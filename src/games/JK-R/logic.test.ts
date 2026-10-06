@@ -123,9 +123,7 @@ describe('JK-R 一起亂畫：docs/TASKS.md 列的規則', () => {
     // 這個測試有意義：AI 的筆確實畫了東西。
     expect(countColor(end, 0)).toBeLessThan(WIDTH * HEIGHT);
     // 換了顏色再動也一樣：畫布上不會出現人當下的顏色。
-    const recolored = run(start(3), 600, (tick) =>
-      input(press({ right: true, b: tick === 0 })),
-    );
+    const recolored = run(start(3), 600, (tick) => input(press({ right: true, b: tick === 0 })));
     expect(countColor(recolored, recolored.human.color)).toBe(0);
   });
 
@@ -181,10 +179,13 @@ describe('JK-R 一起亂畫：docs/TASKS.md 列的規則', () => {
   it('5. 填充者在畫布角落、流場指向畫布外：留在畫布內', () => {
     // 方向 7 是左上；每格都指向左上，筆在 (0, 0)。
     const state = makeState({ filler: { x: 0, y: 0 }, flowAll: { dir: 7, color: 5 } });
-    const end = run(state, 50, () => IDLE);
-    expect(end.filler.x).toBeGreaterThanOrEqual(0);
-    expect(end.filler.y).toBeGreaterThanOrEqual(0);
-    expect(end.filler.x + end.filler.y).toBeGreaterThan(0); // 轉了彎、走得動
+    const states = trace(state, 50, () => IDLE);
+    for (const s of states) {
+      expect(s.filler.x).toBeGreaterThanOrEqual(0);
+      expect(s.filler.y).toBeGreaterThanOrEqual(0);
+    }
+    const end = states[states.length - 1] as JkrState;
+    expect(end.filler.x + end.filler.y).toBeGreaterThan(10); // 轉了彎、走得動
   });
 
   it('6. 唱反調的與人的距離平均大於畫布對角線的四分之一（種子 0 到 4，人亂走）', () => {
@@ -248,7 +249,9 @@ describe('JK-R 一起亂畫：其他規則', () => {
     const s0 = start(0);
     const color = s0.human.color;
     // 第 1 個 tick：往右 2 像素並下筆；之後不動。
-    const states = trace(s0, 61, (tick) => (tick === 0 ? input(press({ right: true, a: true })) : IDLE));
+    const states = trace(s0, 61, (tick) =>
+      tick === 0 ? input(press({ right: true, a: true })) : IDLE,
+    );
     const [mx, my] = mirrorPoint(s0.human.x + 2, s0.human.y);
     expect(getPixel(states[60] as JkrState, mx, my)).not.toBe(color);
     expect(getPixel(states[61] as JkrState, mx, my)).toBe(color);
@@ -256,7 +259,9 @@ describe('JK-R 一起亂畫：其他規則', () => {
 
   it('邊界：跟隨者在第 59、60、61 個 tick', () => {
     // 人在第 1 個 tick 往右走 2 像素（P[1] = (162, 120)），之後不動。
-    const states = trace(start(0), 61, (tick) => (tick === 0 ? input(press({ right: true })) : IDLE));
+    const states = trace(start(0), 61, (tick) =>
+      tick === 0 ? input(press({ right: true })) : IDLE,
+    );
     const home = mirrorPoint(160, 120); // 人的起點的鏡射 = (159, 119)
     const moved = mirrorPoint(162, 120); // P[1] 的鏡射 = (157, 119)
     const pos = (t: number): number[] => {
@@ -270,8 +275,7 @@ describe('JK-R 一起亂畫：其他規則', () => {
   });
 
   it('邊界：idle 剛好在 179、180、181，以及人一有輸入就回到全速', () => {
-    const at = (idle: number): JkrState =>
-      jkrGame.step(makeState({ idle: idle - 1 }), IDLE); // step 之後的 idle 就是 `idle`
+    const at = (idle: number): JkrState => jkrGame.step(makeState({ idle: idle - 1 }), IDLE); // step 之後的 idle 就是 `idle`
     expect(at(60).filler.speed).toBe(aiSpeed(60));
     expect(aiSpeed(60)).toBe(2000);
     expect(aiSpeed(61)).toBe(1983);
@@ -334,26 +338,38 @@ describe('JK-R 一起亂畫：其他規則', () => {
       idle: 119,
       filler: { x: 100, y: 100, acc: 0 },
       flowAll: { dir: 2, color: 5 },
-      paint: [{ x: 101, y: 100, color: 3 }],
+      paint: [{ x: 102, y: 100, color: 3 }],
     });
     const next = jkrGame.step(base, IDLE);
     expect(next.filler.speed).toBe(1000);
-    expect([next.filler.x, next.filler.y]).toEqual([101, 101]); // 東邊有色：轉到「方向 + 1」（東南）
-    expect(getPixel(next, 101, 100)).toBe(3); // 沒被蓋掉
+    expect([next.filler.x, next.filler.y]).toEqual([101, 101]); // 前方 2 像素（東邊）有色：轉到「方向 + 1」（東南）
+    expect(getPixel(next, 102, 100)).toBe(3); // 沒被蓋掉
     expect(getPixel(next, 101, 101)).toBe(5); // 在空白處畫了自己的顏色
     // 沒有阻擋時就照流場走
-    const clear = jkrGame.step(makeState({ idle: 119, filler: { x: 100, y: 100 }, flowAll: { dir: 2, color: 5 } }), IDLE);
+    const clear = jkrGame.step(
+      makeState({ idle: 119, filler: { x: 100, y: 100 }, flowAll: { dir: 2, color: 5 } }),
+      IDLE,
+    );
     expect([clear.filler.x, clear.filler.y]).toEqual([101, 100]);
   });
 
   it('填充者的顏色避開人當下的顏色', () => {
-    const state = makeState({ idle: 119, human: { color: 5 }, filler: { x: 100, y: 100 }, flowAll: { dir: 2, color: 5 } });
+    const state = makeState({
+      idle: 119,
+      human: { color: 5 },
+      filler: { x: 100, y: 100 },
+      flowAll: { dir: 2, color: 5 },
+    });
     const next = jkrGame.step(state, IDLE);
     expect(getPixel(next, 101, 100)).toBe(6);
   });
 
   it('唱反調的：目標是離人最遠的空白取樣點；用與人當下顏色互補的顏色畫', () => {
-    const state = makeState({ idle: 119, human: { x: 10, y: 10, color: 9 }, contrarian: { x: 160, y: 120 } });
+    const state = makeState({
+      idle: 119,
+      human: { x: 10, y: 10, color: 9 },
+      contrarian: { x: 160, y: 120 },
+    });
     const next = jkrGame.step(state, IDLE);
     expect([next.contrarian.tx, next.contrarian.ty]).toEqual([318, 238]);
     expect([next.contrarian.x, next.contrarian.y]).toEqual([161, 121]); // 往目標走一步（八方向）
@@ -372,7 +388,12 @@ describe('JK-R 一起亂畫：其他規則', () => {
         paint.push({ x, y, color: 3 });
       }
     }
-    const state = makeState({ idle: 119, human: { x: 10, y: 10 }, contrarian: { x: 160, y: 120 }, paint });
+    const state = makeState({
+      idle: 119,
+      human: { x: 10, y: 10 },
+      contrarian: { x: 160, y: 120 },
+      paint,
+    });
     const next = jkrGame.step(state, IDLE);
     expect(getPixel(state, next.contrarian.tx, next.contrarian.ty)).toBe(0);
     expect(next.contrarian.tx < 200 || next.contrarian.ty < 120).toBe(true);
@@ -410,7 +431,9 @@ describe('JK-R 一起亂畫：其他規則', () => {
     const drawing = jkrGame.step(quiet, input(press({ a: true })));
     expect(drawing.canvas).not.toBe(quiet.canvas);
     // 沒被改到的列共用同一個字串
-    expect(drawing.canvas.filter((row, i) => row === quiet.canvas[i]).length).toBeGreaterThan(HEIGHT - 10);
+    expect(drawing.canvas.filter((row, i) => row === quiet.canvas[i]).length).toBeGreaterThan(
+      HEIGHT - 20,
+    );
   });
 
   it('畫布是 240 列純字串，JSON 來回不變；canvasToPixels 與 getPixel 一致、尺寸 320×240', () => {
@@ -418,11 +441,62 @@ describe('JK-R 一起亂畫：其他規則', () => {
     expect(state.canvas).toHaveLength(HEIGHT);
     expect(JSON.parse(JSON.stringify(state)) as JkrState).toEqual(state);
     const image = canvasToPixels(state);
-    expect([image.width, image.height, image.pixels.length]).toEqual([WIDTH, HEIGHT, WIDTH * HEIGHT]);
-    for (const [x, y] of [[0, 0], [319, 239], [160, 120], [1, 2], [318, 5], [317, 100]] as const) {
+    expect([image.width, image.height, image.pixels.length]).toEqual([
+      WIDTH,
+      HEIGHT,
+      WIDTH * HEIGHT,
+    ]);
+    for (const [x, y] of [
+      [0, 0],
+      [319, 239],
+      [160, 120],
+      [1, 2],
+      [318, 5],
+      [317, 100],
+    ] as const) {
       expect(image.pixels[y * WIDTH + x]).toBe(getPixel(state, x, y));
     }
-    expect(Math.max(...image.pixels)).toBeLessThanOrEqual(15);
+    expect(image.pixels.every((c) => c <= 15)).toBe(true);
+  });
+
+  it('邊界：畫布的編碼與樸素的二維陣列一致（隨機塗 600 個像素，含蓋掉舊色、跨列、四個角），而且同一張圖只有一種編碼', () => {
+    const rng = createRng(77).fork('paint');
+    const paint: { x: number; y: number; color: number }[] = [];
+    for (let i = 0; i < 600; i += 1) {
+      const corner =
+        i < 4
+          ? [
+              [0, 0],
+              [WIDTH - 1, 0],
+              [0, HEIGHT - 1],
+              [WIDTH - 1, HEIGHT - 1],
+            ][i]
+          : null;
+      paint.push({
+        x: corner ? (corner[0] as number) : rng.int(24) * 13 + rng.int(8),
+        y: corner ? (corner[1] as number) : rng.int(HEIGHT),
+        color: rng.int(16),
+      });
+    }
+    const model = new Uint8Array(WIDTH * HEIGHT);
+    for (const p of paint) {
+      model[p.y * WIDTH + p.x] = p.color;
+    }
+    const state = makeState({ paint });
+    expect(Array.from(canvasToPixels(state).pixels)).toEqual(Array.from(model));
+    // 順序顛倒但最後的圖相同（只留每個像素最後一次的顏色）：字串必須完全相同。
+    const last = new Map<number, { x: number; y: number; color: number }>();
+    for (const p of paint) {
+      last.set(p.y * WIDTH + p.x, p);
+    }
+    const shuffled = makeState({ paint: [...last.values()].reverse() });
+    expect(shuffled.canvas).toEqual(state.canvas);
+    // 整列塗同一色與整列空白，都是一個字元
+    const solid = makeState({
+      paint: Array.from({ length: WIDTH }, (_, x) => ({ x, y: 7, color: 5 })),
+    });
+    expect((solid.canvas[7] as string).length).toBe(1);
+    expect((start().canvas[7] as string).length).toBe(1);
   });
 
   it('PNG 檔名帶種子', () => {
