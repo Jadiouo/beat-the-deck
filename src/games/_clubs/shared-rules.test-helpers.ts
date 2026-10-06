@@ -634,5 +634,32 @@ export function describeSharedSnakeAi<S extends ClubsState>(suite: SnakeSuite<S>
       expect(game.evaluate(over, 1).gain).toBeGreaterThan(0);
       expect(game.evaluate(over, 0).gain).toBeLessThan(0);
     });
+
+    it('局結束的排序：「分差 10 但自己撞死」的 gain 比「落後 5 但活著贏」低（勝負加成不可以被分差蓋過）', () => {
+      // 一條死、另一條贏，不看分數（SPEC 第 10 節）。所以分數高的那邊可以輸。
+      const diedAhead = makeState({
+        over: true,
+        winner: 1,
+        snakes: [{ alive: false, score: 10 }, { score: 0 }],
+      });
+      const wonBehind = makeState({
+        over: true,
+        winner: 0,
+        snakes: [{ score: 0 }, { alive: false, score: 5 }],
+      });
+      expect(game.evaluate(wonBehind, 0).gain).toBeGreaterThan(game.evaluate(diedAhead, 0).gain);
+      // 再大的分差也一樣：分數是整數，這裡取一個遠大於任何一局可能吃到的數量。
+      const hugeLead = makeState({
+        over: true,
+        winner: 1,
+        snakes: [{ alive: false, score: 700 }, { score: 0 }],
+      });
+      const hugeBehind = makeState({
+        over: true,
+        winner: 0,
+        snakes: [{ score: 0 }, { alive: false, score: 700 }],
+      });
+      expect(game.evaluate(hugeBehind, 0).gain).toBeGreaterThan(game.evaluate(hugeLead, 0).gain);
+    });
   });
 }

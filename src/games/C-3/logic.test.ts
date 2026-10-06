@@ -459,6 +459,20 @@ describe('C-3 紅藍食物｜actions 與 evaluate', () => {
     expect(c3Game.evaluate(over, 1).gain).toBeGreaterThan(0);
     expect(c3Game.evaluate(over, 0).gain).toBeLessThan(0);
   });
+
+  it('局結束的排序：「分差 10 但自己撞死」的 gain 比「落後 5 但活著贏」低', () => {
+    const diedAhead = makeState({
+      over: true,
+      winner: 1,
+      snakes: [{ alive: false, score: 10 }, { score: 0 }],
+    });
+    const wonBehind = makeState({
+      over: true,
+      winner: 0,
+      snakes: [{ score: 0 }, { alive: false, score: 5 }],
+    });
+    expect(c3Game.evaluate(wonBehind, 0).gain).toBeGreaterThan(c3Game.evaluate(diedAhead, 0).gain);
+  });
 });
 
 describe('C-3 紅藍食物｜畫面', () => {
