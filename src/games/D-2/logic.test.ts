@@ -290,12 +290,12 @@ describe('D-2 背包上限｜動作與評估（給貪心型用）', () => {
       return d2Game.evaluate(d2Game.step(state, inputs), side).gain;
     });
   const best = (values: readonly number[]): number => values.indexOf(Math.max(...values));
-  const [ACT_NONE, , ACT_RIGHT, ACT_DOWN, ACT_LEFT] = [0, 1, 2, 3, 4];
+  const [, ACT_RIGHT, ACT_DOWN, ACT_LEFT, ACT_NONE] = [0, 1, 2, 3, 4];
 
-  it('actions：同 D-A（5 個不同的動作，1 號邊的順序轉 180 度）', () => {
+  it('actions：同 D-A（5 個不同的動作，1 號邊的順序轉 180 度，全放開排最後）', () => {
     const state = makeState();
-    expect(d2Game.actions(state, 0)).toEqual([NONE, PRESS_UP, PRESS_RIGHT, PRESS_DOWN, PRESS_LEFT]);
-    expect(d2Game.actions(state, 1)).toEqual([NONE, PRESS_DOWN, PRESS_LEFT, PRESS_UP, PRESS_RIGHT]);
+    expect(d2Game.actions(state, 0)).toEqual([PRESS_UP, PRESS_RIGHT, PRESS_DOWN, PRESS_LEFT, NONE]);
+    expect(d2Game.actions(state, 1)).toEqual([PRESS_DOWN, PRESS_LEFT, PRESS_UP, PRESS_RIGHT, NONE]);
   });
 
   it('gain：背包空的時候往最近的金幣走一步最高', () => {

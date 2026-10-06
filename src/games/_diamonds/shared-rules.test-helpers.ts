@@ -224,12 +224,28 @@ export function describeSharedDiamondsRules<S extends DiamondsBase>(suite: Diamo
       expect(s.players[0].cell).toBe(cell(6, 5));
     });
 
-    it('3. 待走方向：同一個週期裡最後按的算（先按上、再按左 → 往左）', () => {
+    it('3. 待走方向：同一個週期裡第一個按的算（先按上、再按左 → 往上，左被忽略，跟梅花的轉向鎖定一樣）', () => {
       const state = makeState({ players: [{ cell: cell(5, 5) }, { cell: cell(20, 20) }] });
       let s = game.step(state, [PRESS_UP, NONE]);
+      expect(s.players[0].pending).toBe(0);
       s = game.step(s, [PRESS_LEFT, NONE]);
+      expect(s.players[0].pending).toBe(0);
       s = run(game, s, 3, IDLE);
-      expect(s.players[0].cell).toBe(cell(4, 5));
+      expect(s.players[0].cell).toBe(cell(5, 4));
+      // 走格之後待走方向歸零，下一個週期可以改按別的方向。
+      expect(s.players[0].pending).toBe(-1);
+      s = run(game, s, MOVE_EVERY, [PRESS_LEFT, NONE]);
+      expect(s.players[0].cell).toBe(cell(4, 4));
+    });
+
+    it('3. 同一個 tick 同時按了好幾個方向：依「上、右、下、左」取第一個', () => {
+      const state = makeState({ players: [{ cell: cell(5, 5) }, { cell: cell(20, 20) }] });
+      const both: Buttons = { ...NONE, left: true, up: true };
+      expect(game.step(state, [both, NONE]).players[0].pending).toBe(0);
+      const rightDown: Buttons = { ...NONE, down: true, right: true };
+      expect(game.step(state, [rightDown, NONE]).players[0].pending).toBe(1);
+      const downLeft: Buttons = { ...NONE, down: true, left: true };
+      expect(game.step(state, [downLeft, NONE]).players[0].pending).toBe(2);
     });
 
     it('3. 走格那個 tick 的按鍵也算在這個週期裡；走完之後待走方向歸零', () => {

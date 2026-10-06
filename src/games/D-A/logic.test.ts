@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { levelController } from '../../ai/level';
 import { greedy } from '../../ai/policies/greedy';
+import { pathfinder } from '../../ai/policies/pathfinder';
 import { rngStateFor } from '../../core/rng';
 import type { Buttons, Inputs } from '../../core/types';
 import { cell, MOVE_EVERY, START_CELLS } from '../_diamonds/logic';
@@ -206,12 +207,12 @@ describe('D-A 搶金幣｜動作與評估（給貪心型用）', () => {
     return dAGame.step(state, inputs);
   };
 
-  it('actions：兩邊都是 5 個不同的動作；0 號邊的順序是全放開、上、右、下、左，1 號邊轉 180 度', () => {
+  it('actions：兩邊都是 5 個不同的動作；0 號邊的順序是上、右、下、左、全放開，1 號邊轉 180 度（全放開排最後）', () => {
     const state = makeState();
     const a0 = dAGame.actions(state, 0);
     const a1 = dAGame.actions(state, 1);
-    expect(a0).toEqual([NONE, PRESS_UP, PRESS_RIGHT, PRESS_DOWN, PRESS_LEFT]);
-    expect(a1).toEqual([NONE, PRESS_DOWN, PRESS_LEFT, PRESS_UP, PRESS_RIGHT]);
+    expect(a0).toEqual([PRESS_UP, PRESS_RIGHT, PRESS_DOWN, PRESS_LEFT, NONE]);
+    expect(a1).toEqual([PRESS_DOWN, PRESS_LEFT, PRESS_UP, PRESS_RIGHT, NONE]);
   });
 
   it('gain：往最近的金幣走一步（只看下一個 tick），比別的方向、比不動都高', () => {
@@ -320,6 +321,16 @@ describe('D-A 搶金幣｜動作與評估（給貪心型用）', () => {
 });
 
 describe('D-A 搶金幣｜AI 在這張牌上會動腦', () => {
+  it('搜尋型（等級 5，往前看 3 步）自己一個人跑 3600 個 tick（對手不動）：至少撿 15 枚（不會一直「等一下再按」而不動）', () => {
+    const seed = 4;
+    const ai = levelController(dAGame, pathfinder, 5, seed);
+    let state = dAGame.init(seed, CONFIG);
+    for (let tick = 0; !dAGame.isOver(state); tick += 1) {
+      state = dAGame.step(state, [ai.decide(state, 0, tick), NONE]);
+    }
+    expect(dAGame.score(state)[0]).toBeGreaterThanOrEqual(15);
+  });
+
   it('貪心型（等級 10）自己一個人跑 3600 個 tick（對手不動）：至少撿 40 枚金幣', () => {
     const seed = 4;
     const ai = levelController(dAGame, greedy, 10, seed);

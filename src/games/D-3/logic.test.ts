@@ -269,14 +269,14 @@ describe('D-3 會貶值的寶石｜動作與評估（給貪心型用）', () => 
       return d3Game.evaluate(d3Game.step(state, inputs), side).gain;
     });
   const best = (values: readonly number[]): number => values.indexOf(Math.max(...values));
-  const [, ACT_UP, ACT_RIGHT, , ACT_LEFT] = [0, 1, 2, 3, 4];
+  const [ACT_UP, ACT_RIGHT, , ACT_LEFT] = [0, 1, 2, 3, 4];
   const gem = (x: number, y: number, born = 0): Gem => ({ cell: cell(x, y), born });
   const FAR = [gem(2, 2), gem(2, 3), gem(3, 2), gem(3, 3)];
 
-  it('actions：同 D-A（5 個不同的動作，1 號邊的順序轉 180 度）', () => {
+  it('actions：同 D-A（5 個不同的動作，1 號邊的順序轉 180 度，全放開排最後）', () => {
     const state = makeState();
-    expect(d3Game.actions(state, 0)).toEqual([NONE, PRESS_UP, PRESS_RIGHT, PRESS_DOWN, PRESS_LEFT]);
-    expect(d3Game.actions(state, 1)).toEqual([NONE, PRESS_DOWN, PRESS_LEFT, PRESS_UP, PRESS_RIGHT]);
+    expect(d3Game.actions(state, 0)).toEqual([PRESS_UP, PRESS_RIGHT, PRESS_DOWN, PRESS_LEFT, NONE]);
+    expect(d3Game.actions(state, 1)).toEqual([PRESS_DOWN, PRESS_LEFT, PRESS_UP, PRESS_RIGHT, NONE]);
   });
 
   it('gain：往最近的寶石走一步最高（價值一樣的時候）', () => {
