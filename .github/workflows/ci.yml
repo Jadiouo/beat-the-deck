@@ -42,7 +42,10 @@ jobs:
 
       - run: npx playwright install --with-deps chromium
 
+      # DEBUG=pw:webserver 讓 Playwright 印出 dev server 的輸出，逾時時才看得到原因。
       - run: npm run e2e
+        env:
+          DEBUG: pw:webserver
 
       - uses: actions/upload-artifact@v4
         if: failure()

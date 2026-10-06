@@ -13,6 +13,8 @@ export default defineConfig(({ command }) => ({
     outDir: 'dist',
   },
   server: {
+    // 與 playwright.config.ts 的 webServer.url 一致：明確綁 IPv4，避免 localhost 在 CI 解析成 ::1。
+    host: '127.0.0.1',
     port: 5173,
   },
 }));
