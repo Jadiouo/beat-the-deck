@@ -97,6 +97,40 @@ describe('shell/progress（TEST_PLAN 3.6）', () => {
     expect(progress.settings.scanlines).toBe(false);
   });
 
+  it('音效設定：預設是關（靜音）；舊存檔沒有這個欄位時用預設值，不丟錯、其他欄位照舊', () => {
+    expect(defaultProgress().settings.sound).toBe(false);
+    const legacy = JSON.stringify({
+      version: 1,
+      cards: { 'C-A': { best: 5, won: true } },
+      globalLevel: 1,
+      lossStreak: 2,
+      settings: { scanlines: true },
+    });
+    const progress = parseProgress(legacy);
+    expect(progress.settings).toEqual({ scanlines: true, sound: false });
+    expect(progress.cards['C-A']).toEqual({ best: 5, won: true });
+    expect(progress.lossStreak).toBe(2);
+  });
+
+  it('音效設定：只認 true；壞掉的值（字串、數字）當成關；存了再讀一樣；版本號仍是 1', () => {
+    expect(
+      parseProgress(JSON.stringify({ version: 1, settings: { sound: 'yes' } })).settings.sound,
+    ).toBe(false);
+    expect(
+      parseProgress(JSON.stringify({ version: 1, settings: { sound: 1 } })).settings.sound,
+    ).toBe(false);
+    const storage = fakeStorage();
+    const on = withSettings(defaultProgress(), { sound: true });
+    expect(on.settings).toEqual({ scanlines: false, sound: true });
+    saveProgress(storage, on);
+    expect(JSON.parse(storage.data['btd.v1'] as string).version).toBe(1);
+    expect(loadProgress(storage).settings.sound).toBe(true);
+    // 不認得的版本照舊當成沒有存檔。
+    expect(parseProgress(JSON.stringify({ version: 2, settings: { sound: true } }))).toEqual(
+      defaultProgress(),
+    );
+  });
+
   it('存了再讀：內容一樣（鍵是 btd.v1，有版本號）', () => {
     const storage = fakeStorage();
     let progress = recordResult(defaultProgress(), 'C-A', 17, 'win');
