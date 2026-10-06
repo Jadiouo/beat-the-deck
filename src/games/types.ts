@@ -37,6 +37,8 @@ export interface CardMeta {
   readonly winnerNotByScore?: boolean;
   /** 運氣成分高（紅心）：A1、A2 的門檻降低。 */
   readonly luckHeavy?: boolean;
+  /** 這張牌真的與種子無關（不用任何隨機事件）：K13（種子有效）跳過。 */
+  readonly seedIndependent?: boolean;
 }
 
 /** 畫一個 state。只讀 state，不可以改它。 */

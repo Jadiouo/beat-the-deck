@@ -14,6 +14,7 @@ import { renderColor } from './render-color';
 import { renderForgotColor } from './render-forgot-color';
 import { renderMutates } from './render-mutates';
 import { renderTransform } from './render-transform';
+import { seedIgnored } from './seed-ignored';
 import { slow } from './slow';
 import { wrongWinner } from './wrong-winner';
 
@@ -31,6 +32,7 @@ export const BAD_GAMES: readonly BadGame[] = [
   badDanger,
   slow,
   asymmetric,
+  seedIgnored,
   renderColor,
   renderForgotColor,
   renderBounds,

@@ -1,5 +1,5 @@
 /**
- * 契約檢查（TEST_PLAN 第 4 節）的實作，K1–K12、R1–R3、meta。
+ * 契約檢查（TEST_PLAN 第 4 節）的實作，K1–K13、R1–R3、meta。
  *
  * 這個檔案是「唯一一份」檢查邏輯：`all-games.test.ts` 對登記表裡每一張牌跑它，
  * `bad-games.test.ts` 對故意違約的假遊戲跑同一份，證明它真的抓得到問題。
@@ -46,6 +46,7 @@ export type CheckCode =
   | 'K10'
   | 'K11'
   | 'K12'
+  | 'K13'
   | 'A1'
   | 'A2'
   | 'A3'
@@ -558,6 +559,66 @@ export function checkSymmetry<S>(
   }
 }
 
+/** K13 用的種子：0 到 9。 */
+export const SEED_MATTERS_SEEDS: readonly number[] = Array.from({ length: 10 }, (_, i) => i);
+/** K13 用的固定輸入串的亂數種子（與遊戲、遊戲的種子都無關）。 */
+const SEED_MATTERS_INPUT_SEED = 0x13;
+
+/** 一串與遊戲、種子都無關的輸入：每個 tick 六個鍵各以 35% 的機率按下。 */
+function fixedInputs(length: number): Inputs[] {
+  const rng = createRng(SEED_MATTERS_INPUT_SEED);
+  const press = (): Buttons => ({
+    up: rng.next() < 0.35,
+    down: rng.next() < 0.35,
+    left: rng.next() < 0.35,
+    right: rng.next() < 0.35,
+    a: rng.next() < 0.35,
+    b: rng.next() < 0.35,
+  });
+  return Array.from({ length }, () => [press(), press()] as const);
+}
+
+/**
+ * K13 種子有效：用同一串輸入、不同的種子（預設 0 到 9）跑完整對局，終局雜湊不可以全部相同。
+ *
+ * 為什麼需要它：牌的作者忘記把 `nextFrom` 回傳的新 `RngState` 寫回新 state 時，遊戲會變得
+ * 「更」決定性（每次都拿到同一個亂數），K1 只比「同種子兩次一樣」，抓不到。
+ * 與種子完全無關的牌（`meta.seedIndependent: true`）跳過這一條。
+ *
+ * state 不能雜湊（NaN、函式……）或遊戲自己丟錯時，這一條不報告（K2、K3、K4 會報告），
+ * 免得同一個問題被多條檢查重複回報。
+ */
+export function checkSeedMatters<S>(
+  game: Game<S>,
+  seeds: readonly number[],
+  config: GameConfig,
+): void {
+  if (seeds.length < 2) {
+    return;
+  }
+  const inputs = fixedInputs(config.maxTicks);
+  const hashes = new Set<string>();
+  for (const seed of seeds) {
+    try {
+      const result = runGame(
+        game,
+        seed,
+        config,
+        (_state, tick) => inputs[tick] ?? [RELEASED, RELEASED],
+      );
+      hashes.add(hashState(result.state));
+    } catch {
+      return;
+    }
+  }
+  if (hashes.size === 1) {
+    violation(
+      'K13',
+      `種子 ${seeds.join('、')} 用同一串輸入，終局雜湊全部相同：種子沒有影響到遊戲（忘了把新的 RngState 寫回 state，或是 init 忽略了種子？）`,
+    );
+  }
+}
+
 // ---------------------------------------------------------------------------
 // A1–A5：AI 行為（TEST_PLAN 5.1）
 // ---------------------------------------------------------------------------
@@ -1026,6 +1087,16 @@ export const CHECKS: readonly CheckDef[] = [
         }
         throw new ContractViolation('K12', `遊戲丟出錯誤：${errorText(error)}`);
       }
+    },
+  },
+  {
+    code: 'K13',
+    title: '種子有效',
+    applies: (entry) => entry.meta.seedIndependent !== true,
+    run(entry: RegistryEntry, seeds: readonly number[]): void {
+      // K13 的種子數是檢查的一部分（0 到 9），不理會呼叫者給的清單。
+      void seeds;
+      checkSeedMatters(entry.game, SEED_MATTERS_SEEDS, CONTRACT_CONFIG);
     },
   },
   {
