@@ -62,9 +62,14 @@ const MEAN_GOOD_ROLL = 4;
 const BUST_PROBABILITY = 1 / 6;
 /** 「等決定」比「直接存」略差，所以平手時存分贏過繼續等。 */
 const CHOOSING_DISCOUNT = 0.01;
-/** `danger` 的放大倍數（3 倍的 1/6 是 0.5）與「有多少東西在桌上」的飽和點。 */
-const DANGER_SCALE = 3;
-const DANGER_SATURATION = 20;
+/**
+ * `danger` 的放大倍數（6 倍的 1/6 是 1）與「有多少東西在桌上」的飽和點：
+ * `danger = min(1, acc / 18)`，所以累積 9 時是 0.5。
+ * 搜尋型（人類模型的底層）在 `danger < 0.5` 時才擲，所以約在累積 9 存分；賭徒型看的是 gain，仍然在 20 存。
+ * （以前是 3 倍與 20，兩種性格都在 20 存，人類模型與等級 10 的 AI 打成平手，A4 在保留區塊上超過 35%。）
+ */
+const DANGER_SCALE = 6;
+const DANGER_SATURATION = 18;
 /**
  * 新的一個回合平均值多少（`H(0)`）：輪到對方時，對方的新回合帶著這個價值；
  * 輪到自己時，之後「對方的新回合」還沒發生，所以要扣掉同一個數，兩種局面才站在同一條基準線上。

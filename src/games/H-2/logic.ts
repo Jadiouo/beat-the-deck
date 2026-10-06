@@ -1,15 +1,7 @@
 import { intFrom, rngStateFor } from '../../core/rng';
 import type { RngState } from '../../core/rng';
 import type { Buttons, Game, GameConfig, Inputs, Side } from '../../core/types';
-import {
-  clamp01,
-  IDLE,
-  PRESS_A,
-  PRESS_B,
-  ROUNDS,
-  ROUND_PAUSE,
-  winnerByTotals,
-} from '../_hearts/logic';
+import { clamp01, IDLE, PRESS_A, ROUNDS, ROUND_PAUSE, winnerByTotals } from '../_hearts/logic';
 
 /**
  * H-2 引信（SPEC 第 10 節；小規格 `docs/cards/H-2.md`）。
@@ -56,8 +48,11 @@ export interface H2State {
   readonly rng: RngState;
 }
 
-/** `gain` 的視野：「再按這麼多個 tick 就放開」的期望值。 */
-const GAIN_HORIZON = 30;
+/**
+ * `gain` 的視野：「再按這麼多個 tick 就放開」的期望值。賭徒型的停止點是 `300 − 視野 / 2`（視野 120 是 240）：
+ * 比期望值最大的 285 早一點，因為 AI 放開有 5 到 18 個 tick 的延遲、還有亂選的提早放開。
+ */
+const GAIN_HORIZON = 120;
 /** `danger` 的視野：「再按這麼多個 tick 之內爆炸」的機率。比 gain 長，所以精準型停得早。 */
 const DANGER_HORIZON = 150;
 /** 結束的局，勝負加成（比任何分差都大）。 */
@@ -148,8 +143,8 @@ function stepH2(state: H2State, inputs: Inputs): H2State {
   } else {
     const roundTick = state.roundTick + 1;
     const players: readonly [Racer, Racer] = [
-      stepRacer(state.players[0], inputs[0].a || inputs[0].b, roundTick, state.fuse),
-      stepRacer(state.players[1], inputs[1].a || inputs[1].b, roundTick, state.fuse),
+      stepRacer(state.players[0], inputs[0].a, roundTick, state.fuse),
+      stepRacer(state.players[1], inputs[1].a, roundTick, state.fuse),
     ];
     const bankedNow = (side: Side): number =>
       state.players[side].status === 'holding' && players[side].status === 'banked'
@@ -255,7 +250,7 @@ export const h2Game: Game<H2State> = {
   },
 
   actions(state: H2State, side: Side): readonly Buttons[] {
-    return canPress(state, side) ? [IDLE, PRESS_A, PRESS_B] : [IDLE];
+    return canPress(state, side) ? [IDLE, PRESS_A] : [IDLE];
   },
 
   evaluate(state: H2State, side: Side): { gain: number; danger: number } {

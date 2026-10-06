@@ -585,8 +585,9 @@ describe('H-A 貪心骰｜actions 與 evaluate', () => {
   });
 
   it('a 還按著、而且想繼續擲的時候，一步看的性格會先選「放開」（精準型、搜尋型也一樣，不會因為怕危險一直不動）', () => {
+    // 累積 3：精準型（danger 超過 0.3 就不碰）在 danger = acc / 18 的設定下，約 5 以下才會擲。
     const held = makeState({
-      acc: 6,
+      acc: 3,
       held: [
         { a: true, b: false },
         { a: false, b: false },
@@ -597,7 +598,7 @@ describe('H-A 貪心骰｜actions 與 evaluate', () => {
       expect(choice).toEqual(IDLE);
     }
     // 已經放開（可以擲）時，三種性格都會按 a。
-    const armed = makeState({ acc: 6 });
+    const armed = makeState({ acc: 3 });
     for (const policy of [gambler, precise, pathfinder]) {
       expect(policy.decide(hAGame, armed, 0, 0, { depth: 1, seed: 0 }).a).toBe(true);
     }
