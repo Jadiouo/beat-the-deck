@@ -137,10 +137,13 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe('shell/audio：預設靜音，要玩家互動過才啟動（SPEC 8.4）', () => {
-  it('預設是靜音：什麼都播不出來，連 AudioContext 都不建立', () => {
+// SPEC 8.4 原文：「預設靜音，要玩家按過一次鍵才啟動」。字面解讀：互動之前一個節點都不建立（瀏覽器的規定），
+// 第一次互動（unlock）之後音效就是開的；開關預設為開，玩家可以在標題選單關掉。
+describe('shell/audio：互動前靜音，第一次互動之後預設就是開的（SPEC 8.4）', () => {
+  it('互動之前：什麼都播不出來，連 AudioContext 都不建立（開關預設是開，也一樣）', () => {
     const { ctx, create, audio } = setup();
-    expect(audio.isEnabled()).toBe(false);
+    expect(audio.isEnabled()).toBe(true);
+    expect(audio.isUnlocked()).toBe(false);
     for (const name of SOUND_NAMES) {
       audio.play(name);
     }
@@ -169,9 +172,17 @@ describe('shell/audio：預設靜音，要玩家互動過才啟動（SPEC 8.4）
 
   it('互動過但開關是關的：不發聲（連 unlock 之後也一樣）', () => {
     const { ctx, audio } = setup();
+    audio.setEnabled(false);
     audio.unlock();
     audio.play('score');
     expect(ctx.nodeCount()).toBe(0);
+  });
+
+  it('互動一次之後，不必動任何設定就會發聲（預設是開）', () => {
+    const { ctx, audio } = setup();
+    audio.unlock();
+    audio.play('menuConfirm');
+    expect(ctx.nodeCount()).toBeGreaterThan(0);
   });
 
   it('互動過、開關打開：發聲；再關掉：又安靜', () => {

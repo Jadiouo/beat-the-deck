@@ -4,7 +4,8 @@ import { EVOLUTION_GAMES, MATCH_CONFIG, evolutionReport } from '../ai/evolution'
 import { policyByName } from '../ai/level';
 import { cAGame } from '../games/C-A/logic';
 import { counterGame } from '../../tests/fixtures/counter-game';
-import { createEvolutionRun } from './evolve';
+import { findEntry } from '../games/registry';
+import { createEvolutionRun, planEvolution } from './evolve';
 
 describe('shell/evolve：AI 進化畫面的數字是真的（SPEC 7.5）', () => {
   it('一次只跑一場：呼叫 runNext 一次，場數加 1，沒有一次把 20 場跑完', () => {
@@ -57,5 +58,36 @@ describe('shell/evolve：AI 進化畫面的數字是真的（SPEC 7.5）', () =>
     run.runNext();
     expect(run.played()).toBe(20);
     expect(run.rate()).toBe(finalRate);
+  });
+});
+
+describe('shell/evolve：哪些牌會出現進化畫面、用哪一份對局設定（SPEC 7.5、第 11 節）', () => {
+  const cA = findEntry('C-A');
+  const jkr = findEntry('JK-R');
+
+  it('一般牌（有 AI 性格）等級升了才有進化畫面；等級沒升是 null', () => {
+    expect(cA).toBeDefined();
+    expect(planEvolution(cA!, 2, 2, 7)).toBeNull();
+    const plan = planEvolution(cA!, 1, 2, 7);
+    expect(plan).not.toBeNull();
+    expect(plan?.entry.id).toBe('C-A');
+    expect(plan?.seed).toBe(7);
+    // 舊等級與新等級都是這張牌的實際等級（全域等級 + 基礎等級 - 1）。
+    expect(plan?.oldLevel).toBe(1 + cA!.meta.baseLevel - 1);
+    expect(plan?.newLevel).toBe(2 + cA!.meta.baseLevel - 1);
+    // C-A 沒有 defaultMaxTicks，用共同設定的 3600。
+    expect(plan?.config.maxTicks).toBe(MATCH_CONFIG.maxTicks);
+  });
+
+  it('鬼牌沒有 AI 性格也沒有勝負：就算全域等級升了，也不出現進化畫面', () => {
+    expect(jkr).toBeDefined();
+    expect(jkr!.meta.defaultPolicy).toBeNull();
+    expect(planEvolution(jkr!, 5, 6, 1)).toBeNull();
+  });
+
+  it('牌的 meta 有 defaultMaxTicks 就用它（與對局、重播同一份），而不是 3600', () => {
+    const longEntry = { ...cA!, meta: { ...cA!.meta, defaultMaxTicks: 5400 } };
+    const plan = planEvolution(longEntry, 1, 2, 3);
+    expect(plan?.config.maxTicks).toBe(5400);
   });
 });

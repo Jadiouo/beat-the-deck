@@ -97,8 +97,12 @@ describe('shell/progress（TEST_PLAN 3.6）', () => {
     expect(progress.settings.scanlines).toBe(false);
   });
 
-  it('音效設定：預設是關（靜音）；舊存檔沒有這個欄位時用預設值，不丟錯、其他欄位照舊', () => {
-    expect(defaultProgress().settings.sound).toBe(false);
+  // 解讀依據：SPEC 8.4 原文「音效……預設靜音，要玩家按過一次鍵才啟動」。
+  // 「預設靜音」指的是瀏覽器不准沒互動就發聲（audio.ts 在第一次互動前不建立任何節點）；
+  // 「按過一次鍵才啟動」就是第一次按鍵、點擊或觸控之後音效是開的。所以設定的預設值是「開」，
+  // 標題選單的開關仍在，玩家可以關掉。舊存檔明確寫了 sound: false 的，照舊關著，不會被改回開。
+  it('音效設定：預設是開（第一次互動之後就有聲音）；舊存檔沒有這個欄位算開，其他欄位照舊', () => {
+    expect(defaultProgress().settings.sound).toBe(true);
     const legacy = JSON.stringify({
       version: 1,
       cards: { 'C-A': { best: 5, won: true } },
@@ -107,26 +111,38 @@ describe('shell/progress（TEST_PLAN 3.6）', () => {
       settings: { scanlines: true },
     });
     const progress = parseProgress(legacy);
-    expect(progress.settings).toEqual({ scanlines: true, sound: false });
+    expect(progress.settings).toEqual({ scanlines: true, sound: true });
     expect(progress.cards['C-A']).toEqual({ best: 5, won: true });
     expect(progress.lossStreak).toBe(2);
+    // 連 settings 都沒有的舊存檔也算開。
+    expect(parseProgress(JSON.stringify({ version: 1 })).settings.sound).toBe(true);
   });
 
-  it('音效設定：只認 true；壞掉的值（字串、數字）當成關；存了再讀一樣；版本號仍是 1', () => {
-    expect(
-      parseProgress(JSON.stringify({ version: 1, settings: { sound: 'yes' } })).settings.sound,
-    ).toBe(false);
-    expect(
-      parseProgress(JSON.stringify({ version: 1, settings: { sound: 1 } })).settings.sound,
-    ).toBe(false);
+  it('音效設定：存檔裡明確寫 sound: false 的玩家，讀回來仍是關（不會被改回開）', () => {
     const storage = fakeStorage();
-    const on = withSettings(defaultProgress(), { sound: true });
-    expect(on.settings).toEqual({ scanlines: false, sound: true });
-    saveProgress(storage, on);
+    saveProgress(storage, withSettings(defaultProgress(), { sound: false }));
+    expect(loadProgress(storage).settings.sound).toBe(false);
+    expect(
+      parseProgress(JSON.stringify({ version: 1, settings: { sound: false, scanlines: true } }))
+        .settings,
+    ).toEqual({ scanlines: true, sound: false });
+  });
+
+  it('音效設定：只有 false 才算關；壞掉的值（字串、數字）退回預設的開；存了再讀一樣；版本號仍是 1', () => {
+    expect(
+      parseProgress(JSON.stringify({ version: 1, settings: { sound: 'no' } })).settings.sound,
+    ).toBe(true);
+    expect(
+      parseProgress(JSON.stringify({ version: 1, settings: { sound: 0 } })).settings.sound,
+    ).toBe(true);
+    const storage = fakeStorage();
+    const off = withSettings(defaultProgress(), { sound: false });
+    expect(off.settings).toEqual({ scanlines: false, sound: false });
+    saveProgress(storage, off);
     expect(JSON.parse(storage.data['btd.v1'] as string).version).toBe(1);
-    expect(loadProgress(storage).settings.sound).toBe(true);
-    // 不認得的版本照舊當成沒有存檔。
-    expect(parseProgress(JSON.stringify({ version: 2, settings: { sound: true } }))).toEqual(
+    expect(loadProgress(storage).settings.sound).toBe(false);
+    // 不認得的版本照舊當成沒有存檔（回到預設）。
+    expect(parseProgress(JSON.stringify({ version: 2, settings: { sound: false } }))).toEqual(
       defaultProgress(),
     );
   });
