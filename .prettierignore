@@ -7,3 +7,4 @@ package-lock.json
 
 # 規格與說明文件是手寫的，排版不交給 Prettier。
 *.md
+.vitest
