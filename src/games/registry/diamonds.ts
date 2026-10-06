@@ -2,6 +2,10 @@ import { d2Game } from '../D-2/logic';
 import type { D2State } from '../D-2/logic';
 import { d2Meta } from '../D-2/meta';
 import { d2Render } from '../D-2/render';
+import { d3Game } from '../D-3/logic';
+import type { D3State } from '../D-3/logic';
+import { d3Meta } from '../D-3/meta';
+import { d3Render } from '../D-3/render';
 import { dAGame } from '../D-A/logic';
 import type { DAState } from '../D-A/logic';
 import { dAMeta } from '../D-A/meta';
@@ -24,5 +28,12 @@ export const diamondsEntries: readonly RegistryEntry[] = [
     game: d2Game,
     render: d2Render,
     meta: d2Meta,
+  }),
+  defineEntry<D3State>({
+    id: d3Meta.id,
+    kind: 'card',
+    game: d3Game,
+    render: d3Render,
+    meta: d3Meta,
   }),
 ];
