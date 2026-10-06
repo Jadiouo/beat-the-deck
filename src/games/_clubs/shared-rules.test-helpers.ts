@@ -552,7 +552,11 @@ export function describeSharedSnakeAi<S extends ClubsState>(suite: SnakeSuite<S>
     });
 
     it('搜尋型（往前看 6 個 tick）不會拖延：食物在正上方，現在就轉向，而不是等到走格前最後一刻', () => {
-      const state = makeState({ foods: [cell(5, 3), cell(30, 20)] });
+      // 蛇放在地圖中間（(15,12) 往右）：離牆夠遠，兩側的牆不會影響「要不要轉」。
+      const state = makeState({
+        foods: [cell(15, 3), cell(30, 20)],
+        snakes: [{ body: body([15, 12], [14, 12], [13, 12]), dir: RIGHT }, {}],
+      });
       for (const depth of [1, 3, 6]) {
         const pressed = pathfinder.decide(game, state, 0, 0, { depth, seed: 0 });
         expect(pressed).toEqual(PRESS_UP);
@@ -574,7 +578,7 @@ export function describeSharedSnakeAi<S extends ClubsState>(suite: SnakeSuite<S>
       expect(game.evaluate(blocked, 0).danger).toBe(1);
     });
 
-    it('danger：往牆走越近越危險（前方 14 格內有牆開始算），貼著牆也有一點危險', () => {
+    it('danger：往牆走越近越危險（前方 20 格內有牆開始算），貼著牆也有一點危險', () => {
       const at = (x: number): number =>
         game.evaluate(
           makeState({
@@ -613,9 +617,12 @@ export function describeSharedSnakeAi<S extends ClubsState>(suite: SnakeSuite<S>
       expect(game.evaluate(ahead, 0).gain - game.evaluate(base, 0).gain).toBe(100);
       expect(game.evaluate(ahead, 1).gain - game.evaluate(base, 1).gain).toBe(-100);
 
-      // 人在 (5,12) 往右，食物在右下方：鎖定「下」比維持「右」更靠近最近的食物嗎？
-      // 食物 (6,14)：維持右下一步 (6,12) 距離 2；轉下 (5,13) 距離 2；轉到更近的食物才有差別，這裡用 (5,16)。
-      const food = makeState({ foods: [cell(5, 16), cell(30, 1)] });
+      // 人在 (15,12) 往右（離牆夠遠，兩側的牆不扣分），食物在 (15,18)：
+      // 維持「右」下一步 (16,12) 距離 7；鎖定「下」下一步 (15,13) 距離 5，所以後者比較高。
+      const food = makeState({
+        foods: [cell(15, 18), cell(30, 1)],
+        snakes: [{ body: body([15, 12], [14, 12], [13, 12]), dir: RIGHT }, {}],
+      });
       const keep = food;
       const turnedDown = game.step(food, [PRESS_DOWN, NONE]);
       expect(game.evaluate(turnedDown, 0).gain).toBeGreaterThan(game.evaluate(keep, 0).gain);
@@ -635,8 +642,8 @@ export function describeSharedSnakeAi<S extends ClubsState>(suite: SnakeSuite<S>
       expect(game.evaluate(over, 0).gain).toBeLessThan(0);
     });
 
-    it('danger：前方第 14 格才是牆也要有一點（反應有延遲的 AI 看到的是將近兩格以前的畫面）', () => {
-      // 蛇頭 (x,12) 往右，下一步 (x+1,12)，牆在 x=32。x=17：下一步之後還有 13 個空格；x=18：只有 12 個。
+    it('danger：前方 20 格內有牆就有一點，但遠的牆很輕、近的牆很重（越近越陡）', () => {
+      // 蛇頭 (x,12) 往右，下一步 (x+1,12)，牆在 x=32。x=11：下一步之後有 19 個空格；x=12：只有 18 個。
       const at = (x: number): number =>
         game.evaluate(
           makeState({
@@ -644,8 +651,32 @@ export function describeSharedSnakeAi<S extends ClubsState>(suite: SnakeSuite<S>
           }),
           0,
         ).danger;
-      expect(at(17)).toBe(0);
-      expect(at(18)).toBeGreaterThan(0);
+      expect(at(10)).toBe(0);
+      expect(at(11)).toBeGreaterThan(0);
+      // 診斷：danger 隨距離線性增加時，離牆 6 格的 danger 就有 0.57，搜尋型為了避開它連牆邊的食物都不敢吃
+      // （L10 對 L10 對打，每 3600 tick 平均只吃到 0.5 個食物，多數的局打到時間到平手）。
+      // 所以遠處要很輕、近處才重：離牆 11 格還不到 0.2，離牆 3 格超過 0.5。
+      expect(at(20)).toBeLessThan(0.2);
+      expect(at(28)).toBeGreaterThan(0.5);
+    });
+
+    it('gain：兩側的牆只在「離食物還遠」的時候全額扣；離食物 8 格以內漸漸少扣，吃到的那一格不扣', () => {
+      // 蛇頭 (5,y) 往右，下一步 (6,y)，食物在同一列、離下一步 d 格。比較貼著上牆（y=0）與在中間（y=12）。
+      const gainAt = (y: number, distance: number): number =>
+        game.evaluate(
+          makeState({
+            foods: [cell(6 + distance, y), cell(30, y === 12 ? 1 : 12)],
+            snakes: [{ body: body([5, y], [4, y], [3, y]), dir: RIGHT }, {}],
+          }),
+          0,
+        ).gain;
+      const wallCost = (distance: number): number => gainAt(12, distance) - gainAt(0, distance);
+      expect(wallCost(14)).toBeGreaterThan(wallCost(8) - 1e-9);
+      expect(wallCost(8)).toBeGreaterThan(wallCost(4));
+      expect(wallCost(4)).toBeGreaterThan(wallCost(1));
+      expect(wallCost(1)).toBeGreaterThan(0);
+      // 下一步就是食物：吃到的那一格不扣（吃到食物是 +100，不能被牆的扣分蓋過）。
+      expect(wallCost(0)).toBe(0);
     });
 
     it('gain：蛇頭下一步的左右兩側離牆越近扣越多（沿著牆走比走在中間差），7 格以上不扣', () => {
