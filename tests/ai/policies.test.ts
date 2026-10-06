@@ -8,6 +8,7 @@ import { precise } from '../../src/ai/policies/precise';
 import { random } from '../../src/ai/policies/random';
 import type { Policy } from '../../src/ai/types';
 import { cAGame } from '../../src/games/C-A/logic';
+import { dAGame } from '../../src/games/D-A/logic';
 import type { ClubsState } from '../../src/games/_clubs/logic';
 import { sAGame } from '../../src/games/S-A/logic';
 import type { SpadesState } from '../../src/games/S-A/logic';
@@ -110,7 +111,10 @@ describe('5.2 性格真的不一樣', () => {
     console.log(`P4 搜尋型對貪心型（等級 5，200 場）：搜尋型勝率 ${(rate * 100).toFixed(1)}%`);
     expect(rate).toBeGreaterThanOrEqual(0.55);
   }, 120_000);
-  it.todo(
-    'P5（D-A 搶金幣）貪心型在開闊地不吃虧：貪心型對搜尋型，同為等級 5，200 場（種子 0..199），貪心型勝率在 45% 到 65% 之間（平手算半場）',
-  );
+  it('P5（D-A 搶金幣）貪心型在開闊地不吃虧：貪心型對搜尋型，同為等級 5，200 場（種子 0..199），貪心型勝率在 45% 到 65% 之間（平手算半場）', () => {
+    const rate = winRate(dAGame, greedy, 5, pathfinder, 5, seedList(200));
+    console.log(`P5 貪心型對搜尋型（D-A，等級 5，200 場）：貪心型勝率 ${(rate * 100).toFixed(1)}%`);
+    expect(rate).toBeGreaterThanOrEqual(0.45);
+    expect(rate).toBeLessThanOrEqual(0.65);
+  }, 120_000);
 });
