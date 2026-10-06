@@ -12,7 +12,8 @@ import {
   generateWalls,
   makeBase,
   moveWalker,
-  orderedActions,
+  actionsToward,
+  bfsDistances,
   pickEmptyCells,
   steerWalker,
   winnerByScore,
@@ -78,6 +79,26 @@ export function makeState(overrides: StateOverrides = {}): D3State {
 
 function playerCells(players: readonly [Walker, Walker]): number[] {
   return [players[0].cell, players[1].cell];
+}
+
+/** 吸引力（`GEM_PULL × 到手時的價值 / (距離 + 2)`）最大的寶石；沒有就是 null。只用來排 `actions` 的順序。 */
+function bestGem(state: D3State, from: number): number | null {
+  const dist = bfsDistances(state.walls, from);
+  let best: number | null = null;
+  let bestPull = 0;
+  for (const gem of state.gems) {
+    const d = dist[gem.cell] as number;
+    const arrival = state.tick + MOVE_EVERY * d;
+    if (d >= UNREACHABLE || arrival - gem.born > LIFETIME) {
+      continue;
+    }
+    const pull = (GEM_PULL * gemValue(arrival - 1, gem.born)) / (d + 2);
+    if (pull > bestPull) {
+      bestPull = pull;
+      best = gem.cell;
+    }
+  }
+  return best;
 }
 
 export const d3Game: Game<D3State> = {
@@ -183,8 +204,9 @@ export const d3Game: Game<D3State> = {
     return state.over ? state.winner : null;
   },
 
-  actions(_state: D3State, side: Side): readonly Buttons[] {
-    return orderedActions(side);
+  actions(state: D3State, side: Side): readonly Buttons[] {
+    const me = state.players[side];
+    return actionsToward(state.walls, me, side, bestGem(state, me.cell));
   },
 
   evaluate(state: D3State, side: Side): { gain: number; danger: number } {

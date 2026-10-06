@@ -12,7 +12,7 @@ import {
   distanceFields,
   generateWalls,
   moveWalker,
-  orderedActions,
+  actionsToward,
   pickEmptyCells,
   steerWalker,
   winnerByScore,
@@ -54,6 +54,36 @@ export function makeState(overrides: StateOverrides = {}): D2State {
 
 function playerCells(players: readonly [Walker, Walker]): number[] {
   return [players[0].cell, players[1].cell];
+}
+
+/**
+ * 這個角色現在該去的格子（只用來排 `actions` 的順序）：背包滿了去基地；背包有東西而且基地比最近的金幣
+ * （扣掉 `RETURN_BONUS`）還近就去基地；否則去最近的金幣；沒有金幣可去而背包有東西就去基地；都沒有是 null。
+ */
+function focusOf(state: D2State, side: Side): number | null {
+  const me = state.players[side];
+  const base = START_CELLS[side];
+  const bag = state.bags[side];
+  const dist = bfsDistances(state.walls, me.cell);
+  let coin: number | null = null;
+  let coinDistance = UNREACHABLE;
+  if (bag < BAG_LIMIT) {
+    for (const c of state.coins) {
+      const d = dist[c] as number;
+      if (d < coinDistance) {
+        coinDistance = d;
+        coin = c;
+      }
+    }
+  }
+  if (bag === 0) {
+    return coin;
+  }
+  const homeDistance = dist[base] as number;
+  if (coin === null || homeDistance - RETURN_BONUS * bag < coinDistance) {
+    return base;
+  }
+  return coin;
 }
 
 export const d2Game: Game<D2State> = {
@@ -168,8 +198,9 @@ export const d2Game: Game<D2State> = {
     return state.over ? state.winner : null;
   },
 
-  actions(_state: D2State, side: Side): readonly Buttons[] {
-    return orderedActions(side);
+  actions(state: D2State, side: Side): readonly Buttons[] {
+    const me = state.players[side];
+    return actionsToward(state.walls, me, side, focusOf(state, side));
   },
 
   evaluate(state: D2State, side: Side): { gain: number; danger: number } {

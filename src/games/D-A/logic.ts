@@ -12,7 +12,8 @@ import {
   generateWalls,
   makeBase,
   moveWalker,
-  orderedActions,
+  actionsToward,
+  bfsDistances,
   pickEmptyCells,
   steerWalker,
   winnerByScore,
@@ -56,6 +57,21 @@ export function makeState(overrides: StateOverrides = {}): DAState {
 
 function playerCells(players: readonly [Walker, Walker]): number[] {
   return [players[0].cell, players[1].cell];
+}
+
+/** 離 `from` 最近（繞過牆的最短步數）的金幣；沒有就是 null。只用來排 `actions` 的順序。 */
+function nearestCoin(state: DAState, from: number): number | null {
+  const dist = bfsDistances(state.walls, from);
+  let best: number | null = null;
+  let bestDistance = UNREACHABLE;
+  for (const coin of state.coins) {
+    const d = dist[coin] as number;
+    if (d < bestDistance) {
+      bestDistance = d;
+      best = coin;
+    }
+  }
+  return best;
 }
 
 export const dAGame: Game<DAState> = {
@@ -151,8 +167,9 @@ export const dAGame: Game<DAState> = {
     return state.over ? state.winner : null;
   },
 
-  actions(_state: DAState, side: Side): readonly Buttons[] {
-    return orderedActions(side);
+  actions(state: DAState, side: Side): readonly Buttons[] {
+    const me = state.players[side];
+    return actionsToward(state.walls, me, side, nearestCoin(state, me.cell));
   },
 
   evaluate(state: DAState, side: Side): { gain: number; danger: number } {

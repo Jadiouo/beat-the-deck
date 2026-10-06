@@ -208,26 +208,39 @@ function press(dir: Dir): Buttons {
   });
 }
 
-/** 0 號邊：全放開、上、右、下、左。 */
-const ORDER_FIRST: readonly Buttons[] = Object.freeze([
-  NONE,
-  press(UP),
-  press(RIGHT),
-  press(DOWN),
-  press(LEFT),
-]);
-/** 1 號邊：把方向轉 180 度（全放開、下、左、上、右），與 0 號邊的起點對稱。 */
-const ORDER_SECOND: readonly Buttons[] = Object.freeze([
-  NONE,
-  press(DOWN),
-  press(LEFT),
-  press(UP),
-  press(RIGHT),
-]);
+/** 0 號邊的預設順序：上、右、下、左；1 號邊轉 180 度（下、左、上、右），與兩個起點對稱。 */
+const DIRS_FIRST: readonly Dir[] = [UP, RIGHT, DOWN, LEFT];
+const DIRS_SECOND: readonly Dir[] = [DOWN, LEFT, UP, RIGHT];
 
-/** 兩邊都是五個不同的動作；1 號邊的順序轉 180 度（平手時取排最前面的，所以偏好也對稱）。 */
-export function orderedActions(side: Side): readonly Buttons[] {
-  return side === 0 ? ORDER_FIRST : ORDER_SECOND;
+/**
+ * 這個角色可以選的五個動作（四個方向與全放開），依 state 排序：
+ * 往 `focus`（這張牌認為這個角色現在該去的格子）靠近得越多的方向排越前面，全放開**永遠排最後**。
+ *
+ * 為什麼要排：搜尋型往前看好幾步，終點一樣的路徑平手時取排最前面的動作。「現在按」與「晚一點才按」、
+ * 「先往別的方向再轉過來」的終點常常完全一樣，而搜尋型每次決定要連續按好幾個 tick——
+ * 全放開排前面它就永遠選「再等一下」而不動，方向排錯它就往錯的方向走。把最靠近目標的方向排前面，
+ * 平手時就會選對（跟梅花 C-A 的作法一樣，見 `docs/cards/C-A.md` 第 12 條）。
+ * 沒有目標（或已經站在目標上）時用預設順序。這只影響平手，不影響 `evaluate`。
+ */
+export function actionsToward(
+  walls: readonly number[],
+  me: Walker,
+  side: Side,
+  focus: number | null,
+): readonly Buttons[] {
+  const dirs = side === 0 ? DIRS_FIRST : DIRS_SECOND;
+  if (focus === null || focus === me.cell) {
+    return [...dirs.map(press), NONE];
+  }
+  const field = bfsDistances(walls, focus);
+  const here = field[me.cell] as number;
+  const scored = dirs.map((dir, order) => {
+    const next = stepTarget(walls, me.cell, dir);
+    // 走不動（牆或出界）等於原地不動：比靠近差，比遠離好。
+    return { dir, order, score: next === me.cell ? here + 0.5 : (field[next] as number) };
+  });
+  scored.sort((x, y) => x.score - y.score || x.order - y.order);
+  return [...scored.map((entry) => press(entry.dir)), NONE];
 }
 
 /** 這組按鍵按的方向：同時按多個就依「上、右、下、左」取第一個；沒按是 -1。 */
@@ -365,8 +378,23 @@ export const GAIN_PER_POINT = 100;
 /** 結束的局：勝負加成。方塊的分差沒有上限，所以取一個比任何分差都大的數。 */
 export const WIN_BONUS = 1_000_000;
 
-/** 從 `from` 出發，繞過牆走到每一格的最短步數（廣度優先）；到不了的是 `UNREACHABLE`。 */
+/**
+ * 距離場的快取：同一張牆（陣列物件）、同一個出發格，結果永遠一樣，搜尋型一次決定會問上百次。
+ * 以牆陣列為鑰匙（WeakMap），牆不再被用到時整份一起被回收；回傳的陣列是共用的，呼叫端只能讀。
+ */
+const DISTANCE_CACHE = new WeakMap<readonly number[], Map<number, Int32Array>>();
+
+/** 從 `from` 出發，繞過牆走到每一格的最短步數（廣度優先）；到不了的是 `UNREACHABLE`。只讀，不要改它。 */
 export function bfsDistances(walls: readonly number[], from: number): Int32Array {
+  let byCell = DISTANCE_CACHE.get(walls);
+  if (byCell === undefined) {
+    byCell = new Map<number, Int32Array>();
+    DISTANCE_CACHE.set(walls, byCell);
+  }
+  const cached = byCell.get(from);
+  if (cached !== undefined) {
+    return cached;
+  }
   const dist = new Int32Array(CELLS).fill(UNREACHABLE);
   const queue = new Int32Array(CELLS);
   let head = 0;
@@ -386,6 +414,7 @@ export function bfsDistances(walls: readonly number[], from: number): Int32Array
       }
     }
   }
+  byCell.set(from, dist);
   return dist;
 }
 
