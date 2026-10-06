@@ -223,19 +223,20 @@ describe('S-A 落雨｜TEST_PLAN 第 6 節', () => {
   });
 
   it('6. 命中後 60 tick 內再碰到子彈：不算，子彈也不消失；第 61 個 tick 才又會被打中', () => {
-    // 一顆不動的子彈壓在玩家身上，玩家剛被打中（invuln = 60）。
+    // 一顆不動的子彈壓在玩家身上，玩家剛被打中（invuln = 60）。落雨照常生成新子彈，所以只看壓在玩家身上的那一顆。
+    const onPlayer = (b: { x: number; y: number }): boolean => b.x === 75 && b.y === 100;
     let state = makeState({
       fields: [{ px: 75, py: 100, hits: 1, invuln: 60, bullets: [{ x: 75, y: 100, vy: 0 }] }, {}],
     });
     for (let t = 1; t <= 60; t += 1) {
       state = sAGame.step(state, IDLE);
       expect(state.fields[0].hits).toBe(1);
-      expect(state.fields[0].bullets).toHaveLength(1);
+      expect(state.fields[0].bullets.some(onPlayer)).toBe(true);
     }
     expect(state.fields[0].invuln).toBe(0);
     state = sAGame.step(state, IDLE);
     expect(state.fields[0].hits).toBe(2);
-    expect(state.fields[0].bullets).toHaveLength(0);
+    expect(state.fields[0].bullets.some(onPlayer)).toBe(false);
     expect(state.fields[0].invuln).toBe(60);
   });
 
@@ -324,13 +325,12 @@ describe('S-A 落雨｜TEST_PLAN 第 6 節', () => {
       expect(gap).toBeGreaterThanOrEqual(5);
       expect(gap).toBeLessThanOrEqual(6);
     }
-    // 間隔是單調縮短的：每一百個 tick 裡的子彈數只增不減。
-    const perHundred = Array.from(
-      { length: 36 },
-      (_, k) => ticks.filter((t) => t > k * 100 && t <= (k + 1) * 100).length,
+    // 間隔是單調縮短的：每 900 個 tick 裡的子彈數一段比一段多。
+    const perBlock = [0, 1, 2, 3].map(
+      (k) => ticks.filter((t) => t > k * 900 && t <= (k + 1) * 900).length,
     );
-    for (let k = 1; k < perHundred.length; k += 1) {
-      expect(perHundred[k] as number).toBeGreaterThanOrEqual(perHundred[k - 1] as number);
+    for (let k = 1; k < perBlock.length; k += 1) {
+      expect(perBlock[k] as number).toBeGreaterThan(perBlock[k - 1] as number);
     }
   });
 

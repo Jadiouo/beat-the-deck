@@ -1,12 +1,16 @@
 import { describe, expect, it } from 'vitest';
 
 import { levelController } from '../../src/ai/level';
+import { gambler } from '../../src/ai/policies/gambler';
 import { greedy } from '../../src/ai/policies/greedy';
 import { pathfinder } from '../../src/ai/policies/pathfinder';
+import { precise } from '../../src/ai/policies/precise';
 import { random } from '../../src/ai/policies/random';
 import type { Policy } from '../../src/ai/types';
 import { cAGame } from '../../src/games/C-A/logic';
 import type { ClubsState } from '../../src/games/_clubs/logic';
+import { sAGame } from '../../src/games/S-A/logic';
+import type { SpadesState } from '../../src/games/S-A/logic';
 import { seedList, winRate } from './harness';
 
 /**
@@ -45,10 +49,36 @@ function deathRate(
   return dead / seeds.length;
 }
 
+/**
+ * P1 的「平均命中數」：被測的性格（等級 5）對 random（等級 10）打 `seeds.length` 場 S-A，
+ * 看被測的那一邊平均被打中幾次。坐哪一邊由種子的奇偶決定（與 harness 的 `winRate` 同一個做法）。
+ */
+function meanHits(policy: Policy, seeds: readonly number[]): number {
+  let total = 0;
+  for (const seed of seeds) {
+    const mine: 0 | 1 = seed % 2 === 0 ? 0 : 1;
+    const a = levelController(sAGame, policy, 5, seed);
+    const b = levelController(sAGame, random, 10, seed + 1_000_003);
+    const [c0, c1] = mine === 0 ? [a, b] : [b, a];
+    let state: SpadesState = sAGame.init(seed, { maxTicks: 3600, params: {} });
+    for (let tick = 0; !sAGame.isOver(state); tick += 1) {
+      state = sAGame.step(state, [c0.decide(state, 0, tick), c1.decide(state, 1, tick)]);
+    }
+    total += state.fields[mine].hits;
+  }
+  return total / seeds.length;
+}
+
 describe('5.2 性格真的不一樣', () => {
-  it.todo(
-    'P1（S-A 落雨）精準型比賭徒型少挨打：兩種性格各打 200 場（種子 0..199）對 random，精準型的平均命中數要低於賭徒型',
-  );
+  it('P1（S-A 落雨）精準型比賭徒型少挨打：兩種性格各打 200 場（種子 0..199）對 random，精準型的平均命中數要低於賭徒型', () => {
+    const seeds = seedList(200);
+    const preciseHits = meanHits(precise, seeds);
+    const gamblerHits = meanHits(gambler, seeds);
+    console.log(
+      `P1 平均命中數（等級 5 對 random，200 場）：精準型 ${preciseHits.toFixed(2)}，賭徒型 ${gamblerHits.toFixed(2)}`,
+    );
+    expect(preciseHits).toBeLessThan(gamblerHits);
+  }, 120_000);
   it.todo(
     'P2（H-2 引信）賭徒型的分數起伏大：兩種性格各打 200 場（種子 0..199），賭徒型總分的標準差要高於精準型',
   );
