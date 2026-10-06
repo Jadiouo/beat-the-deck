@@ -1,6 +1,9 @@
 import { EVOLUTION_GAMES, MATCH_CONFIG, winRate } from '../ai/evolution';
 import type { Policy } from '../ai/types';
+import { effectiveLevel } from '../ai/level';
 import type { Game, GameConfig } from '../core/types';
+import type { RegistryEntry } from '../games/types';
+import { matchConfigFor } from './match-session';
 
 /**
  * 「AI 進化」畫面的數字（SPEC 7.5）：新舊兩個等級的 AI 在這張牌上對打 20 場。
@@ -49,5 +52,37 @@ export function createEvolutionRun<S>(
       points += winRate(game, policy, newLevel, policy, oldLevel, [seed + played], config);
       played += 1;
     },
+  };
+}
+
+/** 一次要播的進化畫面：哪張牌、新舊兩個實際等級、種子，與這張牌打對局用的設定。 */
+export interface EvolutionPlan {
+  readonly entry: RegistryEntry;
+  readonly oldLevel: number;
+  readonly newLevel: number;
+  readonly seed: number;
+  /** 與對局、重播同一份（`matchConfigFor`）：牌的 `defaultMaxTicks` 優先，否則共同的 3600。 */
+  readonly config: GameConfig;
+}
+
+/**
+ * 這場結束後要不要播進化畫面。全域等級沒升，或這張牌沒有 AI 性格（`defaultPolicy` 是 null，
+ * 也就是鬼牌：沒有勝負、沒有對手可以比勝率）就是 null。
+ */
+export function planEvolution(
+  entry: RegistryEntry,
+  levelBefore: number,
+  levelAfter: number,
+  seed: number,
+): EvolutionPlan | null {
+  if (levelAfter <= levelBefore || entry.meta.defaultPolicy === null) {
+    return null;
+  }
+  return {
+    entry,
+    oldLevel: effectiveLevel(levelBefore, entry.meta.baseLevel),
+    newLevel: effectiveLevel(levelAfter, entry.meta.baseLevel),
+    seed,
+    config: matchConfigFor(entry.meta),
   };
 }

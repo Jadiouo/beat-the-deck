@@ -96,6 +96,8 @@ test('JK-R：玩完到結算頁，選「存成圖片」會下載檔名帶種子�
   await expect(mirror).toHaveAttribute('data-screen', 'result', { timeout: 60_000 });
   await expect(mirror).toHaveAttribute('data-card', 'JK-R');
   await expect(page.getByTestId('result-headline')).toHaveText('畫完了');
+  // 鬼牌沒有勝負也沒有 AI 性格：結算頁沒有 AI 台詞（SPEC 7.4 的四個情境都不適用）。
+  await expect(page.getByTestId('result-taunt')).toHaveCount(0);
 
   // 選單：看重播、存成圖片、再一次、回牌桌。往下一格就是「存成圖片」。
   await page.keyboard.press('ArrowDown');
@@ -146,4 +148,36 @@ test('一般牌的結算頁仍是 3 項選單（沒有存成圖片）', async ({
   await page.waitForTimeout(150);
   await page.keyboard.press('Enter');
   await expect(page.locator('#mirror')).toHaveAttribute('data-screen', 'table');
+});
+
+test('JK-R：就算這場讓全域等級升級，離開結算頁也不會出現「AI 進化」（鬼牌沒有 AI 性格）', async ({
+  page,
+}) => {
+  // 先存 14 張翻開的牌：JK-R 這一場是第 15 張，全域等級從 5 升到 6。
+  await page.addInitScript(() => {
+    const cards: Record<string, { best: number; won: boolean }> = {};
+    for (let i = 0; i < 14; i += 1) {
+      cards[`X-${i}`] = { best: 1, won: true };
+    }
+    window.localStorage.setItem(
+      'btd.v1',
+      JSON.stringify({
+        version: 1,
+        cards,
+        globalLevel: 5,
+        lossStreak: 0,
+        settings: { scanlines: false, sound: false },
+      }),
+    );
+  });
+  await page.goto('/?card=JK-R&seed=3&autoplay=human-model');
+  const mirror = page.locator('#mirror');
+  await expect(mirror).toHaveAttribute('data-screen', 'result', { timeout: 60_000 });
+  // 選單最後一項是「回牌桌」：往下三格再確認。
+  for (let i = 0; i < 3; i += 1) {
+    await page.keyboard.press('ArrowDown');
+    await page.waitForTimeout(150);
+  }
+  await page.keyboard.press('Enter');
+  await expect(mirror).toHaveAttribute('data-screen', 'table');
 });

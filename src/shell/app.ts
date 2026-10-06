@@ -1,5 +1,5 @@
 import { humanModel } from '../ai/human-model';
-import { effectiveLevel, levelController, policyByName } from '../ai/level';
+import { levelController, policyByName } from '../ai/level';
 import { hashState } from '../core/hash';
 import type { Controller, Inputs } from '../core/types';
 import { CARD_IDS, findEntry } from '../games/registry';
@@ -11,7 +11,8 @@ import { LOGICAL_HEIGHT, LOGICAL_WIDTH } from './canvas';
 import type { ScreenCanvas } from './canvas';
 import { cellAt, cellState, moveCursor } from './deck-view';
 import type { DeckView } from './deck-view';
-import { createEvolutionRun } from './evolve';
+import { createEvolutionRun, planEvolution } from './evolve';
+import type { EvolutionPlan } from './evolve';
 import { attachBrowserInput, emptyButtons, newPresses } from './input';
 import type { InputSnapshot } from './input';
 import type { Launch } from './launch';
@@ -44,9 +45,9 @@ import {
   drawTable,
   drawTitle,
   resultMenuHit,
+  resultTaunt,
 } from './screens';
 import { strings } from './strings';
-import { pickTaunt, situationOf } from './taunts';
 import type { TauntPersonality } from './taunts';
 import { createBrowserPngDeps, jkrPngExport, savePng } from './save-image';
 import { prepareContext } from './text';
@@ -137,7 +138,7 @@ export function startApp(options: AppOptions): void {
     saveProgress(storage, progress);
   };
 
-  // 音效：預設靜音；玩家第一次按鍵、點擊或觸控時才啟動 AudioContext（瀏覽器的規定，SPEC 8.4）。
+  // 音效（SPEC 8.4）：第一次按鍵、點擊或觸控之前不建立任何節點（瀏覽器的規定）；那之後音效預設是開的，玩家可以在標題選單關掉。
   const audio = createBrowserAudio();
   audio.setEnabled(progress.settings.sound);
   const unlockAudio = (): void => audio.unlock();
@@ -419,13 +420,6 @@ export function startApp(options: AppOptions): void {
   };
 
   // ---- 對局 ----
-  interface EvolutionPlan {
-    readonly entry: RegistryEntry;
-    readonly oldLevel: number;
-    readonly newLevel: number;
-    readonly seed: number;
-  }
-
   interface FinishedMatch {
     readonly entry: RegistryEntry;
     readonly seed: number;
@@ -433,7 +427,8 @@ export function startApp(options: AppOptions): void {
     readonly finalHash: string;
     readonly scores: readonly [number, number];
     readonly outcome: Outcome;
-    readonly taunt: string;
+    /** 沒有 AI 性格的牌（鬼牌）沒有台詞。 */
+    readonly taunt: string | null;
     readonly notes: readonly string[];
     /** 結束時的 state（JK-R 存成圖片用）。 */
     readonly finalState: unknown;
@@ -501,7 +496,6 @@ export function startApp(options: AppOptions): void {
         notes.push(strings.result.newBest);
       }
 
-      const situation = situationOf(winner, progress.lossStreak);
       const result: FinishedMatch = {
         entry,
         seed,
@@ -509,20 +503,12 @@ export function startApp(options: AppOptions): void {
         finalHash: hashState(state),
         scores,
         outcome,
-        taunt: pickTaunt(personalityOf(entry), situation, seed),
+        taunt: resultTaunt(meta.defaultPolicy, winner, progress.lossStreak, seed),
         notes,
         finalState: state,
         savedAs: null,
         saveFailed: false,
-        evolution:
-          levelAfter > levelBefore
-            ? {
-                entry,
-                oldLevel: effectiveLevel(levelBefore, meta.baseLevel),
-                newLevel: effectiveLevel(levelAfter, meta.baseLevel),
-                seed,
-              }
-            : null,
+        evolution: planEvolution(entry, levelBefore, levelAfter, seed),
       };
       setScene(resultScene(result));
     };
@@ -790,9 +776,11 @@ export function startApp(options: AppOptions): void {
       element('h2', resultHeadline(result), 'result-headline'),
       element('p', String(result.scores[0]), 'result-score-0'),
       element('p', String(result.scores[1]), 'result-score-1'),
-      element('p', result.taunt, 'result-taunt'),
       element('p', result.entry.meta.name),
     ];
+    if (result.taunt !== null) {
+      children.splice(3, 0, element('p', result.taunt, 'result-taunt'));
+    }
     if (result.savedAs !== null) {
       children.push(element('p', result.savedAs, 'result-saved'));
     }
@@ -819,6 +807,7 @@ export function startApp(options: AppOptions): void {
       plan.oldLevel,
       plan.newLevel,
       plan.seed,
+      plan.config,
     );
     let ticks = 0;
     audio.play('evolve');

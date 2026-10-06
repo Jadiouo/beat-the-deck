@@ -1,8 +1,11 @@
+import type { Side } from '../core/types';
 import { LOGICAL_HEIGHT, LOGICAL_WIDTH } from './canvas';
 import { drawCards, drawLights } from './deck-view';
 import type { DeckView } from './deck-view';
 import { COLOR } from './palette';
 import { PIPS, drawBitmap, suitColors } from './pixel';
+import { pickTaunt, situationOf } from './taunts';
+import type { TauntPersonality } from './taunts';
 import { strings } from './strings';
 import { drawText, wrapText } from './text';
 
@@ -121,6 +124,22 @@ export function drawInfo(ctx: CanvasRenderingContext2D, data: InfoData): void {
   drawText(ctx, strings.info.hint, CENTER, 224, { size: 11, color: COLOR.mid, align: 'center' });
 }
 
+/**
+ * 結算頁的 AI 台詞（SPEC 7.4：分「AI 贏／AI 輸／平手／你連輸三場」四個情境）。
+ * 沒有 AI 性格的牌（`defaultPolicy` 是 null，也就是鬼牌）沒有勝負，不屬於任何情境，所以沒有台詞（null）。
+ */
+export function resultTaunt(
+  personality: TauntPersonality | null,
+  winner: Side | null,
+  lossStreak: number,
+  seed: number,
+): string | null {
+  if (personality === null) {
+    return null;
+  }
+  return pickTaunt(personality, situationOf(winner, lossStreak), seed);
+}
+
 export interface ResultData {
   readonly headline: string;
   readonly headlineColor: string;
@@ -128,7 +147,8 @@ export interface ResultData {
   /** 沒有勝負的牌（鬼牌）不顯示雙方分數。 */
   readonly showScores: boolean;
   readonly seed: number;
-  readonly taunt: string;
+  /** AI 的台詞；沒有 AI 性格的牌（鬼牌）是 null，結算頁就不畫台詞區。 */
+  readonly taunt: string | null;
   readonly personality: string;
   readonly notes: readonly string[];
   /** 選單的文字，3 項或 4 項（JK-R 多一個「存成圖片」）。 */
@@ -194,17 +214,19 @@ export function drawResult(ctx: CanvasRenderingContext2D, data: ResultData): voi
     });
   }
 
-  // AI 的台詞。
-  ctx.fillStyle = COLOR.accent;
-  ctx.fillRect(12, 120, 296, 1);
-  drawText(ctx, data.personality, 14, 124, { size: 10, color: COLOR.accent });
-  wrapText(ctx, data.taunt, 290, 12)
-    .slice(0, 2)
-    .forEach((line, index) => {
-      drawText(ctx, line, 14, 138 + index * 15, { size: 12 });
-    });
-  ctx.fillStyle = COLOR.accent;
-  ctx.fillRect(12, 168, 296, 1);
+  // AI 的台詞（沒有 AI 性格的牌沒有）。
+  if (data.taunt !== null) {
+    ctx.fillStyle = COLOR.accent;
+    ctx.fillRect(12, 120, 296, 1);
+    drawText(ctx, data.personality, 14, 124, { size: 10, color: COLOR.accent });
+    wrapText(ctx, data.taunt, 290, 12)
+      .slice(0, 2)
+      .forEach((line, index) => {
+        drawText(ctx, line, 14, 138 + index * 15, { size: 12 });
+      });
+    ctx.fillStyle = COLOR.accent;
+    ctx.fillRect(12, 168, 296, 1);
+  }
 
   const tops = resultMenuTops(data.menu.length);
   data.menu.forEach((label, index) => {
