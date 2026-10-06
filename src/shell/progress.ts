@@ -145,15 +145,36 @@ function isWon(progress: Progress, id: string): boolean {
 }
 
 /**
- * 解鎖規則（SPEC 8.1）：四個花色的 A 一開始開放；其餘每張要先贏同花色的前一張；
- * 翻開 13 張後 JK-R 開放，翻開 40 張後 JK-B 開放。
+ * 鬼牌要翻開幾張才開放。
+ *
+ * SPEC 8.1 的數字是 13（JK-R）與 40（JK-B），不傳 `implementedIds` 時就是這兩個數字。
+ * 傳了「目前登記表裡做好的牌」時，門檻取 min(SPEC 的數字, 其他已實作的牌數)：
+ * 41 張牌還沒做完的時候，能翻開的牌少於 13 張，照字面永遠湊不到，JK-R 就永遠鎖住（玩家被卡死）。
+ * 做到 13 張一般牌以上，這個上限就不再起作用，行為與 SPEC 完全一樣。
+ * 計算時不算牌本身；JK-R 的門檻也不算 JK-B（JK-B 要先有 JK-R 才解得開，算進去會自己等自己）。
  */
-export function isUnlocked(progress: Progress, id: string): boolean {
-  if (id === 'JK-R') {
-    return revealedCount(progress) >= JOKER_R_REQUIRES;
-  }
-  if (id === 'JK-B') {
-    return revealedCount(progress) >= JOKER_B_REQUIRES;
+export function jokerRequirement(
+  id: 'JK-R' | 'JK-B',
+  implementedIds: readonly string[] = CARD_IDS,
+): number {
+  const spec = id === 'JK-R' ? JOKER_R_REQUIRES : JOKER_B_REQUIRES;
+  const reachable = implementedIds.filter(
+    (other) => other !== id && !(id === 'JK-R' && other === 'JK-B'),
+  ).length;
+  return Math.min(spec, reachable);
+}
+
+/**
+ * 解鎖規則（SPEC 8.1）：四個花色的 A 一開始開放；其餘每張要先贏同花色的前一張；
+ * 翻開 13 張後 JK-R 開放，翻開 40 張後 JK-B 開放（門檻的上限見 `jokerRequirement`）。
+ */
+export function isUnlocked(
+  progress: Progress,
+  id: string,
+  implementedIds: readonly string[] = CARD_IDS,
+): boolean {
+  if (id === 'JK-R' || id === 'JK-B') {
+    return revealedCount(progress) >= jokerRequirement(id, implementedIds);
   }
   const index = CARD_IDS.indexOf(id);
   if (index < 0) {

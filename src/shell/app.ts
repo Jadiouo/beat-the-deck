@@ -28,6 +28,7 @@ import { splitId } from './pixel';
 import {
   cardLevel,
   currentGlobalLevel,
+  jokerRequirement,
   loadProgress,
   recordResult,
   revealedCount,
@@ -257,15 +258,16 @@ export function startApp(options: AppOptions): void {
 
   // ---- 牌桌 ----
   const implemented = (id: string): boolean => findEntry(id) !== undefined;
+  const implementedIds = CARD_IDS.filter(implemented);
 
   const tableScene = (startCursor: number): Scene => {
     let cursor = startCursor;
-    const view = (): DeckView => ({ progress, cursor, implemented });
+    const view = (): DeckView => ({ progress, cursor, implemented, implementedIds });
 
     const describe = (index: number): { line1: string; line2: string } => {
       const id = CARD_IDS[index] as string;
       const entry = findEntry(id);
-      const state = cellState(progress, id, entry !== undefined);
+      const state = cellState(progress, id, entry !== undefined, implementedIds);
       const name = entry === undefined ? id : strings.table.cardLine(id, entry.meta.name);
       let status = '';
       switch (state) {
@@ -279,12 +281,17 @@ export function startApp(options: AppOptions): void {
           status = strings.table.unimplemented;
           break;
         case 'locked':
-          status =
-            id === 'JK-R'
-              ? strings.table.lockedJoker(13)
-              : id === 'JK-B'
-                ? strings.table.lockedJoker(40)
-                : strings.table.locked(CARD_IDS[index - 1] as string);
+          if (id === 'JK-R' || id === 'JK-B') {
+            const needed = jokerRequirement(id, implementedIds);
+            const specNeeded = id === 'JK-R' ? 13 : 40;
+            status = strings.table.lockedJoker(
+              needed,
+              revealedCount(progress),
+              needed < specNeeded,
+            );
+          } else {
+            status = strings.table.locked(CARD_IDS[index - 1] as string);
+          }
           break;
       }
       return {
@@ -300,7 +307,7 @@ export function startApp(options: AppOptions): void {
     const sync = (): void => {
       const items = CARD_IDS.map((id, index) => {
         const entry = findEntry(id);
-        const state = cellState(progress, id, entry !== undefined);
+        const state = cellState(progress, id, entry !== undefined, implementedIds);
         const item = element(
           'li',
           strings.mirror.cardLabel(id, entry?.meta.name ?? id, state),
@@ -330,7 +337,7 @@ export function startApp(options: AppOptions): void {
       if (entry === undefined) {
         return;
       }
-      const state = cellState(progress, id, true);
+      const state = cellState(progress, id, true, implementedIds);
       if (state === 'playable' || state === 'revealed') {
         audio.play('menuConfirm');
         setScene(infoScene(entry));

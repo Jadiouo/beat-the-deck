@@ -21,7 +21,14 @@ export const strings = {
     revealed: '已翻開',
     unimplemented: '尚未開放',
     locked: (previousId: string): string => `未解鎖：先贏 ${previousId}`,
-    lockedJoker: (needed: number): string => `未解鎖：先翻開 ${needed} 張牌`,
+    /**
+     * 鬼牌的解鎖條件，連同目前進度。`capped` 是門檻被「已開放的牌數」壓低了
+     * （牌還沒做完，湊不到 SPEC 的 13／40 張），要講明白為什麼不是 13。
+     */
+    lockedJoker: (needed: number, have: number, capped: boolean): string =>
+      capped
+        ? `未解鎖：先翻開全部 ${needed} 張已開放的牌（目前 ${have}）`
+        : `未解鎖：先翻開 ${needed} 張牌（目前 ${have}）`,
     best: (score: number): string => `最佳 ${score}`,
     progress: (revealed: number, total: number, level: number): string =>
       `已翻開 ${revealed} / ${total}\u3000AI 等級 ${level}`,

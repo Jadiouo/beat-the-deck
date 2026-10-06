@@ -37,14 +37,19 @@ const ORIGIN_X = 4;
 const ORIGIN_Y = 30;
 
 /** 格子的狀態：翻開 > 尚未開放（牌還沒做）> 可玩（已解鎖）> 鎖住。 */
-export function cellState(progress: Progress, id: string, implemented: boolean): CellState {
+export function cellState(
+  progress: Progress,
+  id: string,
+  implemented: boolean,
+  implementedIds?: readonly string[],
+): CellState {
   if (progress.cards[id]?.won === true) {
     return 'revealed';
   }
   if (!implemented) {
     return 'unimplemented';
   }
-  return isUnlocked(progress, id) ? 'playable' : 'locked';
+  return isUnlocked(progress, id, implementedIds) ? 'playable' : 'locked';
 }
 
 function rowOf(index: number): number {
@@ -104,6 +109,8 @@ export interface DeckView {
   readonly cursor: number;
   /** 這張牌在登記表裡嗎（做好了嗎）。 */
   readonly implemented: (id: string) => boolean;
+  /** 登記表裡做好的牌的 id（鬼牌的解鎖門檻要用，見 `jokerRequirement`）。沒給就照 SPEC 字面。 */
+  readonly implementedIds?: readonly string[];
 }
 
 /** 進度燈：54 格，翻開一張亮一格；四個花色各用主色，鬼牌兩格用紫色（亮的整格、暗的只有頂端兩像素）。 */
@@ -193,7 +200,7 @@ function drawCard(ctx: CanvasRenderingContext2D, id: string, state: CellState, r
 /** 畫 54 個格子與游標。 */
 export function drawCards(ctx: CanvasRenderingContext2D, view: DeckView): void {
   CARD_IDS.forEach((id, index) => {
-    const state = cellState(view.progress, id, view.implemented(id));
+    const state = cellState(view.progress, id, view.implemented(id), view.implementedIds);
     drawCard(ctx, id, state, cellRect(index));
   });
   const cursor = cellRect(view.cursor);
