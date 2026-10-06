@@ -89,4 +89,17 @@ describe('shell/deck-view：格子的狀態', () => {
     // 翻開優先：就算之後登記表拿掉了這張牌，贏過的還是翻開。
     expect(cellState(won, 'C-A', false)).toBe('revealed');
   });
+
+  it('鬼牌：已實作的牌湊不到 13 張時，翻開全部已實作的牌就可玩', () => {
+    const suits = CARD_IDS.filter((id) => !id.startsWith('JK'));
+    const twelve = suits.slice(0, 12);
+    const implemented = [...twelve, 'JK-R'];
+    let progress = defaultProgress();
+    for (const id of twelve) {
+      progress = recordResult(progress, id, 1, 'win');
+    }
+    expect(cellState(progress, 'JK-R', true)).toBe('locked'); // 不傳清單：SPEC 字面
+    expect(cellState(progress, 'JK-R', true, implemented)).toBe('playable');
+    expect(cellState(defaultProgress(), 'JK-R', true, implemented)).toBe('locked');
+  });
 });

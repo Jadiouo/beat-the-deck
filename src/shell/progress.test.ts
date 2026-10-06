@@ -7,6 +7,7 @@ import {
   currentGlobalLevel,
   defaultProgress,
   isUnlocked,
+  jokerRequirement,
   loadProgress,
   parseProgress,
   recordResult,
@@ -14,6 +15,7 @@ import {
   saveProgress,
   withSettings,
 } from './progress';
+import { strings } from './strings';
 import type { Progress, StorageLike } from './progress';
 
 function fakeStorage(
@@ -193,6 +195,54 @@ describe('shell/progress（TEST_PLAN 3.6）', () => {
     const forty = withWins(suits.slice(0, 40));
     expect(revealedCount(forty)).toBe(40);
     expect(isUnlocked(forty, 'JK-B')).toBe(true);
+  });
+
+  describe('鬼牌門檻：已實作的牌湊不到 SPEC 的 13 張時，不要把玩家卡死（SPEC 8.1 的數字不變）', () => {
+    const suits = CARD_IDS.filter((id) => !id.startsWith('JK'));
+    // 目前的現實：12 張一般牌 ＋ JK-R 做好了，JK-B 還沒。
+    const twelveNormals = suits.slice(0, 12);
+    const implemented = [...twelveNormals, 'JK-R'];
+
+    it('不傳「已實作的牌」時就是 SPEC 的字面：13 與 40', () => {
+      expect(jokerRequirement('JK-R')).toBe(13);
+      expect(jokerRequirement('JK-B')).toBe(40);
+      expect(isUnlocked(withWins(twelveNormals), 'JK-R')).toBe(false);
+    });
+
+    it('JK-R：只實作了 12 張一般牌時，門檻是 12；翻開 11 張還不行，12 張就開放', () => {
+      expect(jokerRequirement('JK-R', implemented)).toBe(12);
+      expect(isUnlocked(withWins(twelveNormals.slice(0, 11)), 'JK-R', implemented)).toBe(false);
+      expect(isUnlocked(withWins(twelveNormals), 'JK-R', implemented)).toBe(true);
+    });
+
+    it('JK-R 自己不算在 JK-R 的門檻裡（不會自己等自己）；JK-B 的門檻不超過它前面做好的張數', () => {
+      expect(jokerRequirement('JK-R', ['JK-R', 'JK-B', ...twelveNormals])).toBe(12);
+      expect(jokerRequirement('JK-B', implemented)).toBe(13);
+      expect(isUnlocked(withWins(implemented), 'JK-B', implemented)).toBe(true);
+      expect(isUnlocked(withWins(twelveNormals), 'JK-B', implemented)).toBe(false);
+    });
+
+    it('已實作的一般牌有 13 張以上時，與 SPEC 完全一樣（上限就是 13／40）', () => {
+      const many = suits.slice(0, 30);
+      expect(jokerRequirement('JK-R', many)).toBe(13);
+      expect(isUnlocked(withWins(suits.slice(0, 12)), 'JK-R', many)).toBe(false);
+      expect(isUnlocked(withWins(suits.slice(0, 13)), 'JK-R', many)).toBe(true);
+      expect(jokerRequirement('JK-B', CARD_IDS)).toBe(40);
+      expect(jokerRequirement('JK-B', [...suits.slice(0, 20), 'JK-R'])).toBe(21);
+    });
+
+    it('一般牌的解鎖規則不受影響', () => {
+      expect(isUnlocked(defaultProgress(), 'C-2', implemented)).toBe(false);
+      expect(isUnlocked(defaultProgress(), 'C-A', implemented)).toBe(true);
+    });
+
+    it('畫面文字：說明還差幾張；門檻被已實作張數壓低時要講明白', () => {
+      expect(strings.table.lockedJoker(13, 12, false)).toBe('未解鎖：先翻開 13 張牌（目前 12）');
+      const capped = strings.table.lockedJoker(12, 11, true);
+      expect(capped).toContain('12');
+      expect(capped).toContain('11');
+      expect(capped).toContain('已開放');
+    });
   });
 
   it('全域等級：翻開 0、1、2 張是 1；3 張是 2；27 張以上是 10', () => {
