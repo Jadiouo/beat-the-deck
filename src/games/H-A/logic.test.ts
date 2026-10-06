@@ -1,12 +1,22 @@
 import { describe, expect, it } from 'vitest';
 
-import { levelController } from '../../ai/level';
+import { levelController, levelParams, wrapPolicy } from '../../ai/level';
 import { gambler } from '../../ai/policies/gambler';
+import { pathfinder } from '../../ai/policies/pathfinder';
+import { precise } from '../../ai/policies/precise';
 import { playMatch } from '../../core/match';
 import { intFrom, rngStateFor } from '../../core/rng';
 import type { RngState } from '../../core/rng';
 import type { Buttons, Inputs, Side } from '../../core/types';
-import { AI_WAIT_TICKS, DECISION_TIMEOUT, GOAL, IDLE, MAX_TURNS, PRESS_A, PRESS_B } from '../_hearts/logic';
+import {
+  AI_WAIT_TICKS,
+  DECISION_TIMEOUT,
+  GOAL,
+  IDLE,
+  MAX_TURNS,
+  PRESS_A,
+  PRESS_B,
+} from '../_hearts/logic';
 import { hAGame, makeState } from './logic';
 import type { HAState } from './logic';
 
@@ -262,7 +272,14 @@ describe('H-A 貪心骰｜TEST_PLAN 第 6 節', () => {
     expect(exactly.over).toBe(true);
 
     const unbanked = rollOnce(
-      makeState({ turn: 1, wait: 0, totals: [30, 49], acc: 10, turnsDone: 9, rng: rngWithDice([6]) }),
+      makeState({
+        turn: 1,
+        wait: 0,
+        totals: [30, 49],
+        acc: 10,
+        turnsDone: 9,
+        rng: rngWithDice([6]),
+      }),
       1,
     );
     expect(unbanked.acc).toBe(16);
@@ -435,12 +452,48 @@ describe('H-A 貪心骰｜其他規則', () => {
 });
 
 describe('H-A 貪心骰｜actions 與 evaluate', () => {
-  it('可以輸入時：[全放開, b, a]，全放開排第一；不能輸入時只有一個「全放開」', () => {
+  it('可以輸入時：兩個鍵都能按就是 [b, a]（不列「全放開」，免得一步看的性格一直拖延）；不能輸入時只有一個「全放開」', () => {
     const mine = hAGame.actions(makeState(), 0);
-    expect(mine).toHaveLength(3);
-    expect(mine[0]).toEqual(IDLE);
+    expect(mine).toHaveLength(2);
     expect(mine.some((a) => a.a && !a.b)).toBe(true);
     expect(mine.some((a) => a.b && !a.a)).toBe(true);
+    expect(mine.some((a) => !a.a && !a.b)).toBe(false);
+
+    // a 還按著：按 a 沒有用，所以列「全放開」與 b；b 還按著同理。
+    const aHeld = hAGame.actions(
+      makeState({
+        held: [
+          { a: true, b: false },
+          { a: false, b: false },
+        ],
+      }),
+      0,
+    );
+    expect(aHeld[0]).toEqual(IDLE);
+    expect(aHeld.some((a) => a.a)).toBe(false);
+    expect(aHeld.some((a) => a.b)).toBe(true);
+    const bHeld = hAGame.actions(
+      makeState({
+        held: [
+          { a: false, b: true },
+          { a: false, b: false },
+        ],
+      }),
+      0,
+    );
+    expect(bHeld[0]).toEqual(IDLE);
+    expect(bHeld.some((a) => a.b)).toBe(false);
+    expect(bHeld.some((a) => a.a)).toBe(true);
+    const bothHeld = hAGame.actions(
+      makeState({
+        held: [
+          { a: true, b: true },
+          { a: false, b: false },
+        ],
+      }),
+      0,
+    );
+    expect(bothHeld).toEqual([IDLE]);
 
     const notMine = hAGame.actions(makeState(), 1);
     expect(notMine).toEqual([IDLE]);
@@ -452,11 +505,21 @@ describe('H-A 貪心骰｜actions 與 evaluate', () => {
     expect(over).toEqual([IDLE]);
   });
 
-  it('a 還按著時拿掉 a（邊緣觸發：按著的 a 不會再擲）', () => {
-    const held = makeState({ held: [{ a: true, b: false }, { a: false, b: false }] });
-    const actions = hAGame.actions(held, 0);
-    expect(actions.some((a) => a.a)).toBe(false);
-    expect(actions.some((a) => a.b)).toBe(true);
+  it('a 還按著時，按 a 沒有用（邊緣觸發）：往前模擬「按 a」得到的局面，和「全放開」不同的只有「還按著」', () => {
+    const held = makeState({
+      acc: 6,
+      held: [
+        { a: true, b: false },
+        { a: false, b: false },
+      ],
+    });
+    const stillHeld = hAGame.step(held, only(0, PRESS_A));
+    expect(stillHeld.phase).toBe('choose');
+    expect(stillHeld.rolls).toBe(0);
+    const released = hAGame.step(held, idle());
+    expect(released.held[0].a).toBe(false);
+    // 放開之後再按，才會擲。
+    expect(hAGame.step(released, only(0, PRESS_A)).phase).toBe('rolling');
   });
 
   it('evaluate：danger 在 0 到 1，gain 有限；結束的局有勝負加成', () => {
@@ -493,7 +556,7 @@ describe('H-A 貪心骰｜actions 與 evaluate', () => {
     expect(decide(makeState({ acc: 0 })).a).toBe(true);
     expect(decide(makeState({ acc: 12 })).a).toBe(true);
     expect(decide(makeState({ acc: 19 })).a).toBe(true);
-    expect(decide(makeState({ acc: 20 })).b).toBe(true);
+    expect(decide(makeState({ acc: 22 })).b).toBe(true);
     expect(decide(makeState({ acc: 31 })).b).toBe(true);
     expect(decide(makeState({ turn: 1, wait: 20, acc: 8 }), 1)).toEqual(IDLE);
     expect(decide(makeState({ phase: 'rolling', acc: 8 }))).toEqual(IDLE);
@@ -510,13 +573,23 @@ describe('H-A 貪心骰｜actions 與 evaluate', () => {
     expect(decide(chase, 1).a).toBe(true);
   });
 
-  it('a 還按著、而且想繼續擲的時候，一步看的性格會先選「放開」', () => {
+  it('a 還按著、而且想繼續擲的時候，一步看的性格會先選「放開」（精準型、搜尋型也一樣，不會因為怕危險一直不動）', () => {
     const held = makeState({
       acc: 6,
-      held: [{ a: true, b: false }, { a: false, b: false }],
+      held: [
+        { a: true, b: false },
+        { a: false, b: false },
+      ],
     });
-    const choice = gambler.decide(hAGame, held, 0, 0, { depth: 1, seed: 0 });
-    expect(choice).toEqual(IDLE);
+    for (const policy of [gambler, precise, pathfinder]) {
+      const choice = policy.decide(hAGame, held, 0, 0, { depth: 1, seed: 0 });
+      expect(choice).toEqual(IDLE);
+    }
+    // 已經放開（可以擲）時，三種性格都會按 a。
+    const armed = makeState({ acc: 6 });
+    for (const policy of [gambler, precise, pathfinder]) {
+      expect(policy.decide(hAGame, armed, 0, 0, { depth: 1, seed: 0 }).a).toBe(true);
+    }
   });
 });
 
@@ -532,8 +605,10 @@ describe('H-A 貪心骰｜AI 在邊緣觸發下也能玩', () => {
   it('等級 5 的賭徒型坐 1 號邊：一個回合裡擲不止一次，而且不是靠超時', () => {
     const rng = rngWithoutOnes(6);
     let s = makeState({ turn: 1, wait: AI_WAIT_TICKS, rng });
-    const ai = levelController(hAGame, gambler, 5, 3);
-    const human = levelController(hAGame, gambler, 5, 4);
+    // 等級 5 的反應延遲（11）與決定間隔（7），但不亂選（epsilon = 0），測的是邊緣觸發而不是運氣。
+    const steady = { ...levelParams(5), epsilon: 0 };
+    const ai = wrapPolicy(hAGame, gambler, steady, 3);
+    const human = wrapPolicy(hAGame, gambler, steady, 4);
     for (let tick = 0; tick < 500 && s.turn === 1; tick += 1) {
       s = hAGame.step(s, [human.decide(s, 0, tick), ai.decide(s, 1, tick)]);
     }
@@ -546,8 +621,9 @@ describe('H-A 貪心骰｜AI 在邊緣觸發下也能玩', () => {
   it('等級 5 的賭徒型坐 0 號邊（沒有 45 tick 等待）：要先放開再按，也能連續擲、不靠超時', () => {
     const rng = rngWithoutOnes(6);
     let s = makeState({ turn: 0, rng });
-    const human = levelController(hAGame, gambler, 5, 3);
-    const ai = levelController(hAGame, gambler, 5, 4);
+    const steady = { ...levelParams(5), epsilon: 0 };
+    const human = wrapPolicy(hAGame, gambler, steady, 3);
+    const ai = wrapPolicy(hAGame, gambler, steady, 4);
     for (let tick = 0; tick < 600 && s.turn === 0; tick += 1) {
       s = hAGame.step(s, [human.decide(s, 0, tick), ai.decide(s, 1, tick)]);
     }
