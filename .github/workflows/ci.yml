@@ -10,6 +10,9 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # 快的部分：型別、lint、單元與整體檢查（vitest 的 light project）。
+  # 逐張牌的契約與 AI 統計檢查（heavy project）會隨牌數變慢，拆到下面的 ai-stats 並行跑。
+  # 本機的 `npm run check` 仍然包含全部測試（light ＋ heavy）；CI 這兩個 job 加起來等於它。
   check:
     name: check
     runs-on: ubuntu-latest
@@ -23,7 +26,33 @@ jobs:
 
       - run: npm ci
 
-      - run: npm run check
+      - run: npm run typecheck
+
+      - run: npm run lint
+
+      - run: npm run test:light
+
+  # 逐張牌的契約檢查（K1–K13、R1–R3）與 A1–A5 統計檢查，分成 SHARDS 份、每份一台機器並行跑。
+  # 檔案已經依牌的序號分成 13 份（tests/ai/a-checks.shared.ts 的 SLOT_COUNT），所以 --shard 切得平均。
+  # 要加快就把 shard 清單加長（例如 [1, 2, 3, 4, 5, 6]）並把 --shard 的分母改成同一個數字。
+  ai-stats:
+    name: ai-stats (${{ matrix.shard }}/4)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - run: npx vitest run --project heavy --shard=${{ matrix.shard }}/4
 
   # 端到端測試（TEST_PLAN 第 7 節）。和 check 並行跑、各自回報，不互相等；
   # 失敗的時候看 check 是不是也紅了就知道是外殼還是核心的問題。
@@ -54,11 +83,11 @@ jobs:
           path: playwright-report/
           retention-days: 7
 
-  # 部署到 GitHub Pages（TASKS T5）。只在 main 分支的 push 才跑，而且要 check 與 e2e 都成功。
+  # 部署到 GitHub Pages（TASKS T5）。只在 main 分支的 push 才跑，而且要 check、ai-stats 與 e2e 都成功。
   # repo 設定要先手動把 Settings → Pages → Build and deployment → Source 選成 GitHub Actions。
   deploy:
     name: deploy
-    needs: [check, e2e]
+    needs: [check, ai-stats, e2e]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:

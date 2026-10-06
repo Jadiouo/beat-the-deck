@@ -4,6 +4,7 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import { CARD_IDS } from '../../src/games/registry';
+import { counterEntry } from '../fixtures/counter-entry';
 import {
   ALL_ENTRIES,
   BUCKETS,
@@ -46,8 +47,8 @@ describe('A1–A5 與契約檢查的分檔', () => {
   });
 
   it('不在 54 張清單裡的登記項（替身牌）進 other', () => {
-    expect(bucketOf({ id: 'counter-game' } as never)).toBe('other');
-    expect(entriesOfBucket('other').map((entry) => entry.id)).toContain('counter-game');
+    expect(bucketOf({ id: counterEntry.id } as never)).toBe('other');
+    expect(entriesOfBucket('other').map((entry) => entry.id)).toContain(counterEntry.id);
   });
 
   it('每個分檔都有對應的測試檔，呼叫的是自己那一組，而且沒有多餘的檔案', () => {
@@ -66,10 +67,7 @@ describe('A1–A5 與契約檢查的分檔', () => {
         );
       }
       const actual = readdirSync(dir).filter(
-        (name) =>
-          name.startsWith(`${prefix}.`) &&
-          name.endsWith('.test.ts') &&
-          name !== 'a-checks.buckets.test.ts',
+        (name) => name.startsWith(`${prefix}.`) && name.endsWith('.test.ts'),
       );
       expect(actual.sort()).toEqual([...expected].sort());
     }
