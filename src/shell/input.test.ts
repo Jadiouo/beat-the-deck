@@ -4,6 +4,7 @@ import type { Buttons } from '../core/types';
 import {
   createKeyboardState,
   emptyButtons,
+  framePresses,
   mergeButtons,
   newPresses,
   readPad,
@@ -233,5 +234,51 @@ describe('shell/input：手把、觸控、合併', () => {
       pause: false,
     });
     expect(newPresses(leftAndConfirm, idle)).toEqual(idle);
+  });
+
+  describe('framePresses：連續兩幀各按一下，兩下都要算（e2e 第 2 條偶發失敗的根因）', () => {
+    const idle = { buttons: emptyButtons(), confirm: false, pause: false };
+
+    it('按著不放：只有第一幀算按下', () => {
+      const keys = createKeyboardState();
+      keys.keyDown('Enter');
+      const held = { buttons: keys.buttons(), confirm: keys.confirm(), pause: keys.pause() };
+      const taps = keys.takeTaps();
+      const tapSnap = { buttons: taps.buttons, confirm: taps.confirm, pause: taps.pause };
+      expect(framePresses(idle, held, tapSnap).confirm).toBe(true);
+      // 下一幀還按著、沒有新的 tap。
+      expect(framePresses(held, held, idle).confirm).toBe(false);
+    });
+
+    it('兩次很短的按放分別落在連續兩幀：第二下也算一次新的按下', () => {
+      const keys = createKeyboardState();
+      const frame = (previous: typeof idle) => {
+        const held = { buttons: keys.buttons(), confirm: keys.confirm(), pause: keys.pause() };
+        const t = keys.takeTaps();
+        const taps = { buttons: t.buttons, confirm: t.confirm, pause: t.pause };
+        return { held, presses: framePresses(previous, held, taps) };
+      };
+      keys.keyDown('Enter');
+      keys.keyUp('Enter');
+      const first = frame(idle);
+      expect(first.presses.confirm).toBe(true);
+      keys.keyDown('Enter');
+      keys.keyUp('Enter');
+      const second = frame(first.held);
+      expect(second.presses.confirm).toBe(true);
+    });
+
+    it('方向鍵也一樣', () => {
+      const keys = createKeyboardState();
+      keys.keyDown('ArrowLeft');
+      keys.keyUp('ArrowLeft');
+      const t1 = keys.takeTaps();
+      keys.keyDown('ArrowLeft');
+      keys.keyUp('ArrowLeft');
+      const t2 = keys.takeTaps();
+      const asSnap = (t: typeof t1) => ({ buttons: t.buttons, confirm: t.confirm, pause: t.pause });
+      expect(framePresses(idle, idle, asSnap(t1)).buttons.left).toBe(true);
+      expect(framePresses(idle, idle, asSnap(t2)).buttons.left).toBe(true);
+    });
   });
 });
