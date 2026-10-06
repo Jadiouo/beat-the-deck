@@ -22,6 +22,13 @@ export function copyButtons(buttons: Buttons): Buttons {
   };
 }
 
+/** `maxTicks` 必須是正整數，否則「走了 maxTicks 步」的檢查會失效（NaN、Infinity）。 */
+export function assertMaxTicks(maxTicks: number): void {
+  if (!Number.isSafeInteger(maxTicks) || maxTicks <= 0) {
+    throw new RangeError(`config.maxTicks 必須是正整數，收到 ${String(maxTicks)}`);
+  }
+}
+
 /**
  * 不開畫面跑完一場對局。
  *
@@ -36,6 +43,7 @@ export function playMatch<S>(
   c0: Controller<S>,
   c1: Controller<S>,
 ): MatchResult {
+  assertMaxTicks(config.maxTicks);
   let state = game.init(seed, config);
   const inputs: Inputs[] = [];
 

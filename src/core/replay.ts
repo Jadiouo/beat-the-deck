@@ -1,4 +1,5 @@
 import { hashState } from './hash';
+import { assertMaxTicks } from './match';
 import type { Game, GameConfig, Inputs, Side } from './types';
 
 /** 重播的結果。`finalHash` 要與原本對局的 `MatchResult.finalHash` 比對。 */
@@ -21,6 +22,12 @@ export function replay<S>(
   config: GameConfig,
   inputs: readonly Inputs[],
 ): ReplayResult {
+  assertMaxTicks(config.maxTicks);
+  if (inputs.length > config.maxTicks) {
+    throw new Error(
+      `重播的紀錄太長：遊戲 ${game.id} 的 maxTicks 是 ${config.maxTicks}，但紀錄有 ${inputs.length} 筆`,
+    );
+  }
   let state = game.init(seed, config);
 
   for (let tick = 0; tick < inputs.length; tick += 1) {
