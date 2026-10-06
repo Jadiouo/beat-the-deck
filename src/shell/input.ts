@@ -200,9 +200,37 @@ export function newPresses(previous: InputSnapshot, current: InputSnapshot): Inp
   };
 }
 
+/**
+ * 選單用的「這一幀的按下」：邊緣偵測（上一幀沒按著、這一幀按著）再加上這一幀的 tap。
+ *
+ * 為什麼要加 tap：`read()` 合併了「按著」與「tap」（兩幀之間按下又放開）。如果只拿合併後的快照做邊緣偵測，
+ * 兩下很短的按放落在連續兩幀時，第二幀的快照跟上一幀一樣都是 true，會被誤當成「一直按著」而漏掉。
+ * 負載高、幀間隔拉長時，測試或手快的玩家就會碰到（e2e 第 2 條的偶發失敗就是這個）。
+ * 任何一個 tap 本身就是一次新的按下，不受上一幀影響。
+ */
+export function framePresses(
+  previousHeld: InputSnapshot,
+  held: InputSnapshot,
+  taps: InputSnapshot,
+): InputSnapshot {
+  const edge = newPresses(previousHeld, held);
+  return {
+    buttons: mergeButtons(edge.buttons, taps.buttons),
+    confirm: edge.confirm || taps.confirm,
+    pause: edge.pause || taps.pause,
+  };
+}
+
+/** 一幀的輸入：合併後的快照（遊戲用）、只有按著的（邊緣偵測用）、只有 tap 的。 */
+export interface FrameInput {
+  readonly current: InputSnapshot;
+  readonly held: InputSnapshot;
+  readonly taps: InputSnapshot;
+}
+
 /** 瀏覽器端的輸入來源：鍵盤事件、手把輪詢、觸控按鈕。`read()` 每一幀呼叫一次。 */
 export interface BrowserInput {
-  read(): InputSnapshot;
+  read(): FrameInput;
   /** 觸控虛擬按鍵（由 touch.ts 設定）。 */
   setTouch(buttons: Buttons): void;
 }
@@ -232,16 +260,25 @@ export function attachBrowserInput(target: Window): BrowserInput {
   });
 
   return {
-    read(): InputSnapshot {
+    read(): FrameInput {
       const pads = target.navigator.getGamepads?.() ?? [];
       const pad = pads.find((candidate) => candidate !== null && candidate.connected) ?? null;
       const padSnapshot = readPad(pad);
       const taps = keyboard.takeTaps();
       const buttons = mergeButtons(keyboard.buttons(), taps.buttons, padSnapshot.buttons, touch);
+      const heldButtons = mergeButtons(keyboard.buttons(), padSnapshot.buttons, touch);
       return {
-        buttons,
-        confirm: keyboard.confirm() || taps.confirm || padSnapshot.buttons.a || touch.a,
-        pause: keyboard.pause() || taps.pause || padSnapshot.pause,
+        current: {
+          buttons,
+          confirm: keyboard.confirm() || taps.confirm || padSnapshot.buttons.a || touch.a,
+          pause: keyboard.pause() || taps.pause || padSnapshot.pause,
+        },
+        held: {
+          buttons: heldButtons,
+          confirm: keyboard.confirm() || padSnapshot.buttons.a || touch.a,
+          pause: keyboard.pause() || padSnapshot.pause,
+        },
+        taps: { buttons: taps.buttons, confirm: taps.confirm, pause: taps.pause },
       };
     },
     setTouch(buttons: Buttons): void {

@@ -13,7 +13,7 @@ import { cellAt, cellState, moveCursor } from './deck-view';
 import type { DeckView } from './deck-view';
 import { createEvolutionRun, planEvolution } from './evolve';
 import type { EvolutionPlan } from './evolve';
-import { attachBrowserInput, emptyButtons, newPresses } from './input';
+import { attachBrowserInput, emptyButtons, framePresses } from './input';
 import type { InputSnapshot } from './input';
 import type { Launch } from './launch';
 import { createLoop } from './loop';
@@ -156,6 +156,7 @@ export function startApp(options: AppOptions): void {
   window.addEventListener('resize', refit);
 
   let snapshot: InputSnapshot = { buttons: emptyButtons(), confirm: false, pause: false };
+  let heldSnapshot: InputSnapshot = snapshot;
   let scene: Scene;
 
   const loop = createLoop({
@@ -873,8 +874,9 @@ export function startApp(options: AppOptions): void {
   window.addEventListener('blur', () => scene.blur?.());
 
   const frame = (now: number): void => {
-    const current = input.read();
-    const presses = newPresses(snapshot, current);
+    const { current, held, taps } = input.read();
+    const presses = framePresses(heldSnapshot, held, taps);
+    heldSnapshot = held;
     snapshot = current;
     if (presses.confirm || presses.pause || Object.values(presses.buttons).some(Boolean)) {
       audio.unlock(); // 手把按鍵不一定算「使用者互動」事件，這裡再補一次。
