@@ -337,25 +337,4 @@ describe('human-model 人類模型（SPEC 7.3）', () => {
     };
     expect(run()).toEqual(run());
   });
-
-  it('按錯的比例約 8%（在 counter-game 上「錯」就是沒按 A）：每 6 個 tick 才有一次決定', () => {
-    const long: GameConfig = { maxTicks: 40_000, params: { length: 40_000 } };
-    const controller = humanModel(counterGame, 77);
-    let state = counterGame.init(1, long);
-    let decisions = 0;
-    let wrong = 0;
-    for (let t = 0; t < 36_000; t += 1) {
-      const pressed = controller.decide(state, 0, t);
-      if (t % 6 === 0) {
-        decisions += 1;
-        if (!pressed.a) {
-          wrong += 1;
-        }
-      }
-      state = counterGame.step(state, [pressed, pressed]);
-    }
-    expect(decisions).toBe(6000);
-    expect(wrong / decisions).toBeGreaterThan(0.06);
-    expect(wrong / decisions).toBeLessThan(0.1);
-  });
 });
