@@ -10,4 +10,6 @@ export const jkrMeta: CardMeta = {
   rank: 'R',
   defaultPolicy: null,
   baseLevel: 1,
+  /** SPEC 第 11 節：90 秒（5400 tick），比共同設定的 60 秒長。 */
+  defaultMaxTicks: 5400,
 };

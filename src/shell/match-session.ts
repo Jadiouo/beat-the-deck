@@ -1,6 +1,8 @@
+import { MATCH_CONFIG } from '../ai/evolution';
 import { hashState } from '../core/hash';
 import { copyButtons } from '../core/match';
 import type { Buttons, Controller, Game, GameConfig, Inputs } from '../core/types';
+import type { CardMeta } from '../games/types';
 import { rotateButtons } from './input';
 
 /**
@@ -34,6 +36,14 @@ export function screenController<S>(read: () => Buttons): Controller<S> {
       return rotateButtons(read(), viewRotationOf(state));
     },
   };
+}
+
+/**
+ * 一張牌在遊戲裡用的對局設定：共同設定（3600 tick）；牌的 meta 有 `defaultMaxTicks` 就用它
+ * （JK-R 是 5400，SPEC 第 11 節的 90 秒）。重播也要用同一份，不然長度對不上。
+ */
+export function matchConfigFor(meta: CardMeta): GameConfig {
+  return { ...MATCH_CONFIG, maxTicks: meta.defaultMaxTicks ?? MATCH_CONFIG.maxTicks };
 }
 
 export interface MatchSession<S> {

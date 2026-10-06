@@ -1,4 +1,3 @@
-import { MATCH_CONFIG } from '../ai/evolution';
 import { humanModel } from '../ai/human-model';
 import { effectiveLevel, levelController, policyByName } from '../ai/level';
 import { hashState } from '../core/hash';
@@ -16,7 +15,12 @@ import { attachBrowserInput, emptyButtons, newPresses } from './input';
 import type { InputSnapshot } from './input';
 import type { Launch } from './launch';
 import { createLoop } from './loop';
-import { createMatchSession, createReplaySession, screenController } from './match-session';
+import {
+  createMatchSession,
+  createReplaySession,
+  matchConfigFor,
+  screenController,
+} from './match-session';
 import { COLOR } from './palette';
 import { splitId } from './pixel';
 import {
@@ -444,7 +448,7 @@ export function startApp(options: AppOptions): void {
     const human: Controller<unknown> = autoplay
       ? humanModel(entry.game, seed)
       : screenController(() => snapshot.buttons);
-    const session = createMatchSession(entry.game, seed, MATCH_CONFIG, human, ai);
+    const session = createMatchSession(entry.game, seed, matchConfigFor(meta), human, ai);
 
     // 自動遊玩是加速跑的（測試用），不出聲。
     const sfx = (name: SoundName): void => {
@@ -679,7 +683,12 @@ export function startApp(options: AppOptions): void {
   // ---- 重播 ----
   const replayScene = (result: FinishedMatch, back: Scene): Scene => {
     const entry = result.entry;
-    const session = createReplaySession(entry.game, result.seed, MATCH_CONFIG, result.inputs);
+    const session = createReplaySession(
+      entry.game,
+      result.seed,
+      matchConfigFor(entry.meta),
+      result.inputs,
+    );
     let endedTicks = 0;
     setMirror({ screen: 'replay', card: entry.id }, []);
     return {

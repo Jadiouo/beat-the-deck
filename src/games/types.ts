@@ -37,6 +37,12 @@ export interface CardMeta {
   readonly winnerNotByScore?: boolean;
   /** 運氣成分高（紅心）：A1、A2 的門檻降低。 */
   readonly luckHeavy?: boolean;
+  /**
+   * 這張牌在遊戲裡一局跑幾個 tick；沒寫就是共同設定的 3600（SPEC 第 9 節，60 秒）。
+   * 只有外殼讀它（`matchConfigFor`）；契約測試仍用 3600 跑每一張牌，所以牌自己的 `logic.ts`
+   * 要用 `min(config.maxTicks, defaultMaxTicks)`（JK-R 的做法），兩邊都成立。
+   */
+  readonly defaultMaxTicks?: number;
   /** 這張牌真的與種子無關（不用任何隨機事件）：K13（種子有效）跳過。 */
   readonly seedIndependent?: boolean;
 }
