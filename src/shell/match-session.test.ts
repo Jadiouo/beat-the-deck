@@ -8,11 +8,15 @@ import { replay } from '../core/replay';
 import type { Buttons, Controller } from '../core/types';
 import { c2Game, makeState as makeC2State } from '../games/C-2/logic';
 import { cAGame } from '../games/C-A/logic';
+import { cAMeta } from '../games/C-A/meta';
+import { jkrGame } from '../games/JK-R/logic';
+import { jkrMeta } from '../games/JK-R/meta';
 import { counterGame } from '../../tests/fixtures/counter-game';
 import { emptyButtons } from './input';
 import {
   createMatchSession,
   createReplaySession,
+  matchConfigFor,
   screenController,
   viewRotationOf,
 } from './match-session';
@@ -130,5 +134,39 @@ describe('shell/match-session：C-2 的輸入轉換（外殼把畫面方向轉�
     const next = c2Game.step(state, [world, emptyButtons()]);
     const direct = c2Game.step(state, [press('up'), emptyButtons()]);
     expect(next.snakes[0]).toEqual(direct.snakes[0]);
+  });
+});
+
+describe('shell/match-session：每張牌的對局長度（JK-R 要 90 秒，SPEC 第 11 節）', () => {
+  it('JK-R 的 meta.defaultMaxTicks 是 5400（90 秒 × 60 tick）', () => {
+    expect(jkrMeta.defaultMaxTicks).toBe(5400);
+  });
+
+  it('外殼算出來的設定：JK-R 是 5400，沒有指定的牌（C-A）是共同設定的 3600', () => {
+    expect(matchConfigFor(jkrMeta).maxTicks).toBe(5400);
+    expect(cAMeta.defaultMaxTicks).toBeUndefined();
+    expect(matchConfigFor(cAMeta).maxTicks).toBe(3600);
+    expect(matchConfigFor(cAMeta)).toEqual(MATCH_CONFIG);
+  });
+
+  it('JK-R 照外殼的設定真的跑滿 5400 個 tick（不是 3600）才結束', () => {
+    const session = createMatchSession(jkrGame, 1, matchConfigFor(jkrMeta), IDLE, IDLE);
+    for (let i = 0; i < 3600; i += 1) {
+      session.advance();
+    }
+    expect(session.isOver()).toBe(false);
+    while (!session.isOver()) {
+      session.advance();
+    }
+    expect(session.tick()).toBe(5400);
+    expect(session.inputs()).toHaveLength(5400);
+  });
+
+  it('契約測試用的 3600 設定跑 JK-R 仍然在 3600 結束（logic 取 min）', () => {
+    const session = createMatchSession(jkrGame, 1, MATCH_CONFIG, IDLE, IDLE);
+    while (!session.isOver()) {
+      session.advance();
+    }
+    expect(session.tick()).toBe(3600);
   });
 });
