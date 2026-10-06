@@ -573,6 +573,17 @@ describe('H-A 貪心骰｜actions 與 evaluate', () => {
     expect(decide(chase, 1).a).toBe(true);
   });
 
+  it('搜尋型（人類模型的底層）比賭徒型保守：累積到 9 左右就存分；賭徒型還是 20（A4 在保留種子區塊上要有餘裕）', () => {
+    const decide = (policy: typeof pathfinder, s: HAState): Buttons =>
+      policy.decide(hAGame, s, 0, 0, { depth: 1, seed: 0 });
+    expect(decide(pathfinder, makeState({ acc: 0 })).a).toBe(true);
+    expect(decide(pathfinder, makeState({ acc: 6 })).a).toBe(true);
+    expect(decide(pathfinder, makeState({ acc: 14 })).b).toBe(true);
+    expect(decide(pathfinder, makeState({ acc: 20 })).b).toBe(true);
+    expect(decide(gambler, makeState({ acc: 14 })).a).toBe(true);
+    expect(decide(gambler, makeState({ acc: 22 })).b).toBe(true);
+  });
+
   it('a 還按著、而且想繼續擲的時候，一步看的性格會先選「放開」（精準型、搜尋型也一樣，不會因為怕危險一直不動）', () => {
     const held = makeState({
       acc: 6,

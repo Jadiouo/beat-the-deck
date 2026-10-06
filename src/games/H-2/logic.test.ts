@@ -434,7 +434,7 @@ describe('H-2 引信｜actions 與 evaluate', () => {
     }
   });
 
-  it('賭徒型與精準型的停止點不同：精準型約在 110 放開，賭徒型撐到 285 左右', () => {
+  it('賭徒型與精準型的停止點不同：精準型約在 110 放開，賭徒型撐到 240 左右（gain 的視野 120：停在 300 − 120/2）', () => {
     const decide = (policy: typeof gambler, acc: number): Buttons =>
       policy.decide(h2Game, makeState({ players: [holding(acc), waiting] }), 0, 0, {
         depth: 1,
@@ -446,10 +446,10 @@ describe('H-2 引信｜actions 與 evaluate', () => {
     for (const acc of [130, 200, 280]) {
       expect(decide(precise, acc).a).toBe(false);
     }
-    for (const acc of [20, 100, 200, 270]) {
+    for (const acc of [20, 100, 200, 230]) {
       expect(decide(gambler, acc).a).toBe(true);
     }
-    for (const acc of [300, 400]) {
+    for (const acc of [255, 300, 400]) {
       expect(decide(gambler, acc).a).toBe(false);
     }
   });
