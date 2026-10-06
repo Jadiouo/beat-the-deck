@@ -1,23 +1,19 @@
-import { c2Game } from './C-2/logic';
-import type { C2State } from './C-2/logic';
-import { c2Meta } from './C-2/meta';
-import { c2Render } from './C-2/render';
-import { c3Game } from './C-3/logic';
-import type { C3State } from './C-3/logic';
-import { c3Meta } from './C-3/meta';
-import { c3Render } from './C-3/render';
-import { cAGame } from './C-A/logic';
-import type { ClubsState } from './C-A/logic';
-import { cAMeta } from './C-A/meta';
-import { cARender } from './C-A/render';
+import { clubsEntries } from './registry/clubs';
+import { diamondsEntries } from './registry/diamonds';
+import { heartsEntries } from './registry/hearts';
+import { jokersEntries } from './registry/jokers';
+import { spadesEntries } from './registry/spades';
 import type { RegistryEntry } from './types';
-import { defineEntry } from './types';
 
 /**
  * 54 張牌的登記表（SPEC 第 4 節）。
  *
- * 新增一張牌：在 `registry` 加一筆 `defineEntry({ ... })`，不用改契約測試
- * （`tests/contract/all-games.test.ts` 用 `describe.each([...registry, 替身牌])`）。
+ * 新增一張牌：只改那個花色的檔案，不用改這個檔案，也不用改任何測試檔。
+ *   梅花 `registry/clubs.ts`、黑桃 `registry/spades.ts`、方塊 `registry/diamonds.ts`、
+ *   紅心 `registry/hearts.ts`、鬼牌 `registry/jokers.ts`。
+ * 在該檔的陣列裡加一筆 `defineEntry({ ... })` 與它的 import 即可；每個花色檔只能放自己花色的牌
+ * （`registry.test.ts` 會檢查）。這樣好幾個 session 可以同時做不同花色而不會編輯到同一個檔案。
+ * 契約測試（`tests/contract/all-games.test.ts`）用 `describe.each([...registry, 替身牌])`，不用改。
  */
 
 const SUIT_LETTERS = ['C', 'S', 'D', 'H'] as const;
@@ -40,27 +36,11 @@ export const CARD_IDS: readonly string[] = [
  * 所以正式建置不會打包 `tests/` 底下的任何東西。
  */
 export const registry: readonly RegistryEntry[] = [
-  defineEntry<ClubsState>({
-    id: cAMeta.id,
-    kind: 'card',
-    game: cAGame,
-    render: cARender,
-    meta: cAMeta,
-  }),
-  defineEntry<C2State>({
-    id: c2Meta.id,
-    kind: 'card',
-    game: c2Game,
-    render: c2Render,
-    meta: c2Meta,
-  }),
-  defineEntry<C3State>({
-    id: c3Meta.id,
-    kind: 'card',
-    game: c3Game,
-    render: c3Render,
-    meta: c3Meta,
-  }),
+  ...clubsEntries,
+  ...spadesEntries,
+  ...diamondsEntries,
+  ...heartsEntries,
+  ...jokersEntries,
 ];
 
 /** 用 id 找登記項。 */
