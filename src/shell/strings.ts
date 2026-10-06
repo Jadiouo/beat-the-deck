@@ -65,9 +65,14 @@ export const strings = {
     seed: (seed: number): string => `種子 ${seed}`,
     newBest: '新的最佳分數',
     revealed: '這張牌翻開了',
+    /** 鬼牌沒有勝負（JK-R 玩完就算翻開）。 */
+    jokerDone: '畫完了',
     menuReplay: '看重播',
+    menuSave: '存成圖片',
     menuAgain: '再一次',
     menuBack: '回牌桌',
+    saved: (fileName: string): string => `已存成 ${fileName}`,
+    saveFailed: '存圖失敗',
     hint: '上下：選擇\u3000Z／Enter：確認',
   },
 

@@ -3,6 +3,7 @@ import { effectiveLevel, levelController, policyByName } from '../ai/level';
 import { hashState } from '../core/hash';
 import type { Controller, Inputs } from '../core/types';
 import { CARD_IDS, findEntry } from '../games/registry';
+import type { JkrState } from '../games/JK-R/logic';
 import type { RegistryEntry } from '../games/types';
 import { createBrowserAudio } from './audio';
 import type { SoundName } from './audio';
@@ -34,7 +35,6 @@ import {
 } from './progress';
 import type { Outcome, Progress, StorageLike } from './progress';
 import {
-  RESULT_MENU_Y,
   TITLE_MENU_Y,
   drawBanner,
   drawEvolution,
@@ -43,10 +43,12 @@ import {
   drawScanlines,
   drawTable,
   drawTitle,
+  resultMenuHit,
 } from './screens';
 import { strings } from './strings';
 import { pickTaunt, situationOf } from './taunts';
 import type { TauntPersonality } from './taunts';
+import { createBrowserPngDeps, jkrPngExport, savePng } from './save-image';
 import { prepareContext } from './text';
 import { TOUCH_AREA_HEIGHT, createTouchControls } from './touch';
 
@@ -433,6 +435,11 @@ export function startApp(options: AppOptions): void {
     readonly outcome: Outcome;
     readonly taunt: string;
     readonly notes: readonly string[];
+    /** 結束時的 state（JK-R 存成圖片用）。 */
+    readonly finalState: unknown;
+    /** 存成圖片的結果：成功是檔名；失敗記下來給畫面顯示。 */
+    savedAs: string | null;
+    saveFailed: boolean;
     evolution: EvolutionPlan | null;
   }
 
@@ -504,6 +511,9 @@ export function startApp(options: AppOptions): void {
         outcome,
         taunt: pickTaunt(personalityOf(entry), situation, seed),
         notes,
+        finalState: state,
+        savedAs: null,
+        saveFailed: false,
         evolution:
           levelAfter > levelBefore
             ? {
@@ -600,84 +610,124 @@ export function startApp(options: AppOptions): void {
     setScene(evolutionScene(plan, destination));
   };
 
-  const resultScene = (result: FinishedMatch): Scene => {
-    let cursor = 0;
-    const meta = result.entry.meta;
-    const headline =
-      result.outcome === 'win'
+  const resultHeadline = (result: FinishedMatch): string =>
+    result.entry.id.startsWith('JK')
+      ? strings.result.jokerDone
+      : result.outcome === 'win'
         ? strings.result.youWin
         : result.outcome === 'loss'
           ? strings.result.aiWins
           : strings.result.draw;
-    const headlineColor =
-      result.outcome === 'win'
+
+  const pngDeps = createBrowserPngDeps();
+
+  const resultScene = (result: FinishedMatch): Scene => {
+    let cursor = 0;
+    const isJoker = result.entry.id.startsWith('JK');
+    const headline = resultHeadline(result);
+    const headlineColor = isJoker
+      ? COLOR.accent
+      : result.outcome === 'win'
         ? COLOR.clubs
         : result.outcome === 'loss'
           ? COLOR.hearts
           : COLOR.light;
     const personalityName = strings.personality[personalityOf(result.entry)].name;
+    // JK-R 沒有勝負，結算頁多一項「存成圖片」（SPEC 第 11 節）。
+    const canSave = result.entry.id === 'JK-R';
+    const menu = canSave
+      ? [
+          strings.result.menuReplay,
+          strings.result.menuSave,
+          strings.result.menuAgain,
+          strings.result.menuBack,
+        ]
+      : [strings.result.menuReplay, strings.result.menuAgain, strings.result.menuBack];
+    const actionOf = (index: number): 'replay' | 'save' | 'again' | 'back' =>
+      (canSave
+        ? (['replay', 'save', 'again', 'back'] as const)
+        : (['replay', 'again', 'back'] as const))[index] ?? 'back';
 
-    setMirror(
-      {
-        screen: 'result',
-        card: result.entry.id,
-        outcome: result.outcome,
-        seed: String(result.seed),
-      },
-      [
-        element('h2', headline, 'result-headline'),
-        element('p', String(result.scores[0]), 'result-score-0'),
-        element('p', String(result.scores[1]), 'result-score-1'),
-        element('p', result.taunt, 'result-taunt'),
-        element('p', meta.name),
-      ],
-    );
+    syncResultMirror(result);
+
+    const saveImage = (): void => {
+      savePng(jkrPngExport(result.finalState as JkrState), pngDeps).then(
+        (name) => {
+          result.savedAs = name;
+          result.saveFailed = false;
+          if (scene === self) {
+            syncResultMirror(result);
+          }
+        },
+        () => {
+          result.savedAs = null;
+          result.saveFailed = true;
+          if (scene === self) {
+            syncResultMirror(result);
+          }
+        },
+      );
+    };
 
     const activate = (): void => {
       audio.play('menuConfirm');
-      if (cursor === 0) {
-        setScene(replayScene(result, resultScene(result)));
-      } else if (cursor === 1) {
-        leaveResult(result, () => startMatch(result.entry, newSeed(), false));
-      } else {
-        leaveResult(result, () => setScene(tableScene(CARD_IDS.indexOf(result.entry.id))));
+      switch (actionOf(cursor)) {
+        case 'replay':
+          setScene(replayScene(result, resultScene(result)));
+          break;
+        case 'save':
+          saveImage();
+          break;
+        case 'again':
+          leaveResult(result, () => startMatch(result.entry, newSeed(), false));
+          break;
+        case 'back':
+          leaveResult(result, () => setScene(tableScene(CARD_IDS.indexOf(result.entry.id))));
+          break;
       }
     };
 
-    return {
+    const self: Scene = {
       draw: (c) =>
         drawResult(c, {
           headline,
           headlineColor,
           scores: result.scores,
+          showScores: !isJoker,
           seed: result.seed,
           taunt: result.taunt,
           personality: personalityName,
-          notes: result.notes,
+          notes: [
+            ...result.notes,
+            ...(result.savedAs !== null ? [strings.result.saved(result.savedAs)] : []),
+            ...(result.saveFailed ? [strings.result.saveFailed] : []),
+          ],
+          menu,
           cursor,
         }),
       press(p) {
         if (p.buttons.up) {
-          cursor = (cursor + 2) % 3;
+          cursor = (cursor + menu.length - 1) % menu.length;
           audio.play('menuMove');
         } else if (p.buttons.down) {
-          cursor = (cursor + 1) % 3;
+          cursor = (cursor + 1) % menu.length;
           audio.play('menuMove');
         } else if (p.confirm) {
           activate();
         } else if (p.buttons.b) {
-          cursor = 2;
+          cursor = menu.length - 1;
           activate();
         }
       },
       click(_x, y) {
-        const hit = RESULT_MENU_Y.findIndex((top) => y >= top - 4 && y < top + 16);
+        const hit = resultMenuHit(menu.length, y);
         if (hit >= 0) {
           cursor = hit;
           activate();
         }
       },
     };
+    return self;
   };
 
   // ---- 重播 ----
@@ -734,8 +784,21 @@ export function startApp(options: AppOptions): void {
     };
   };
 
-  /** 從重播回到結算頁時，鏡像要換回結算頁。 */
+  /** 結算頁的鏡像（剛進來、從重播回來、存圖有結果時都用它重建）。 */
   const syncResultMirror = (result: FinishedMatch): void => {
+    const children = [
+      element('h2', resultHeadline(result), 'result-headline'),
+      element('p', String(result.scores[0]), 'result-score-0'),
+      element('p', String(result.scores[1]), 'result-score-1'),
+      element('p', result.taunt, 'result-taunt'),
+      element('p', result.entry.meta.name),
+    ];
+    if (result.savedAs !== null) {
+      children.push(element('p', result.savedAs, 'result-saved'));
+    }
+    if (result.saveFailed) {
+      children.push(element('p', strings.result.saveFailed, 'result-save-failed'));
+    }
     setMirror(
       {
         screen: 'result',
@@ -743,12 +806,7 @@ export function startApp(options: AppOptions): void {
         outcome: result.outcome,
         seed: String(result.seed),
       },
-      [
-        element('h2', undefined, 'result-headline'),
-        element('p', String(result.scores[0]), 'result-score-0'),
-        element('p', String(result.scores[1]), 'result-score-1'),
-        element('p', result.taunt, 'result-taunt'),
-      ],
+      children,
     );
   };
 

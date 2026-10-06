@@ -125,14 +125,33 @@ export interface ResultData {
   readonly headline: string;
   readonly headlineColor: string;
   readonly scores: readonly [number, number];
+  /** 沒有勝負的牌（鬼牌）不顯示雙方分數。 */
+  readonly showScores: boolean;
   readonly seed: number;
   readonly taunt: string;
   readonly personality: string;
   readonly notes: readonly string[];
+  /** 選單的文字，3 項或 4 項（JK-R 多一個「存成圖片」）。 */
+  readonly menu: readonly string[];
   readonly cursor: number;
 }
 
-export const RESULT_MENU_Y = [174, 190, 206] as const;
+const RESULT_MENU_TOPS: Readonly<Record<number, readonly number[]>> = {
+  3: [174, 190, 206],
+  4: [170, 184, 198, 212],
+};
+
+/** 結算頁選單每一項的上緣 y。項數只支援 3 或 4。 */
+export function resultMenuTops(count: number): readonly number[] {
+  return RESULT_MENU_TOPS[count] ?? (RESULT_MENU_TOPS[3] as readonly number[]);
+}
+
+/** 點擊的 y（邏輯座標）落在哪一項；都不是回傳 -1。每一項的範圍從上緣上方 3 像素起、高度等於項距。 */
+export function resultMenuHit(count: number, y: number): number {
+  const tops = resultMenuTops(count);
+  const spacing = (tops[1] as number) - (tops[0] as number);
+  return tops.findIndex((top) => y >= top - 3 && y < top - 3 + spacing);
+}
 
 export function drawResult(ctx: CanvasRenderingContext2D, data: ResultData): void {
   clear(ctx);
@@ -143,19 +162,25 @@ export function drawResult(ctx: CanvasRenderingContext2D, data: ResultData): voi
     align: 'center',
   });
 
-  drawText(ctx, strings.result.scoreYou, 80, 44, { size: 12, color: COLOR.light, align: 'center' });
-  drawText(ctx, String(data.scores[0]), 80, 58, { size: 26, bold: true, align: 'center' });
-  drawText(ctx, strings.result.scoreAi, 240, 44, {
-    size: 12,
-    color: COLOR.accent,
-    align: 'center',
-  });
-  drawText(ctx, String(data.scores[1]), 240, 58, {
-    size: 26,
-    bold: true,
-    color: COLOR.accent,
-    align: 'center',
-  });
+  if (data.showScores) {
+    drawText(ctx, strings.result.scoreYou, 80, 44, {
+      size: 12,
+      color: COLOR.light,
+      align: 'center',
+    });
+    drawText(ctx, String(data.scores[0]), 80, 58, { size: 26, bold: true, align: 'center' });
+    drawText(ctx, strings.result.scoreAi, 240, 44, {
+      size: 12,
+      color: COLOR.accent,
+      align: 'center',
+    });
+    drawText(ctx, String(data.scores[1]), 240, 58, {
+      size: 26,
+      bold: true,
+      color: COLOR.accent,
+      align: 'center',
+    });
+  }
   drawText(ctx, strings.result.seed(data.seed), CENTER, 92, {
     size: 10,
     color: COLOR.mid,
@@ -181,9 +206,9 @@ export function drawResult(ctx: CanvasRenderingContext2D, data: ResultData): voi
   ctx.fillStyle = COLOR.accent;
   ctx.fillRect(12, 168, 296, 1);
 
-  const labels = [strings.result.menuReplay, strings.result.menuAgain, strings.result.menuBack];
-  labels.forEach((label, index) => {
-    const y = RESULT_MENU_Y[index] ?? 174;
+  const tops = resultMenuTops(data.menu.length);
+  data.menu.forEach((label, index) => {
+    const y = tops[index] ?? 174;
     const active = index === data.cursor;
     drawText(ctx, label, CENTER, y, {
       size: 13,
@@ -194,7 +219,11 @@ export function drawResult(ctx: CanvasRenderingContext2D, data: ResultData): voi
       drawMarker(ctx, 112, y + 3);
     }
   });
-  drawText(ctx, strings.result.hint, CENTER, 226, { size: 10, color: COLOR.mid, align: 'center' });
+  drawText(ctx, strings.result.hint, CENTER, data.menu.length > 3 ? 228 : 226, {
+    size: 10,
+    color: COLOR.mid,
+    align: 'center',
+  });
 }
 
 export interface EvolutionData {
