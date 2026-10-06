@@ -49,10 +49,20 @@ describe('故意違約的假遊戲會被契約檢查抓到', () => {
     }
   });
 
-  it('K1–K12、R1–R3 每一條都至少有一個假遊戲專門抓它', () => {
-    const covered = new Set(BAD_GAMES.map((bad) => bad.primary));
+  it('K1–K12、R1–R3 每一條都至少被一個假遊戲抓到', () => {
+    const caught = new Set(BAD_GAMES.flatMap((bad) => [bad.primary, ...bad.collateral]));
     const missing = CHECKS.map((check) => check.code).filter(
-      (code) => code !== 'META' && !covered.has(code),
+      (code) => code !== 'META' && !caught.has(code),
+    );
+    expect(missing).toEqual([]);
+  });
+
+  it('除了 K10 之外，每一條都有一個專門抓它的假遊戲', () => {
+    // K10（重播）是「決定性」的下游：能讓重播對不上、卻不讓 K1 先失敗的違規只有「step 改動輸入」，
+    // 那個假遊戲的主要違規是 K4。所以 K10 靠連帶失敗被驗證（見 mutating-inputs、impure、nan 等）。
+    const primaries = new Set(BAD_GAMES.map((bad) => bad.primary));
+    const missing = CHECKS.map((check) => check.code).filter(
+      (code) => code !== 'META' && code !== 'K10' && !primaries.has(code),
     );
     expect(missing).toEqual([]);
   });

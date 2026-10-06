@@ -175,7 +175,8 @@ export function checkDeterminism<S>(game: Game<S>, seed: number, config: GameCon
     config,
     (state, tick) => {
       const inputs = pick(state, tick);
-      recorded.push(inputs);
+      // 存一份副本：就算 step 事後改動它拿到的輸入，「同一串輸入」也不會跟著變。
+      recorded.push([copyButtons(inputs[0]), copyButtons(inputs[1])]);
       return inputs;
     },
     (state, tick) => {
@@ -303,7 +304,7 @@ export function checkNoBadNumbers<S>(game: Game<S>, seed: number, config: GameCo
   scan(result.state, result.ticks);
 }
 
-/** K4 step 是純的：先深度凍結 state，step 不可以丟錯，呼叫前後原 state 的雜湊相同。 */
+/** K4 step 是純的：先深度凍結 state（與這個 tick 的輸入），step 不可以丟錯，呼叫前後原 state 的雜湊相同。 */
 export function checkStepPure<S>(game: Game<S>, seed: number, config: GameConfig): void {
   let stepCount = 0;
   const guarded: Game<S> = {
@@ -311,7 +312,9 @@ export function checkStepPure<S>(game: Game<S>, seed: number, config: GameConfig
     step(state: S, inputs: Inputs): S {
       const tick = stepCount;
       stepCount += 1;
+      // 輸入也一併凍結：step 不可以改動 state，也不可以改動拿到的輸入。
       deepFreeze(state);
+      deepFreeze(inputs);
       const before = softHash(state);
       let next: S;
       try {
@@ -796,7 +799,7 @@ export const CHECKS: readonly CheckDef[] = [
     code: 'K12',
     title: '對稱',
     applies: (entry) => entry.meta.symmetric === true,
-    run(entry, seeds) {
+    run(entry: RegistryEntry, seeds: readonly number[]): void {
       // K12 的種子數是檢查的一部分（200 個），不理會呼叫者給的清單長度。
       void seeds;
       try {
@@ -831,7 +834,7 @@ export const CHECKS: readonly CheckDef[] = [
     code: 'META',
     title: 'meta 與文件',
     applies: () => true,
-    run(entry) {
+    run(entry: RegistryEntry): void {
       checkMeta(entry);
     },
   },

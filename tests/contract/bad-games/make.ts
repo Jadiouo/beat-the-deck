@@ -42,6 +42,7 @@ export function makeBadEntry(
     kind: 'fixture',
     game,
     render: options.render ?? counterRender,
-    meta: { ...counterMeta, ...options.meta },
+    // 預設不宣稱對稱：K12 只在 `asymmetric` 這個假遊戲裡出現，免得它被別人的問題牽連。
+    meta: { ...counterMeta, symmetric: false, ...options.meta },
   });
 }

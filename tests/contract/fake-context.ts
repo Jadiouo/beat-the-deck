@@ -395,9 +395,13 @@ export class FakeContext implements Partial<Omit<CanvasRenderingContext2D, 'canv
     }
   }
 
-  createImageData(sw: number, sh: number): ImageData {
+  createImageData(sw: number, sh: number, settings?: ImageDataSettings): ImageData;
+  createImageData(imageData: ImageData): ImageData;
+  createImageData(a: number | ImageData, b = 0): ImageData {
     this.calls.push('createImageData');
-    return { data: new Uint8ClampedArray(sw * sh * 4), width: sw, height: sh, colorSpace: 'srgb' };
+    const width = typeof a === 'number' ? a : a.width;
+    const height = typeof a === 'number' ? b : a.height;
+    return { data: new Uint8ClampedArray(width * height * 4), width, height, colorSpace: 'srgb' };
   }
 
   getImageData(sx: number, sy: number, sw: number, sh: number): ImageData {

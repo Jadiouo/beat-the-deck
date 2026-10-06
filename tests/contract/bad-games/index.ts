@@ -7,6 +7,7 @@ import { functionInState } from './function-in-state';
 import { impure } from './impure';
 import type { BadGame } from './make';
 import { mutating } from './mutating';
+import { mutatingInputs } from './mutating-inputs';
 import { nan } from './nan';
 import { renderBounds } from './render-bounds';
 import { renderColor } from './render-color';
@@ -20,6 +21,7 @@ import { wrongWinner } from './wrong-winner';
 export const BAD_GAMES: readonly BadGame[] = [
   impure,
   mutating,
+  mutatingInputs,
   endless,
   nan,
   functionInState,

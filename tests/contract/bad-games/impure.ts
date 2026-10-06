@@ -18,5 +18,6 @@ export const impure: BadGame = {
     },
   }),
   primary: 'K1',
-  collateral: [],
+  // 不決定性本來就會讓「JSON 復原後繼續走」（K2）與重播（K10）也對不上。
+  collateral: ['K2', 'K10'],
 };

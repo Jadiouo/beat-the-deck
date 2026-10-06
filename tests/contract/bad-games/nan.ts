@@ -15,7 +15,8 @@ export const nan: BadGame = {
     },
   }),
   primary: 'K3',
+  // K2：NaN 經過 JSON 來回會變成 null，本來就是 K2 要抓的「不是純資料」。
   // core 的 playMatch／replay 會對最終 state 算 hashState，而 hashState 遇到 NaN 就丟錯，
   // 所以用到 playMatch 的 K10、K11 必然跟著失敗。
-  collateral: ['K10', 'K11'],
+  collateral: ['K2', 'K10', 'K11'],
 };
