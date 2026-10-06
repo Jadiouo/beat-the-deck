@@ -1,3 +1,7 @@
+import { c10Game } from '../C-10/logic';
+import type { C10State } from '../C-10/logic';
+import { c10Meta } from '../C-10/meta';
+import { c10Render } from '../C-10/render';
 import { c2Game } from '../C-2/logic';
 import type { C2State } from '../C-2/logic';
 import { c2Meta } from '../C-2/meta';
@@ -35,5 +39,12 @@ export const clubsEntries: readonly RegistryEntry[] = [
     game: c3Game,
     render: c3Render,
     meta: c3Meta,
+  }),
+  defineEntry<C10State>({
+    id: c10Meta.id,
+    kind: 'card',
+    game: c10Game,
+    render: c10Render,
+    meta: c10Meta,
   }),
 ];

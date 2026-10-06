@@ -46,7 +46,6 @@ const NONE: Buttons = { up: false, down: false, left: false, right: false, a: fa
 const PRESS_UP: Buttons = { ...NONE, up: true };
 const PRESS_DOWN: Buttons = { ...NONE, down: true };
 const PRESS_LEFT: Buttons = { ...NONE, left: true };
-const PRESS_RIGHT: Buttons = { ...NONE, right: true };
 const IDLE: Inputs = [NONE, NONE];
 
 /** 讓「下一次 step」剛好是走格的那一次（`roundTick` 加 1 之後是 6 的倍數）。 */
@@ -336,7 +335,10 @@ describe('C-10 追與逃｜兩局與計分', () => {
         round: 1,
         roundTick: 503,
         runnerTicks: [300, -1],
-        snakes: [{ body: body([9, 11]), dir: DOWN, score: 300 }, { score: ROUND_TICKS - 300 }],
+        snakes: [
+          { body: body([9, 11]), dir: DOWN, score: 300 },
+          { body: body([10, 12], [9, 12], [8, 12], [7, 12]), dir: RIGHT, score: ROUND_TICKS - 300 },
+        ],
       }),
       IDLE,
     );
