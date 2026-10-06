@@ -49,9 +49,7 @@ describe('core/hash（補充：TEST_PLAN 沒列）', () => {
   });
 
   it('型別不同的值不會撞：1 與 "1"、null 與 0、陣列與物件', () => {
-    const hashes = [1, '1', null, 0, [], {}, true, false, [1], { 0: 1 }].map((v) =>
-      hashState(v),
-    );
+    const hashes = [1, '1', null, 0, [], {}, true, false, [1], { 0: 1 }].map((v) => hashState(v));
     expect(new Set(hashes).size).toBe(hashes.length);
   });
 
