@@ -382,6 +382,8 @@ export const WIN_BONUS = 1_000_000;
  * 距離場的快取：同一張牆（陣列物件）、同一個出發格，結果永遠一樣，搜尋型一次決定會問上百次。
  * 以牆陣列為鑰匙（WeakMap），牆不再被用到時整份一起被回收；回傳的陣列是共用的，呼叫端只能讀。
  */
+/** 廣度優先搜尋用的佇列：同步用完就丟，每次搜尋前都從頭寫，所以共用一份不會互相影響（少產生垃圾）。 */
+const BFS_QUEUE = new Int32Array(CELLS);
 const DISTANCE_CACHE = new WeakMap<readonly number[], Map<number, Int32Array>>();
 
 /** 從 `from` 出發，繞過牆走到每一格的最短步數（廣度優先）；到不了的是 `UNREACHABLE`。只讀，不要改它。 */
@@ -396,7 +398,7 @@ export function bfsDistances(walls: readonly number[], from: number): Int32Array
     return cached;
   }
   const dist = new Int32Array(CELLS).fill(UNREACHABLE);
-  const queue = new Int32Array(CELLS);
+  const queue = BFS_QUEUE;
   let head = 0;
   let tail = 0;
   dist[from] = 0;
