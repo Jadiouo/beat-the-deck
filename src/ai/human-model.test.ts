@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
 import type { Buttons, Game, GameConfig, Inputs, Side } from '../core/types';
+import { counterGame } from '../../tests/fixtures/counter-game';
+import { winRate } from './evolution';
 import { HUMAN_PARAMS, humanModel } from './human-model';
+import { pathfinder } from './policies/pathfinder';
 
 /**
  * 人類模型「8% 按錯」的量法（SPEC 7.3、TEST_PLAN 3.7）。
@@ -121,5 +124,17 @@ describe('human-model 按錯（SPEC 7.3 的 8%）', () => {
     const game = pickGame(64);
     expect(decisions(game, 31)).toEqual(decisions(game, 31));
     expect(decisions(game, 31)).not.toEqual(decisions(game, 32));
+  });
+
+  it('A3、A4 走的路徑（winRate 收 LevelParams）用的是同一種按錯：二選一時有效錯誤率約 4%', () => {
+    // counter-game 只有「放開／按 A」兩個動作。對手參數相同但不按錯，所以人類最多打成平手
+    // （平手算 0.5）；整場 100 tick 有 17 次決定，一次都沒按錯的機率是 (1 − 有效錯誤率)^17：
+    // 有效錯誤率 4% 時約 50%、勝率約 0.25；8%（必定避開）時約 24%、勝率約 0.12。
+    const seeds = Array.from({ length: 600 }, (_v, i) => i);
+    const config: GameConfig = { maxTicks: 100, params: {} };
+    const perfect = { ...HUMAN_PARAMS, epsilon: 0 };
+    const rate = winRate(counterGame, pathfinder, HUMAN_PARAMS, pathfinder, perfect, seeds, config);
+    expect(rate).toBeGreaterThan(0.19);
+    expect(rate).toBeLessThan(0.31);
   });
 });
