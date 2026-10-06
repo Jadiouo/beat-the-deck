@@ -1,14 +1,15 @@
-import { counterGame } from '../../tests/fixtures/counter-game';
-import type { CounterState } from '../../tests/fixtures/counter-game';
-import { COLOR } from '../shell/palette';
-import type { CardMeta, RegistryEntry } from './types';
+import { cAGame } from './C-A/logic';
+import type { ClubsState } from './C-A/logic';
+import { cAMeta } from './C-A/meta';
+import { cARender } from './C-A/render';
+import type { RegistryEntry } from './types';
 import { defineEntry } from './types';
 
 /**
  * 54 張牌的登記表（SPEC 第 4 節）。
  *
- * 新增一張牌：在 `registry` 加一行 `defineEntry({ ... })`，不用改契約測試
- * （`tests/contract/all-games.test.ts` 用 `describe.each(registry)`）。
+ * 新增一張牌：在 `registry` 加一筆 `defineEntry({ ... })`，不用改契約測試
+ * （`tests/contract/all-games.test.ts` 用 `describe.each([...registry, 替身牌])`）。
  */
 
 const SUIT_LETTERS = ['C', 'S', 'D', 'H'] as const;
@@ -25,53 +26,20 @@ export const CARD_IDS: readonly string[] = [
   'JK-B',
 ];
 
-// ---------------------------------------------------------------------------
-// counter：counter-game 的替身牌（kind: 'fixture'），不是真的撲克牌。
-// 契約測試與（T4 之後的）外殼用它驗證「從選牌到結算」整條路通。
-// ---------------------------------------------------------------------------
-
-export const counterMeta: CardMeta = {
-  id: 'counter',
-  name: '計數替身',
-  description: '測試用的替身牌：按住 A 每個 tick 加 1 分，一百個 tick 後分數高的贏。',
-  controls: '按住 A（空白鍵）得分。',
-  suit: null,
-  rank: null,
-  defaultPolicy: null,
-  baseLevel: 1,
-  symmetric: true,
-};
-
-/** 左右兩條分數條，長度與分數成正比。 */
-export function counterRender(ctx: CanvasRenderingContext2D, state: CounterState): void {
-  const barMax = 140;
-  const total = Math.max(1, state.length);
-  ctx.fillStyle = COLOR.bg;
-  ctx.fillRect(0, 0, 320, 240);
-  ctx.fillStyle = COLOR.dark;
-  ctx.fillRect(10, 100, barMax, 20);
-  ctx.fillRect(170, 100, barMax, 20);
-  ctx.fillStyle = COLOR.clubs;
-  ctx.fillRect(10, 100, Math.min(barMax, (state.scores[0] / total) * barMax), 20);
-  ctx.fillStyle = COLOR.hearts;
-  ctx.fillRect(170, 100, Math.min(barMax, (state.scores[1] / total) * barMax), 20);
-  ctx.fillStyle = COLOR.fg;
-  ctx.fillText(`${state.scores[0]}`, 10, 90);
-  ctx.fillText(`${state.scores[1]}`, 170, 90);
-}
-
-export const counterEntry: RegistryEntry = defineEntry<CounterState>({
-  id: counterMeta.id,
-  kind: 'fixture',
-  game: counterGame,
-  render: counterRender,
-  meta: counterMeta,
-});
-
-// ---------------------------------------------------------------------------
-
-/** 登記表。目前只有替身牌。 */
-export const registry: readonly RegistryEntry[] = [counterEntry];
+/**
+ * 登記表：只放真的牌。測試用的替身牌（counter-game）不在這裡，
+ * 它的登記項在 `tests/fixtures/counter-entry.ts`，契約測試自己把它加進來跑，
+ * 所以正式建置不會打包 `tests/` 底下的任何東西。
+ */
+export const registry: readonly RegistryEntry[] = [
+  defineEntry<ClubsState>({
+    id: cAMeta.id,
+    kind: 'card',
+    game: cAGame,
+    render: cARender,
+    meta: cAMeta,
+  }),
+];
 
 /** 用 id 找登記項。 */
 export function findEntry(id: string): RegistryEntry | undefined {

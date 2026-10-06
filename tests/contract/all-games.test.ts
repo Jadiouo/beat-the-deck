@@ -2,13 +2,15 @@ import { describe, expect, it } from 'vitest';
 
 import { CARD_IDS, registry } from '../../src/games/registry';
 import { PALETTE } from '../../src/shell/palette';
+import { counterEntry } from '../fixtures/counter-entry';
 import { AI_CHECKS, CHECKS, CONTRACT_SEEDS, runCheck } from './checks';
 
 /**
  * TEST_PLAN 第 4 節｜契約測試。
  *
- * 對登記表裡每一張牌自動跑同一組檢查。新增一張牌只要在 `registry.ts` 加一行，
- * 不用改這個檔案。檢查本身寫在 `checks.ts`（`bad-games.test.ts` 也用同一份，
+ * 對登記表裡每一張牌（外加只存在於 tests/ 的替身牌）自動跑同一組檢查。
+ * `describe.each` 的來源是 `[...registry, counterEntry]`，所以新增一張真牌只要在 `registry.ts`
+ * 加一筆，不用改這個檔案。檢查本身寫在 `checks.ts`（`bad-games.test.ts` 也用同一份，
  * 用故意違約的假遊戲證明這些檢查真的抓得到問題）。
  *
  * A1–A5（AI 行為，TEST_PLAN 5.1）放在 `AI_CHECKS`，同一個迴圈就會跑：
@@ -49,7 +51,8 @@ describe('色盤', () => {
   });
 });
 
-describe.each(registry)('$id', (entry) => {
+/** 真牌（登記表）加上替身牌（只存在於 tests/）。新增一張真牌只要改 `registry.ts`。 */
+describe.each([...registry, counterEntry])('$id', (entry) => {
   for (const check of [...CHECKS, ...AI_CHECKS]) {
     const title = `${check.code} ${check.title}`;
     if (!check.applies(entry)) {

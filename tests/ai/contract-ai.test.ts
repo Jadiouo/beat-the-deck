@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { counterEntry, counterMeta } from '../../src/games/registry';
+import { counterEntry, counterMeta } from '../fixtures/counter-entry';
 import type { CardMeta, RegistryEntry } from '../../src/games/types';
 import { defineEntry } from '../../src/games/types';
 import { counterGame } from '../fixtures/counter-game';
@@ -21,7 +21,7 @@ import {
 } from '../contract/checks';
 
 /**
- * 登記表裡現在只有替身牌（沒有預設性格），所以 A1–A5 在 all-games.test.ts 裡全部被跳過。
+ * 替身牌沒有預設性格，所以 A1–A5 在 all-games.test.ts 對它全部被跳過（真牌 C-A 會跑）。
  * 這個檔案證明它們「會跑、會給數字、會抓到壞的」：把 counter-game 包成一個只存在於
  * 測試裡的、有預設性格的臨時登記項，直接對它跑 A1–A5 的檢查函式。
  * 第一張真牌進登記表時，all-games.test.ts 的迴圈會自動用同一份檢查去測它。

@@ -1,7 +1,7 @@
 import type { CounterState } from '../../fixtures/counter-game';
 import { counterGame } from '../../fixtures/counter-game';
 import type { Game } from '../../../src/core/types';
-import { counterMeta, counterRender } from '../../../src/games/registry';
+import { counterMeta, counterRender } from '../../fixtures/counter-entry';
 import type { CardMeta, RegistryEntry, RenderFn } from '../../../src/games/types';
 import { defineEntry } from '../../../src/games/types';
 import type { CheckCode } from '../checks';
