@@ -7,6 +7,12 @@ import { jokersEntries } from './registry/jokers';
 import { spadesEntries } from './registry/spades';
 import type { RegistryEntry } from './types';
 
+/**
+ * 這個檔案只檢查「不管登記了幾張牌都成立」的結構性不變量。
+ * 不可以寫死「目前登記了哪幾張」或「共幾張」：新增一張牌不需要改這個檔案
+ * （見 registry.ts 檔頭註解）。唯一寫死的是 54 張牌 id 清單本身，那是 SPEC 第 4 節定死的常數。
+ */
+
 /** 每個花色模組與它允許的 id 前綴。 */
 const SUIT_MODULES: readonly (readonly [string, readonly RegistryEntry[], string])[] = [
   ['clubs', clubsEntries, 'C-'],
@@ -16,9 +22,40 @@ const SUIT_MODULES: readonly (readonly [string, readonly RegistryEntry[], string
   ['jokers', jokersEntries, 'JK-'],
 ];
 
+/** SPEC 第 4 節：四個花色各 A→K，順序為梅花、黑桃、方塊、紅心。 */
+const SUITS = ['C', 'S', 'D', 'H'] as const;
+const RANKS = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'] as const;
+
+/** `sub` 是否為 `full` 的子序列（保持相對順序，可以跳過元素）。 */
+function isSubsequence(sub: readonly string[], full: readonly string[]): boolean {
+  let i = 0;
+  for (const item of full) {
+    if (i < sub.length && sub[i] === item) i += 1;
+  }
+  return i === sub.length;
+}
+
 describe('registry 組裝', () => {
-  it('registry 的內容與拆分前相同：C-A、C-2、C-3，依序', () => {
-    expect(registry.map((entry) => entry.id)).toEqual(['C-A', 'C-2', 'C-3']);
+  const ids = registry.map((entry) => entry.id);
+
+  it('至少登記了一張牌（登記表不可以被清空）', () => {
+    expect(registry.length).toBeGreaterThan(0);
+  });
+
+  it('沒有重複的 id', () => {
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it('每個 id 都在 54 張牌的清單裡', () => {
+    for (const id of ids) expect(CARD_IDS, id).toContain(id);
+  });
+
+  it('登記表的順序與 CARD_IDS 一致（是 CARD_IDS 的子序列）', () => {
+    expect(isSubsequence(ids, CARD_IDS), `順序不符：${ids.join(', ')}`).toBe(true);
+  });
+
+  it('每一筆的 meta.id 與 id 一致', () => {
+    for (const entry of registry) expect(entry.meta.id, entry.id).toBe(entry.id);
   });
 
   it('registry 是各花色模組依 梅花、黑桃、方塊、紅心、鬼牌 的順序串起來', () => {
@@ -30,25 +67,27 @@ describe('registry 組裝', () => {
       ...jokersEntries,
     ]);
   });
+});
 
-  it('CARD_IDS 仍是 54 張，順序為梅花、黑桃、方塊、紅心 A→K，最後 JK-R、JK-B', () => {
+describe('CARD_IDS（SPEC 第 4 節的常數）', () => {
+  it('共 54 個，沒有重複', () => {
     expect(CARD_IDS).toHaveLength(54);
-    expect(CARD_IDS.slice(0, 3)).toEqual(['C-A', 'C-2', 'C-3']);
-    expect(CARD_IDS[13]).toBe('S-A');
-    expect(CARD_IDS[26]).toBe('D-A');
-    expect(CARD_IDS[39]).toBe('H-A');
-    expect(CARD_IDS.slice(-2)).toEqual(['JK-R', 'JK-B']);
+    expect(new Set(CARD_IDS).size).toBe(54);
   });
 
-  it('沒有重複的 id，而且每個 id 都在 54 張牌的清單裡', () => {
-    const ids = registry.map((entry) => entry.id);
-    expect(new Set(ids).size).toBe(ids.length);
-    for (const id of ids) expect(CARD_IDS, id).toContain(id);
+  it('四個花色各 13 張，順序為梅花、黑桃、方塊、紅心，各 A,2,…,10,J,Q,K', () => {
+    const expected = SUITS.flatMap((suit) => RANKS.map((rank) => `${suit}-${rank}`));
+    expect(expected).toHaveLength(52);
+    expect(CARD_IDS.slice(0, 52)).toEqual(expected);
+  });
+
+  it('最後兩個是 JK-R 與 JK-B', () => {
+    expect(CARD_IDS.slice(-2)).toEqual(['JK-R', 'JK-B']);
   });
 });
 
 describe.each(SUIT_MODULES)('花色模組 %s', (_name, entries, prefix) => {
-  it(`只放 ${prefix}* 的牌`, () => {
+  it(`只放 ${prefix}* 的牌，且 meta.id 與 id 一致`, () => {
     for (const entry of entries) {
       expect(entry.id.startsWith(prefix), `${entry.id} 放錯檔案`).toBe(true);
       expect(entry.meta.id).toBe(entry.id);
