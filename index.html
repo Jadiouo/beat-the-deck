@@ -2,11 +2,99 @@
 <html lang="zh-Hant">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
     <title>Beat the Deck</title>
+    <link rel="icon" href="data:," />
+    <style>
+      /* 背景色與 src/shell/palette.ts 的 bg 相同。 */
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: #1a1423;
+        color: #f6f1e7;
+        overflow: hidden;
+        touch-action: none;
+        -webkit-user-select: none;
+        user-select: none;
+      }
+      #app {
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+      }
+      canvas {
+        image-rendering: pixelated;
+        image-rendering: crisp-edges;
+      }
+      /* 看不見但在 DOM 裡：給讀螢幕的人與端到端測試。 */
+      #mirror {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        margin: -1px;
+        padding: 0;
+        overflow: hidden;
+        clip: rect(0 0 0 0);
+        white-space: nowrap;
+        border: 0;
+      }
+      .touch-area {
+        width: 100%;
+        height: 128px;
+        justify-content: space-between;
+        align-items: center;
+        box-sizing: border-box;
+        padding: 0 16px;
+      }
+      .touch-pad {
+        position: relative;
+        width: 120px;
+        height: 120px;
+      }
+      .touch-button {
+        position: absolute;
+        width: 40px;
+        height: 40px;
+        border: 2px solid #7a7390;
+        background: #3b3055;
+        color: #f6f1e7;
+        font: bold 14px sans-serif;
+        touch-action: none;
+      }
+      .touch-button.up {
+        left: 40px;
+        top: 0;
+      }
+      .touch-button.left {
+        left: 0;
+        top: 40px;
+      }
+      .touch-button.right {
+        left: 80px;
+        top: 40px;
+      }
+      .touch-button.down {
+        left: 40px;
+        top: 80px;
+      }
+      .touch-actions {
+        display: flex;
+        gap: 16px;
+      }
+      .touch-actions .touch-button {
+        position: static;
+        width: 56px;
+        height: 56px;
+        border-radius: 50%;
+      }
+    </style>
   </head>
   <body>
     <div id="app"></div>
+    <div id="mirror" role="region" aria-live="polite"></div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import type { Locator, Page } from '@playwright/test';
 
 /**
  * TEST_PLAN 第 7 節的四條端到端測試。
@@ -11,8 +12,7 @@ import { expect, test } from '@playwright/test';
  * - 第 3 條：H-A 還沒有，改用 ?card=C-A&seed=1&autoplay=human-model。
  */
 
-const mirror = (page: import('@playwright/test').Page): import('@playwright/test').Locator =>
-  page.locator('#mirror');
+const mirror = (page: Page): Locator => page.locator('#mirror');
 
 test('1. 打開首頁：看到標題，按鍵進到牌桌，看到 54 張牌，4 張 A 的格子都在', async ({ page }) => {
   await page.goto('/');

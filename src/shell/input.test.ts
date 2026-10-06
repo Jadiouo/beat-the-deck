@@ -85,6 +85,27 @@ describe('shell/input：鍵盤（TEST_PLAN 3.5）', () => {
     expect(keys.confirm()).toBe(true);
   });
 
+  it('極短的按放（在兩幀之間按下又放開）也不會漏掉：takeTaps 回傳這段期間按過的鍵，只回傳一次', () => {
+    const keys = createKeyboardState();
+    keys.keyDown('ArrowLeft');
+    keys.keyUp('ArrowLeft');
+    keys.keyDown('Enter');
+    keys.keyUp('Enter');
+    // 兩幀之間已經放開，held 看不到。
+    expect(keys.buttons()).toEqual(emptyButtons());
+    const taps = keys.takeTaps();
+    expect(taps.buttons).toEqual(only('left'));
+    expect(taps.confirm).toBe(true);
+    expect(taps.pause).toBe(false);
+    // 讀過就清掉。
+    expect(keys.takeTaps()).toEqual({ buttons: emptyButtons(), confirm: false, pause: false });
+    // 失去焦點也清掉。
+    keys.keyDown('KeyX');
+    keys.keyUp('KeyX');
+    keys.blur();
+    expect(keys.takeTaps().buttons).toEqual(emptyButtons());
+  });
+
   it('不認得的鍵不影響任何東西', () => {
     const keys = createKeyboardState();
     keys.keyDown('KeyQ');

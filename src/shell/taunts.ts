@@ -1,4 +1,13 @@
+import { createRng } from '../core/rng';
 import type { Side } from '../core/types';
+
+/**
+ * AI 的台詞（SPEC 7.4）。四種性格各一組，分四個情境，每組至少 5 句。
+ *
+ * 語氣：冷面的機器。講局勢、機率、它自己的計算；不嘲笑、不評價玩家本人。
+ * 用「這場對局的種子」挑句子（`pickTaunt`），所以重播同一場時台詞也一樣。
+ * 這個檔案就是文字表，所以文字本體放在這裡，不放 strings.ts。
+ */
 
 export type Situation = 'aiWins' | 'aiLoses' | 'draw' | 'streak';
 export type TauntPersonality = 'pathfinder' | 'precise' | 'greedy' | 'gambler';
@@ -14,20 +23,153 @@ export const PERSONALITIES: readonly TauntPersonality[] = [
 export const TAUNTS: Readonly<
   Record<TauntPersonality, Readonly<Record<Situation, readonly string[]>>>
 > = {
-  pathfinder: { aiWins: [], aiLoses: [], draw: [], streak: [] },
-  precise: { aiWins: [], aiLoses: [], draw: [], streak: [] },
-  greedy: { aiWins: [], aiLoses: [], draw: [], streak: [] },
-  gambler: { aiWins: [], aiLoses: [], draw: [], streak: [] },
+  // 搜尋型（梅花）：往前模擬，講「路徑」與「步數」。
+  pathfinder: {
+    aiWins: [
+      '已推演至終局。這條路徑的結果是我領先。',
+      '往前模擬了數十步，這個結局出現在最前面幾個分支裡。',
+      '路徑已走完，分數差距與預測相符。',
+      '搜尋樹的葉節點，大多落在這個結果。',
+      '本場結束。紀錄已寫入，可以重播確認每一步。',
+    ],
+    aiLoses: [
+      '有一個分支沒有被搜到。已更新。',
+      '終局與預測不符。偏差來自搜尋深度不足。',
+      '這條路徑不在我的候選裡。記錄下來了。',
+      '本場評估值被推翻。重播可以看到轉折的那一步。',
+      '預測失準。這是這個等級的上限，不是結論。',
+    ],
+    draw: [
+      '兩邊的路徑長度相同，沒有分出高下。',
+      '搜尋結果：雙方評估值相等。',
+      '平手。這個局面在我的樹裡是對稱的。',
+      '分數相同。沒有可以多搜一步的空間了。',
+      '沒有贏家。需要更深的搜尋才分得出來。',
+    ],
+    streak: [
+      '連續三場的紀錄已存檔。這是三個樣本，不是定論。',
+      '三場的分支各不相同。每一場都是新的搜尋。',
+      '連敗不改變下一場的初始局面，種子會換。',
+      '三場資料顯示的是局面，不是任何一方的下限。',
+      '可以回牌桌換一張牌。搜尋樹不會因此變短。',
+    ],
+  },
+  // 精準型（黑桃）：每個 tick 重新決定，講「危險值」與「門檻」。
+  precise: {
+    aiWins: [
+      '危險值全程低於門檻。結果在預期之內。',
+      '每一個 tick 都重新計算過，沒有被排除的動作被選到。',
+      '本場結束。誤差為零，這是流程，不是運氣。',
+      '評估完成：我方分數較高。',
+      '排除了超過門檻的動作，剩下的選了最高的。就這樣。',
+    ],
+    aiLoses: [
+      '本場有一個 tick 的評估低於實際。已標記。',
+      '危險值估計偏低。這是我的誤差。',
+      '結果與計算不一致。檢查中。',
+      '你的分數較高。數字不會說謊。',
+      '門檻設定可以更嚴格。下一場會調整。',
+    ],
+    draw: [
+      '兩邊分數一致。誤差範圍內無法區分。',
+      '平手。每一個 tick 的決定都已記錄。',
+      '評估值相同，無優先順序。',
+      '結果：持平。',
+      '沒有被排除的動作能打破這個局面。',
+    ],
+    streak: [
+      '三場紀錄已核對。計算沒有偏向任何一方。',
+      '連續三場的結果是統計上常見的序列。',
+      '下一場的種子不同，結果不受前三場影響。',
+      '資料收集完成。可以換一張牌，也可以重來。',
+      '三次樣本的標準差不小，不需要從中推論。',
+    ],
+  },
+  // 貪心型（方塊）：只看下一步，講「眼前」與「當下最大」。
+  greedy: {
+    aiWins: [
+      '每一步我都拿了眼前最大的。最後加起來比較多。',
+      '只看下一步。下一步夠多就夠了。',
+      '分數累積完成。我的比較高。',
+      '眼前的選項被一一取走，結算如上。',
+      '我不看遠的。近的拿完了，場就結束了。',
+    ],
+    aiLoses: [
+      '我拿了眼前最大的，但總和輸了。這就是只看一步的代價。',
+      '有些東西要等一步以後才值錢。我看不到。',
+      '你的總和比較大。紀錄已更新。',
+      '下一步最大的選擇，不一定是整場最大的。',
+      '本場結算：我少了一些。我不知道少在哪一步。',
+    ],
+    draw: [
+      '兩邊拿到的一樣多。',
+      '每一步都拿最大的，總和與你相同。',
+      '平手。沒有誰多拿一點。',
+      '結算相等。眼前沒有更大的了。',
+      '分數一致。我只能說到這裡。',
+    ],
+    streak: [
+      '三場結算完畢。我仍然只看下一步。',
+      '我每場都從頭開始拿，不記得前面的事。',
+      '三場的總和已寫入。下一場眼前會有新的東西。',
+      '連續三場的紀錄是三個總和，不是別的。',
+      '要不要再來，由你決定。我的下一步是等待。',
+    ],
+  },
+  // 賭徒型（紅心）：偏好風險，講「機率」與「押注」。
+  gambler: {
+    aiWins: [
+      '押中了。機率不是保證，但這次是。',
+      '風險與報酬在這一場對上了。',
+      '落後時我加大過賭注。最後的結果是賺的。',
+      '這個結局的機率不高，但它發生了。',
+      '賭局結算：我方收益為正。',
+    ],
+    aiLoses: [
+      '押注失敗。期望值為正的賭，也會輸。',
+      '這場的機率落在尾端。已記錄。',
+      '收益為負。下一場的賠率不受影響。',
+      '我加大了賭注，骰子沒有配合。',
+      '輸掉的部分，已經計入風險。',
+    ],
+    draw: [
+      '不輸不贏。賠率回到原點。',
+      '兩邊收益相同，這是少見的結果。',
+      '平手。沒有人拿走彩池。',
+      '機率分佈的正中央。',
+      '這局沒有開出任何一方。',
+    ],
+    streak: [
+      '三場的結果是三次獨立的抽樣，彼此不相關。',
+      '連續三次，在機率上並不罕見。',
+      '賭局沒有記憶。下一場的賠率重新計算。',
+      '三場的累積已經記錄。下一場，賭注照舊。',
+      '運氣不會累積，也不會欠債。',
+    ],
+  },
 };
 
-export function situationOf(_winner: Side | null, _lossStreak: number): Situation {
-  throw new Error('not implemented');
+/**
+ * 這場的情境。`lossStreak` 是「包含這一場」的人連輸場數。
+ * AI 贏而且人已經連輸三場以上用「連輸」；人贏或平手時不看連輸次數。
+ */
+export function situationOf(winner: Side | null, lossStreak: number): Situation {
+  if (winner === null) {
+    return 'draw';
+  }
+  if (winner === 0) {
+    return 'aiLoses';
+  }
+  return lossStreak >= 3 ? 'streak' : 'aiWins';
 }
 
+/** 用對局的種子挑一句：同一個種子、性格、情境永遠同一句。 */
 export function pickTaunt(
-  _personality: TauntPersonality,
-  _situation: Situation,
-  _seed: number,
+  personality: TauntPersonality,
+  situation: Situation,
+  seed: number,
 ): string {
-  throw new Error('not implemented');
+  const lines = TAUNTS[personality][situation];
+  const rng = createRng(seed).fork(`taunt-${personality}-${situation}`);
+  return lines[rng.int(lines.length)] as string;
 }
