@@ -6,6 +6,10 @@ import { h3Game } from '../H-3/logic';
 import type { H3State } from '../H-3/logic';
 import { h3Meta } from '../H-3/meta';
 import { h3Render } from '../H-3/render';
+import { hQGame } from '../H-Q/logic';
+import type { HQState } from '../H-Q/logic';
+import { hQMeta } from '../H-Q/meta';
+import { hQRender } from '../H-Q/render';
 import { hAGame } from '../H-A/logic';
 import type { HAState } from '../H-A/logic';
 import { hAMeta } from '../H-A/meta';
@@ -35,5 +39,12 @@ export const heartsEntries: readonly RegistryEntry[] = [
     game: h3Game,
     render: h3Render,
     meta: h3Meta,
+  }),
+  defineEntry<HQState>({
+    id: hQMeta.id,
+    kind: 'card',
+    game: hQGame,
+    render: hQRender,
+    meta: hQMeta,
   }),
 ];

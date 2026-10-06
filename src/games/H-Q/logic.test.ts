@@ -131,12 +131,12 @@ describe('H-Q 加碼｜初始與常數', () => {
     expect(hQGame.init(3, CONFIG).salt).toBe(s.salt);
   });
 
-  it('賭注每回合加倍、上限 8：1、2、4、8、8、8、8、8、8、8；棄牌付一半（進位）', () => {
+  it('賭注每回合加倍、上限 8：1、2、4、8、8、8、8、8、8、8；棄牌付四分之三（進位）', () => {
     expect(ROUNDS).toBe(10);
     expect(Array.from({ length: ROUNDS }, (_v, r) => stakeFor(r))).toEqual([
       1, 2, 4, 8, 8, 8, 8, 8, 8, 8,
     ]);
-    expect([1, 2, 4, 8].map(foldCost)).toEqual([1, 1, 2, 4]);
+    expect([1, 2, 4, 8].map(foldCost)).toEqual([1, 2, 3, 6]);
   });
 });
 
@@ -238,14 +238,18 @@ describe('H-Q 加碼｜規則', () => {
   it('7. 棄牌：棄牌的人付 foldCost 給對方；對方出什麼都一樣（連對方的輸拳也拿）', () => {
     for (const other of [ROCK, PAPER, SCISSORS] as const) {
       const a = playRound(choosing({ stake: 8, round: 4 }), FOLD, other);
-      expect(a.chips).toEqual([CHIPS - 4, CHIPS + 4]);
+      expect(a.chips).toEqual([CHIPS - 6, CHIPS + 6]);
       const b = playRound(choosing({ stake: 8, round: 4 }), other, FOLD);
-      expect(b.chips).toEqual([CHIPS + 4, CHIPS - 4]);
+      expect(b.chips).toEqual([CHIPS + 6, CHIPS - 6]);
     }
     expect(playRound(choosing({ stake: 1 }), FOLD, ROCK).chips).toEqual([CHIPS - 1, CHIPS + 1]);
     expect(playRound(choosing({ stake: 2, round: 1 }), ROCK, FOLD).chips).toEqual([
-      CHIPS + 1,
-      CHIPS - 1,
+      CHIPS + 2,
+      CHIPS - 2,
+    ]);
+    expect(playRound(choosing({ stake: 4, round: 2 }), FOLD, SCISSORS).chips).toEqual([
+      CHIPS - 3,
+      CHIPS + 3,
     ]);
   });
 
@@ -294,7 +298,7 @@ describe('H-Q 加碼｜規則', () => {
     );
     expect(timedOut.last?.moves).toEqual([ROCK, FOLD]);
     expect(timedOut.last?.timeout).toEqual([false, true]);
-    expect(timedOut.last?.delta).toEqual([4, -4]);
+    expect(timedOut.last?.delta).toEqual([6, -6]);
   });
 
   it('11. 打完 10 回合：籌碼多的贏；結束之後 step 原樣回傳；winner 在結束前是 null', () => {
@@ -410,7 +414,7 @@ describe('H-Q 加碼｜規則', () => {
       let round = s.round;
       while (!hQGame.isOver(s)) {
         s = hQGame.step(s, idle());
-        if (s.round !== round) {
+        if (s.round !== round && !s.over) {
           round = s.round;
           salts.push(s.salt);
           rngs.push(s.rng);
@@ -602,6 +606,25 @@ describe('H-Q 加碼｜actions 與 evaluate', () => {
     expect([1, 2, 3, 4, 5, 10].map((level) => levelParams(level).depth)).toEqual([
       1, 2, 2, 3, 3, 6,
     ]);
+  });
+
+  it('騙它：先連出三次石頭餵出規律，AI 照讀，賭注升到 8 時換成剪刀，AI 輸掉整個賭注', () => {
+    // AI 前兩次都剋石頭（出布）；第 3 回合（賭注 8）AI 讀到「又是石頭」，出布。
+    const history = historyOf([
+      [ROCK, SCISSORS],
+      [ROCK, PAPER],
+      [ROCK, PAPER],
+    ]);
+    const state = choosing({ history, stake: 8, round: 3 });
+    const aiMove = moveOf(decideAtDepth(state, 1, 6));
+    expect(aiMove).toBe(PAPER);
+    // 玩家知道 AI 會出布，這手出剪刀：贏下 8。
+    const after = playRound(state, SCISSORS, aiMove as Move);
+    expect(after.chips).toEqual([CHIPS + 8, CHIPS - 8]);
+    // 被騙之後 AI 對「石頭」的信心立刻掉下來。
+    const before = predictOpponent(history, 1).probs[ROCK] as number;
+    const betrayed = predictOpponent(after.history, 1).probs[ROCK] as number;
+    expect(betrayed).toBeLessThan(before - 0.2);
   });
 
   it('沒有歷史（沒有資訊）：深度 1 永遠出石頭（actions 的第一個）；深度 6 的選擇由 salt 決定，不同 salt 不全相同，而且不會棄牌', () => {
