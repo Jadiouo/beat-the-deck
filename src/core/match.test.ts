@@ -81,13 +81,20 @@ describe('core/match（TEST_PLAN 3.3）', () => {
     expect(replayed.ticks).toBe(result.ticks);
   });
 
-  it('改掉 inputs 裡任一個 tick 的一顆按鍵：finalHash 不同', () => {
-    const result = playMatch(counterGame, 42, config, hold, idle);
-    for (const tick of [0, 37, 99]) {
-      const tampered: Inputs[] = result.inputs.map((pair) => [{ ...pair[0] }, { ...pair[1] }]);
-      tampered[tick] = [tampered[tick][0], { ...tampered[tick][1], a: true }];
-      const replayed = replay(counterGame, 42, config, tampered);
-      expect(replayed.finalHash).not.toBe(result.finalHash);
+  // TEST_PLAN 3.3 寫的是「任一個 tick 的一顆按鍵」，但這個 fixture 依規格
+  // （每個 tick 按著 a 的那一邊加 1 分）只有 a 鍵會進入 state：改 b、方向鍵不可能
+  // 改變 finalHash，這是規格定義的必然結果，不是 bug，所以這裡只驗證 a 鍵，
+  // 也不為了讓「任一顆按鍵」成立而改 fixture 的規則。
+  // 真正的「任一顆按鍵都會改變雜湊」由契約測試 K1 對真的牌驗證。
+  it('改掉 inputs 裡的 a 鍵（side 0 與 side 1、開頭／中段／結尾）：finalHash 都不同', () => {
+    const base = playMatch(counterGame, 42, config, hold, idle);
+    for (const side of [0, 1] as const) {
+      for (const tick of [0, 50, 99]) {
+        const tampered: Inputs[] = base.inputs.map((pair) => [{ ...pair[0] }, { ...pair[1] }]);
+        tampered[tick][side].a = !tampered[tick][side].a;
+        const replayed = replay(counterGame, 42, config, tampered);
+        expect(replayed.finalHash, `side ${side} tick ${tick}`).not.toBe(base.finalHash);
+      }
     }
   });
 
@@ -155,6 +162,49 @@ describe('core/match（補充：TEST_PLAN 沒列）', () => {
   });
 });
 
+describe('core/match：壞的 maxTicks 要丟錯，不能無窮迴圈', () => {
+  const bad: Array<[string, number]> = [
+    ['NaN', Number.NaN],
+    ['Infinity', Number.POSITIVE_INFINITY],
+    ['-1', -1],
+    ['0', 0],
+    ['10.5', 10.5],
+  ];
+  for (const [name, value] of bad) {
+    it(`playMatch：maxTicks 是 ${name} 時丟錯，訊息帶出收到的值`, () => {
+      // 就算遊戲永遠不結束，也必須在進入迴圈之前就丟錯
+      const endless: Game<CounterState> = { ...counterGame, isOver: () => false };
+      expect(() => playMatch(endless, 1, { maxTicks: value, params: {} }, idle, idle)).toThrow(
+        new RegExp(`maxTicks.*${name.replace('.', '\\.')}`, 's'),
+      );
+    });
+
+    it(`replay：maxTicks 是 ${name} 時丟錯`, () => {
+      expect(() => replay(counterGame, 1, { maxTicks: value, params: {} }, [])).toThrow(/maxTicks/);
+    });
+  }
+});
+
+describe('core/replay：與 playMatch 的 maxTicks 檢查等價', () => {
+  const long: Game<CounterState> = {
+    ...counterGame,
+    init: (seed) => ({ seed, tick: 0, length: 80, scores: [0, 0] }),
+  };
+
+  it('遊戲 80 tick 才結束、maxTicks 是 50：playMatch 與 replay 都丟錯', () => {
+    const small: GameConfig = { maxTicks: 50, params: {} };
+    expect(() => playMatch(long, 1, small, idle, idle)).toThrow(/maxTicks/);
+    const eighty: Inputs[] = Array.from({ length: 80 }, () => [NONE, NONE] as Inputs);
+    expect(() => replay(long, 1, small, eighty)).toThrow(/maxTicks/);
+  });
+
+  it('inputs.length 剛好等於 maxTicks 時可以重播', () => {
+    const exact: GameConfig = { maxTicks: 30, params: {} };
+    const result = playMatch(counterGame, 1, exact, hold, idle);
+    expect(replay(counterGame, 1, exact, result.inputs).ticks).toBe(30);
+  });
+});
+
 describe('core/replay（補充：TEST_PLAN 沒列）', () => {
   it('不同的種子重播得到不同的 finalHash（種子有進 state）', () => {
     const result = playMatch(counterGame, 1, config, hold, idle);
@@ -194,6 +244,46 @@ describe('counter-game 本身', () => {
     const result = playMatch(counterGame, 1, { maxTicks: 30, params: {} }, hold, idle);
     expect(result.ticks).toBe(30);
     expect(result.score).toEqual([30, 0]);
+  });
+
+  it('任何合法 config 下都在 maxTicks 之內結束（含小數 length 與 maxTicks）', () => {
+    const cases: Array<[number | undefined, number]> = [
+      [10.5, 1000],
+      [undefined, 10.5],
+      [10.5, 10.5],
+      [undefined, 1],
+      [0, 5],
+      [-3, 5],
+      [1e9, 7],
+    ];
+    for (const [length, maxTicks] of cases) {
+      const params: Record<string, number> = length === undefined ? {} : { length };
+      const result = playMatch(
+        counterGame,
+        1,
+        { maxTicks: Math.floor(maxTicks), params },
+        hold,
+        idle,
+      );
+      expect(result.ticks).toBeLessThanOrEqual(Math.floor(maxTicks));
+    }
+  });
+
+  it('init 對壞的 config 或種子丟錯，而不是產生永不結束的遊戲', () => {
+    for (const maxTicks of [Number.NaN, Number.POSITIVE_INFINITY, -1, 0, 10.5]) {
+      expect(() => counterGame.init(1, { maxTicks, params: {} })).toThrow(/maxTicks/);
+    }
+    expect(() => counterGame.init(1, { maxTicks: 50, params: { length: Number.NaN } })).toThrow(
+      /length/,
+    );
+    expect(() =>
+      counterGame.init(1, { maxTicks: 50, params: { length: Number.POSITIVE_INFINITY } }),
+    ).toThrow(/length/);
+    expect(() => counterGame.init(Number.NaN, config)).toThrow(/NaN/);
+  });
+
+  it('params.length 是小數時向下取整', () => {
+    expect(counterGame.init(1, { maxTicks: 100, params: { length: 10.9 } }).length).toBe(10);
   });
 
   it('actions 兩邊都至少有「全放開」與「按 a」', () => {
