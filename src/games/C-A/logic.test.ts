@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { pathfinder } from '../../ai/policies/pathfinder';
 import type { Buttons, Inputs } from '../../core/types';
 import {
   CELLS,
@@ -482,13 +483,49 @@ describe('C-A 貪食蛇對決｜種子', () => {
 });
 
 describe('C-A 貪食蛇對決｜actions 與 evaluate', () => {
-  it('actions 兩邊都固定五個：第一個是全放開，其餘是四個方向', () => {
+  it('actions 兩邊都固定五個不同的動作：全放開與四個方向', () => {
     const state = cAGame.init(0, CONFIG);
     for (const side of [0, 1] as const) {
       const actions = cAGame.actions(state, side);
       expect(actions).toHaveLength(5);
-      expect(actions[0]).toEqual(NONE);
-      expect(actions.slice(1)).toEqual([PRESS_UP, PRESS_DOWN, PRESS_LEFT, PRESS_RIGHT]);
+      const names = actions.map((a) => JSON.stringify(a));
+      expect(new Set(names).size).toBe(5);
+      expect(actions).toContainEqual(NONE);
+      for (const press of [PRESS_UP, PRESS_DOWN, PRESS_LEFT, PRESS_RIGHT]) {
+        expect(actions).toContainEqual(press);
+      }
+    }
+  });
+
+  it('actions 的順序：沒有鎖定轉向時，兩個有效的轉向排前面，讓蛇頭更靠近食物的那個排第一；不改變方向的動作排後面', () => {
+    // 人在 (5,12) 往右。食物在正上方 (5,3)：往上轉最靠近。
+    const above = makeState({ foods: [cell(5, 3), cell(30, 20)] });
+    const first = cAGame.actions(above, 0);
+    expect(first[0]).toEqual(PRESS_UP);
+    expect(first[1]).toEqual(PRESS_DOWN);
+    expect(first.slice(2)).toContainEqual(NONE);
+    // 食物在正下方：往下轉排第一。
+    const below = makeState({ foods: [cell(5, 20), cell(30, 3)] });
+    expect(cAGame.actions(below, 0)[0]).toEqual(PRESS_DOWN);
+    // 往右、往左（同向、反向）都不會改變方向，不能排在兩個轉向前面。
+    for (const state of [above, below]) {
+      const [a, b] = cAGame.actions(state, 0);
+      expect([a, b]).not.toContainEqual(PRESS_RIGHT);
+      expect([a, b]).not.toContainEqual(PRESS_LEFT);
+      expect([a, b]).not.toContainEqual(NONE);
+    }
+  });
+
+  it('actions 的順序：已經鎖定轉向、或局已經結束時，用固定順序（全放開排第一）', () => {
+    const locked = cAGame.step(makeState({ foods: [cell(5, 3), cell(30, 20)] }), [PRESS_UP, NONE]);
+    expect(cAGame.actions(locked, 0)[0]).toEqual(NONE);
+  });
+
+  it('搜尋型（往前看 6 個 tick）不會拖延：食物在正上方，現在就轉向，而不是等到走格前最後一刻', () => {
+    const state = makeState({ foods: [cell(5, 3), cell(30, 20)] });
+    for (const depth of [1, 3, 6]) {
+      const pressed = pathfinder.decide(cAGame, state, 0, 0, { depth, seed: 0 });
+      expect(pressed).toEqual(PRESS_UP);
     }
   });
 
@@ -503,6 +540,21 @@ describe('C-A 貪食蛇對決｜actions 與 evaluate', () => {
       ],
     });
     expect(cAGame.evaluate(blocked, 0).danger).toBe(1);
+  });
+
+  it('danger：往牆走越近越危險（前方 10 格內有牆開始算），貼著牆也有一點危險', () => {
+    const at = (x: number): number =>
+      cAGame.evaluate(
+        makeState({ snakes: [{ body: body([x, 12], [x - 1, 12], [x - 2, 12]), dir: RIGHT }, {}] }),
+        0,
+      ).danger;
+    expect(at(10)).toBe(0);
+    expect(at(22)).toBeGreaterThan(0);
+    expect(at(26)).toBeGreaterThan(at(22));
+    expect(at(29)).toBeGreaterThan(at(26));
+    expect(at(30)).toBeGreaterThan(at(29));
+    expect(at(30)).toBeLessThan(1);
+    expect(at(31)).toBe(1);
   });
 
   it('danger：快被困死的格子介於 0 與 1 之間', () => {
