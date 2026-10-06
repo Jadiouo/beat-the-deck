@@ -103,7 +103,9 @@ describe('shell/save-image：JK-R 存成 PNG（SPEC 第 11 節）', () => {
       ]);
     }
     expect(used.size).toBeGreaterThan(2);
-  });
+    // 7 萬 6 千次 expect，獨跑約 1 秒；機器忙的時候（vitest 同時在跑幾十個檔案）會超過預設的 5 秒。
+    // 斷言一個字都沒動，只把這一條的逾時拉到 30 秒（TEST_PLAN 第 2 節：不可以有偶爾才失敗的測試）。
+  }, 30_000);
 
   it('savePng：用 ImageData 畫到 320×240 的離屏 canvas，toBlob 成 image/png，用檔名交給下載', async () => {
     const { deps, imageDataCalls, canvases, downloads } = fakeDeps();
