@@ -39,6 +39,12 @@ export const INVULN_TICKS = 60;
 export const START_X = FIELD_W / 2;
 export const START_Y = 190;
 
+/** 瞄準彈的速度。 */
+export const AIMED_SPEED = 1.6;
+/** S-2、S-3：一般子彈固定每 15 tick 一顆、瞄準彈每 45 tick 一顆。 */
+export const FIXED_RAIN_INTERVAL = 15;
+export const AIMED_INTERVAL = 45;
+
 /** 落雨的生成間隔：第 0 tick 是 20，線性縮短到第 3600 tick 是 5。 */
 export const RAIN_START_INTERVAL = 20;
 export const RAIN_END_INTERVAL = 5;
@@ -146,8 +152,28 @@ function spawnRain(rng: RngState): readonly [Bullet, RngState] {
   return [{ x, y: 0, vx: 0, vy: BULLET_SPEED, grazed: false }, next];
 }
 
+/**
+ * 在上緣隨機位置生成一顆瞄準彈：起點 (x, 0)，朝向 (px, py)（玩家當下的位置），速度 1.6，之後直線飛。
+ * x 與一般子彈一樣在 [2, 148] 均勻挑；回傳子彈與新的亂數狀態。
+ * 玩家的 y 至少是 3，所以向量的長度一定大於 0；玩家剛好在正下方時 dx 是 0，方向就是正下。
+ */
+function spawnAimed(rng: RngState, px: number, py: number): readonly [Bullet, RngState] {
+  const [roll, next] = nextFrom(rng);
+  const x = BULLET_R + roll * (FIELD_W - 2 * BULLET_R);
+  const dx = px - x;
+  const dy = py;
+  const length = Math.sqrt(dx * dx + dy * dy);
+  // 長度是 0 走不到（py >= 3），保護只是為了任何輸入都不可能產生 NaN。
+  const vx = length === 0 ? 0 : (dx / length) * AIMED_SPEED;
+  const vy = length === 0 ? AIMED_SPEED : (dy / length) * AIMED_SPEED;
+  return [{ x, y: 0, vx, vy, grazed: false }, next];
+}
+
 interface Spawns {
+  /** 這個 tick 要不要生成一般子彈。 */
   readonly rain: boolean;
+  /** 這個 tick 要不要生成瞄準彈。 */
+  readonly aimed: boolean;
 }
 
 /** 一個場地走一個 tick：玩家移動、子彈移動並移除、命中判定、無敵倒數、生成新的子彈。 */
@@ -182,6 +208,12 @@ function stepField(field: Field, buttons: Buttons, spawns: Spawns): Field {
     kept.push(bullet);
     rng = next;
   }
+  if (spawns.aimed) {
+    // 在一般子彈之後取下一個亂數；目標是這個 tick 移動之後的玩家位置。
+    const [bullet, next] = spawnAimed(rng, player.px, player.py);
+    kept.push(bullet);
+    rng = next;
+  }
   return { ...player, hits, invuln, rng, bullets: kept };
 }
 
@@ -195,13 +227,19 @@ export function stepSpades(state: SpadesState, inputs: Inputs): SpadesState {
     return state;
   }
   const tick = state.tick + 1;
-  // 落雨：累加器每個 tick 加 1 / 當下的間隔，滿 1 就生成一顆。
-  let phase = state.phase + 1 / rainInterval(tick);
-  const rain = phase >= 1 - 1e-9;
-  if (rain) {
-    phase -= 1;
+  let phase = state.phase;
+  let rain: boolean;
+  if (state.mode === 'rain') {
+    // 落雨：累加器每個 tick 加 1 / 當下的間隔，滿 1 就生成一顆。
+    phase += 1 / rainInterval(tick);
+    rain = phase >= 1 - 1e-9;
+    if (rain) {
+      phase -= 1;
+    }
+  } else {
+    rain = tick % FIXED_RAIN_INTERVAL === 0;
   }
-  const spawns: Spawns = { rain };
+  const spawns: Spawns = { rain, aimed: state.mode !== 'rain' && tick % AIMED_INTERVAL === 0 };
   return {
     ...state,
     tick,
