@@ -26,7 +26,7 @@ import { PALETTE } from '../../src/shell/palette';
 import { asRenderingContext, createFakeContext, LOGIC_HEIGHT, LOGIC_WIDTH } from './fake-context';
 import type { FakeContext } from './fake-context';
 import { deepFreeze } from './freeze';
-import { MATCH_CONFIG, seedList, winRate } from '../ai/harness';
+import { MATCH_CONFIG, winRate } from '../ai/harness';
 import { AI_SEEDS } from '../ai/seeds';
 import type { DecideTimes } from '../ai/harness';
 
@@ -65,10 +65,14 @@ export const SYMMETRY_SEEDS: readonly number[] = Array.from({ length: 200 }, (_,
 /** SPEC 第 9 節：除非小規格另外寫，一局 3600 tick。 */
 export const CONTRACT_CONFIG: GameConfig = { maxTicks: 3600, params: {} };
 
-/** A1–A5 的種子（TEST_PLAN 5.1），固定為 0..N-1；N 是 `tests/ai/seeds.ts` 的 `AI_SEED_COUNT`（目前 200）。 */
+/** A1–A5 的種子（TEST_PLAN 5.1），固定為 0..N-1；N 是 `tests/ai/seeds.ts` 的 `AI_SEED_COUNT`（目前 100，依 TEST_PLAN 第 8 節降過）。 */
 export { AI_SEEDS };
-/** A5 量 decide() 用的種子數：夠多場、又不要太慢。 */
-const SPEED_SEEDS: readonly number[] = seedList(5);
+/** A5 起手的種子數；樣本數不夠就往上加（見 `measureA5`）。 */
+const A5_START_SEEDS = 5;
+/** A5 的樣本數下限：和樣本最多的牌（約 18,000）一致，p99.9 才至少排除最慢的 18 個。 */
+export const A5_MIN_SAMPLES = 18_000;
+/** A5 最多用幾個種子（0..N-1）；用完還湊不到下限就以現有樣本為準，不無限跑。 */
+export const A5_MAX_SEEDS = 200;
 /** human-model 的四個參數，A3、A4 用它當 `winRate` 的「等級」。 */
 const HUMAN_LEVEL = HUMAN_PARAMS;
 /** K11、K12 用的等級：兩邊都是預設性格、等級 5。 */
@@ -673,6 +677,8 @@ export function measureA4(entry: RegistryEntry, seeds: readonly number[] = AI_SE
 
 /** A5 的數字：比 `DecideTimes` 多一個第 99.9 百分位；`maxMs` 照舊保留（只印出來，不當門檻）。 */
 export interface A5Times extends DecideTimes {
+  /** 實際用了幾個種子（0..seedsUsed-1）。 */
+  readonly seedsUsed: number;
   readonly p999Ms: number;
 }
 
@@ -693,8 +699,14 @@ export function percentile(sorted: readonly number[], p: number): number {
  * 做法與 `tests/ai/harness.ts` 的 `measureDecideTimes` 相同（每個種子打一場，對手是 level 10 的
  * random、坐另一邊，只計時被測的那一邊，第一場只暖機），但要保留每一個樣本才能算百分位，
  * 所以在這裡自己收集（harness 只回傳平均與最大值，不在這次授權的修改範圍內）。
+ * 這段迴圈與 tests/ai/harness.ts 的 measureDecideTimes 重複，原因是需要保留每個樣本才能算百分位；
+ * 兩邊的參數（暖機、對手、換邊、level 10）要一起改。
+ *
+ * 種子：沒給 `seeds` 時用 0..N-1 的前綴，從 `A5_START_SEEDS` 開始一場一場加，直到累積樣本數
+ * 達到 `A5_MIN_SAMPLES` 或用到 `A5_MAX_SEEDS` 為止（有的牌對局提早結束，decide() 次數少）。
+ * 有給 `seeds` 就照給的跑（自我驗證測試用）。
  */
-export function measureA5(entry: RegistryEntry, seeds: readonly number[] = SPEED_SEEDS): A5Times {
+export function measureA5(entry: RegistryEntry, seeds?: readonly number[]): A5Times {
   const game = entry.game;
   const policy = requirePolicy(entry);
   const times: number[] = [];
@@ -719,13 +731,26 @@ export function measureA5(entry: RegistryEntry, seeds: readonly number[] = SPEED
       playMatch(game, seed, MATCH_CONFIG, other, timed);
     }
   };
-  run(seeds[0] ?? 0, false);
-  for (const seed of seeds) {
-    run(seed, true);
+  run(seeds?.[0] ?? 0, false);
+  let seedsUsed = 0;
+  if (seeds !== undefined) {
+    for (const seed of seeds) {
+      run(seed, true);
+      seedsUsed += 1;
+    }
+  } else {
+    while (
+      seedsUsed < A5_MAX_SEEDS &&
+      (seedsUsed < A5_START_SEEDS || times.length < A5_MIN_SAMPLES)
+    ) {
+      run(seedsUsed, true);
+      seedsUsed += 1;
+    }
   }
   const sorted = [...times].sort((x, y) => x - y);
   const total = sorted.reduce((sum, t) => sum + t, 0);
   return {
+    seedsUsed,
     samples: sorted.length,
     meanMs: sorted.length === 0 ? 0 : total / sorted.length,
     p999Ms: percentile(sorted, 0.999),
@@ -806,15 +831,17 @@ export function checkHumanLosesToLevel10(
  * 會排除最慢的 18 個（GC 暫停的落點），而真的演算法變慢是每一次都慢，p99.9 一樣會超標。
  * 百分位的算法見 `percentile`（升冪排序後取索引 ceil(0.999 × n) − 1）。
  * 最慢值仍然會被印出來（不管過不過），哪天演算法真的變慢，看輸出就知道。
+ *
+ * 樣本數下限：p99.9 排除的個數是 n/1000，樣本少就等於又退回「最慢一次」。有的牌（C-A 約 4,800、
+ * 紅心更少）一場的 decide() 次數少，5 個種子湊不到 18,000。所以種子從 5 往上加（仍是 0..N-1 的前綴），
+ * 直到樣本數 ≥ A5_MIN_SAMPLES（18,000）或用到 A5_MAX_SEEDS（200）。這是把量測做準，不是放寬門檻
+ * （平均 1 ms、p99.9 8 ms 都沒動）。實際用的種子數印在 log 裡。
  */
-export function checkDecisionSpeed(
-  entry: RegistryEntry,
-  seeds: readonly number[] = SPEED_SEEDS,
-): void {
-  const { samples, meanMs, p999Ms, maxMs } = measureA5(entry, seeds);
+export function checkDecisionSpeed(entry: RegistryEntry, seeds?: readonly number[]): void {
+  const { samples, seedsUsed, meanMs, p999Ms, maxMs } = measureA5(entry, seeds);
   // 照實印出：過關也印（console.log 會顯示在 vitest 該測試的 stdout）。
   console.log(
-    `[A5] ${entry.id} 樣本數 ${samples}，平均 ${meanMs.toFixed(3)} ms，p99.9 ${p999Ms.toFixed(3)} ms，最慢一次 ${maxMs.toFixed(3)} ms`,
+    `[A5] ${entry.id} 種子數 ${seedsUsed}，樣本數 ${samples}，平均 ${meanMs.toFixed(3)} ms，p99.9 ${p999Ms.toFixed(3)} ms，最慢一次 ${maxMs.toFixed(3)} ms`,
   );
   const summary = `${samples} 次 decide()（平均 ${meanMs.toFixed(3)}、p99.9 ${p999Ms.toFixed(3)}、最慢 ${maxMs.toFixed(3)} 毫秒）`;
   if (!(meanMs < 1)) {
