@@ -1,13 +1,22 @@
 import { intFrom, rngStateFor } from '../../core/rng';
 import type { RngState } from '../../core/rng';
 import type { Buttons, Game, GameConfig, Inputs, Side } from '../../core/types';
-import { AI_WAIT_TICKS, DECISION_TIMEOUT, IDLE, otherSide, winnerByTotals } from '../_hearts/logic';
+import {
+  AI_WAIT_TICKS,
+  clamp01,
+  DECISION_TIMEOUT,
+  IDLE,
+  otherSide,
+  winnerByTotals,
+} from '../_hearts/logic';
 
 /**
  * H-Q 加碼（SPEC 第 9 節一行：「每回合賭注加倍的猜拳變體」；小規格 `docs/cards/H-Q.md`）。
  *
- * 兩邊同時出手：石頭、布、剪刀，或棄牌（不跟這回合的賭注，付四分之三）。賭注每回合加倍、上限 8，共 10 回合。
- * 這張牌驗證的路線：歷史存進 state，`evaluate` 用歷史做對手建模，通用性格只負責在 `actions` 之間挑。
+ * 兩邊同時出手：石頭、布、剪刀（可以加碼：按住 a 再出拳），或棄牌（不跟這回合的賭注）。
+ * 賭注每回合加倍、上限 8，共 10 回合。只有一邊加碼時，另一邊在「回應期」看到加碼之後，可以跟或棄牌。
+ * 這張牌驗證的路線：歷史存進 state，`evaluate` 用歷史做對手建模，通用性格只負責在 `actions` 之間挑；
+ * AI 只在讀得準的時候加碼，是因為加碼要付費，而 `evaluate` 算出來只有讀得準才值得。
  */
 
 /** 四種出手。0 石頭、1 布、2 剪刀、3 棄牌。贏 x 的那一手是 `(x + 1) % 3`。 */
@@ -23,6 +32,11 @@ export const CHIPS = 100;
 export const MAX_STAKE = 8;
 /** 兩邊都出手之後，鎖定幾個 tick 才開牌（看得到開牌需要的模擬深度：出手 1、鎖定 2、開牌 3）。 */
 export const LOCK_TICKS = 2;
+/**
+ * 只有一邊加碼時，鎖定之後的回應期：先有幾個 tick 兩邊的輸入都被忽略（讓人看清楚「它加碼了」），
+ * 之後沒加碼的那一邊才可以回應。要大於 3，模擬（最深 6 步）才不會走進「公開之後」的階段。
+ */
+export const RESPOND_PREP = 30;
 /** 開牌之後停幾個 tick 才入帳、進下一回合。 */
 export const RESULT_TICKS = 30;
 
@@ -34,14 +48,26 @@ export const MOVE_BUTTONS: readonly Buttons[] = Object.freeze([
   Object.freeze({ ...IDLE, b: true }),
 ]);
 
-export type HQPhase = 'prep' | 'choose' | 'locked' | 'result';
-export type HQEvent = 'none' | 'lock' | 'open' | 'bank' | 'timeout';
+/** 加碼的拳：按住 a 的同時出拳（同一個 tick 裡 a 與那個方向鍵都按著）。索引是 0 石頭、1 布、2 剪刀。 */
+export const RAISE_BUTTONS: readonly Buttons[] = Object.freeze([
+  Object.freeze({ ...IDLE, a: true, left: true }),
+  Object.freeze({ ...IDLE, a: true, up: true }),
+  Object.freeze({ ...IDLE, a: true, right: true }),
+]);
+
+/** 回應期的「跟」：按 a。回應期的「棄牌」是 b（`MOVE_BUTTONS[FOLD]`）。 */
+export const CALL_BUTTONS: Buttons = Object.freeze({ ...IDLE, a: true });
+
+export type HQPhase = 'prep' | 'choose' | 'locked' | 'respond' | 'result';
+export type HQEvent = 'none' | 'lock' | 'raise' | 'open' | 'bank' | 'timeout';
 
 /** 一回合開牌的結果。只在 `result` 階段存在，入帳之後進 `history`。 */
 export interface HQLast {
   readonly moves: readonly [Move, Move];
   readonly delta: readonly [number, number];
   readonly timeout: readonly [boolean, boolean];
+  /** 兩邊這回合有沒有加碼。 */
+  readonly raised: readonly [boolean, boolean];
 }
 
 export interface HQState {
@@ -54,12 +80,19 @@ export interface HQState {
   /** 這回合的賭注。 */
   readonly stake: number;
   readonly phase: HQPhase;
-  /** prep、locked、result 還剩幾個 tick。 */
+  /** prep、locked、respond（準備期）、result 還剩幾個 tick。 */
   readonly wait: number;
-  /** choose 階段已經過了幾個 tick（超時用）。 */
+  /** choose 階段、回應期（開了之後）已經過了幾個 tick（超時用）。 */
   readonly idle: number;
   /** 兩邊這回合的出手（`null` 是還沒出手）。出手之後不能改。 */
   readonly pending: readonly [Move | null, Move | null];
+  /** 兩邊這回合有沒有加碼（只有出拳才可能加碼；棄牌不算）。出手之後不能改。 */
+  readonly raised: readonly [boolean, boolean];
+  /**
+   * 加碼是不是已經公開（回應期開了）。只給 `evaluate` 用：公開之前，往前模擬走到的 state 裡
+   * 對手有沒有加碼是對手的祕密（模擬用真的 `step`，會經過 respond 階段），所以那時 `evaluate` 要當作沒看到。
+   */
+  readonly revealed: boolean;
   /** 兩邊是不是因為超時被自動棄牌。 */
   readonly timedOut: readonly [boolean, boolean];
   /** 已經入帳的籌碼。這回合開牌的結果在 `last`，要等 result 結束才入帳。 */
@@ -67,6 +100,8 @@ export interface HQState {
   readonly last: HQLast | null;
   /** 已經入帳的每一回合的出手，`[人, AI]`。最多 ROUNDS 筆。 */
   readonly history: readonly (readonly [Move, Move])[];
+  /** 已經入帳的每一回合兩邊有沒有加碼，和 `history` 一一對應（畫面用，AI 不讀）。 */
+  readonly raises: readonly (readonly [boolean, boolean])[];
   /** 每回合開始抽一次：給 `evaluate` 在沒有資訊時做平手的隨機選擇。 */
   readonly salt: number;
   readonly rng: RngState;
@@ -94,9 +129,22 @@ export function stakeFor(round: number): number {
   return Math.min(MAX_STAKE, 2 ** Math.max(0, round));
 }
 
-/** 棄牌付給對方的籌碼：賭注的四分之三，進位（1、2、3、6）。 */
+/** 沒看到對方加碼就棄牌（出手時按 b、或超時）：付一整個賭注。 */
 export function foldCost(stake: number): number {
+  return stake;
+}
+
+/**
+ * 看到對方加碼之後棄牌（回應期按 b、或回應期超時）：付賭注的四分之三，進位（1、2、3、6）。
+ * 加碼把賭注翻倍，但棄牌永遠只付「原本的賭注」的一部分，所以被讀死的時候棄牌比硬跟便宜得多。
+ */
+export function respondFoldCost(stake: number): number {
   return Math.ceil((stake * 3) / 4);
+}
+
+/** 加碼費：加碼的人付給對方，賭注的一半，進位（1、1、2、4）。不管輸贏、對方跟不跟都付。 */
+export function raiseFee(stake: number): number {
+  return Math.ceil(stake / 2);
 }
 
 /** 贏 `move`（石頭、布、剪刀）的那一手。 */
@@ -108,37 +156,59 @@ function isThrow(move: Move | null): move is 0 | 1 | 2 {
   return move !== null && move < 3;
 }
 
-/** 一個 tick 的按鍵是哪個出手：棄牌最優先（保守），其次左、上、右；a 與下沒有作用。 */
-function moveFromButtons(buttons: Buttons): Move | null {
-  if (buttons.b) {
-    return FOLD;
-  }
-  if (buttons.left) {
-    return ROCK;
-  }
-  if (buttons.up) {
-    return PAPER;
-  }
-  if (buttons.right) {
-    return SCISSORS;
-  }
-  return null;
+interface Press {
+  readonly move: Move;
+  readonly raised: boolean;
 }
 
-/** `mine` 對 `theirs` 這回合的籌碼變化（零和）。 */
-function payoff(mine: Move, theirs: Move, stake: number): number {
-  const cost = foldCost(stake);
+/**
+ * 一個 tick 的按鍵是哪個出手：棄牌（b）最優先（保守），其次左、上、右；a 與下沒有單獨的作用，
+ * a 與拳同時按著就是加碼的拳（b 勝過 a，所以 a＋b 是棄牌，不算加碼）。
+ */
+function pressFromButtons(buttons: Buttons): Press | null {
+  if (buttons.b) {
+    return { move: FOLD, raised: false };
+  }
+  const move: Move | null = buttons.left
+    ? ROCK
+    : buttons.up
+      ? PAPER
+      : buttons.right
+        ? SCISSORS
+        : null;
+  return move === null ? null : { move, raised: buttons.a };
+}
+
+/**
+ * `mine` 對 `theirs` 這回合的籌碼變化（零和）。
+ * 兩邊都出拳：贏輸的是 `stake × (1 + 加碼的人數)`，平手 0；一邊棄牌：棄牌的人付 `foldCost(stake)`；
+ * 兩邊都棄牌：0。另外，每個加碼的人付 `raiseFee(stake)` 給對方（兩邊都加碼就互相抵銷）。
+ */
+function payoff(
+  mine: Move,
+  theirs: Move,
+  stake: number,
+  mineRaised: boolean,
+  theirsRaised: boolean,
+  revealed: boolean,
+): number {
+  const fee = (theirsRaised ? raiseFee(stake) : 0) - (mineRaised ? raiseFee(stake) : 0);
+  // 回應期（加碼公開之後）棄牌付的比較少；沒看到加碼就棄牌是整個賭注。
+  const cost = revealed ? respondFoldCost(stake) : foldCost(stake);
   if (mine === FOLD) {
-    return theirs === FOLD ? 0 : -cost;
+    return fee + (theirs === FOLD ? 0 : -cost);
   }
   if (theirs === FOLD) {
-    return cost;
+    return fee + cost;
   }
   if (mine === theirs) {
-    return 0;
+    return fee;
   }
-  return mine === beats(theirs as 0 | 1 | 2) ? stake : -stake;
+  const at = stake * (1 + (mineRaised ? 1 : 0) + (theirsRaised ? 1 : 0));
+  return fee + (mine === beats(theirs as 0 | 1 | 2) ? at : -at);
 }
+
+const NOT_RAISED: readonly [boolean, boolean] = [false, false];
 
 const RELEASED_FLAGS: readonly [boolean, boolean] = [false, false];
 
@@ -155,10 +225,13 @@ export function makeState(overrides: Partial<HQState> = {}): HQState {
     wait: AI_WAIT_TICKS,
     idle: 0,
     pending: [null, null],
+    raised: NOT_RAISED,
+    revealed: false,
     timedOut: RELEASED_FLAGS,
     chips: [CHIPS, CHIPS],
     last: null,
     history: [],
+    raises: [],
     salt: 12345,
     rng: rngStateFor(0, 'salt'),
     lastEvent: 'none',
@@ -267,6 +340,45 @@ export function predictOpponent(
   return { probs, top: tied ? null : top };
 }
 
+/**
+ * 這個 AI 對 `side` 的對手，到目前為止「事先預測有沒有中」的命中率（拉普拉斯平滑，從三分之一起算）。
+ * 每一回合用「當時的歷史」算一次預測（和畫面下方那一排小格是同一件事），有把握（`top` 不是 `null`）
+ * 的才算一次嘗試，`top` 等於對手真的出的拳才算中：`(中 + 1) / (嘗試 + 3)`。
+ * `predictOpponent` 的機率只看歷史的形狀（幾個專家連中就很集中，亂出的歷史偶爾也會碰巧連中），
+ * 命中率是「它在這個對手身上實際讀得多準」，`evaluate` 兩者取小，AI 才不會對亂出的人過度自信。
+ */
+export function readAccuracy(history: readonly (readonly [Move, Move])[], side: Side): number {
+  const them = otherSide(side);
+  let trials = 0;
+  let hits = 0;
+  for (let t = 1; t < history.length; t += 1) {
+    const top = predictOpponent(history.slice(0, t), side).top;
+    if (top !== null) {
+      trials += 1;
+      if (top === (history[t] as readonly [Move, Move])[them]) {
+        hits += 1;
+      }
+    }
+  }
+  return (hits + 2 / 3) / (trials + 2);
+}
+
+/**
+ * AI 實際採信的對手分佈：把 `predictOpponent` 的分佈往「三種拳各 1/3」收，收到
+ * 「最高的那一手的機率 ＝ min(模型的機率, 實際命中率)」為止（命中率不高於 1/3 就完全不採信）。
+ */
+function trustedProbs(
+  history: readonly (readonly [Move, Move])[],
+  side: Side,
+): readonly [number, number, number, number] {
+  const { probs } = predictOpponent(history, side);
+  const peak = Math.max(probs[0], probs[1], probs[2]);
+  const spread = peak - 1 / 3;
+  const weight = spread > 1e-9 ? clamp01((readAccuracy(history, side) - 1 / 3) / spread) : 0;
+  const mix = (p: number, uniform: number): number => (1 - weight) * uniform + weight * p;
+  return [mix(probs[0], 1 / 3), mix(probs[1], 1 / 3), mix(probs[2], 1 / 3), mix(probs[3], 0)];
+}
+
 // ---------------------------------------------------------------------------
 // step
 // ---------------------------------------------------------------------------
@@ -279,16 +391,35 @@ function drawSalt(rng: RngState): { salt: number; rng: RngState } {
 /** 開牌：算出這回合的結果，籌碼與歷史都還沒動。 */
 function settle(state: HQState, tick: number): HQState {
   const moves = state.pending as readonly [Move, Move];
+  const [r0, r1] = state.raised;
   const delta: readonly [number, number] = [
-    payoff(moves[0], moves[1], state.stake),
-    payoff(moves[1], moves[0], state.stake),
+    payoff(moves[0], moves[1], state.stake, r0, r1, state.revealed),
+    payoff(moves[1], moves[0], state.stake, r1, r0, state.revealed),
   ];
   return {
     ...state,
     phase: 'result',
     wait: RESULT_TICKS,
-    last: { moves, delta, timeout: state.timedOut },
+    last: { moves, delta, timeout: state.timedOut, raised: state.raised },
     lastEvent: 'open',
+    eventTick: tick,
+  };
+}
+
+/** 鎖定結束：只有一邊加碼、另一邊出了拳 → 進回應期；其他組合直接開牌。 */
+function settleOrRespond(state: HQState, tick: number): HQState {
+  const [p0, p1] = state.pending;
+  const needsResponse = state.raised[0] !== state.raised[1] && isThrow(p0) && isThrow(p1);
+  if (!needsResponse) {
+    return settle(state, tick);
+  }
+  return {
+    ...state,
+    phase: 'respond',
+    wait: RESPOND_PREP,
+    idle: 0,
+    revealed: false,
+    lastEvent: 'raise',
     eventTick: tick,
   };
 }
@@ -303,6 +434,7 @@ function bank(state: HQState): HQState {
     ...state,
     chips: [state.chips[0] + last.delta[0], state.chips[1] + last.delta[1]],
     history: [...state.history, [last.moves[0], last.moves[1]] as const],
+    raises: [...state.raises, [last.raised[0], last.raised[1]] as const],
     round: state.round + 1,
     last: null,
   };
@@ -321,6 +453,8 @@ function nextRound(state: HQState, tick: number): HQState {
     wait: AI_WAIT_TICKS,
     idle: 0,
     pending: [null, null],
+    raised: NOT_RAISED,
+    revealed: false,
     timedOut: RELEASED_FLAGS,
     salt,
     rng,
@@ -332,14 +466,16 @@ function nextRound(state: HQState, tick: number): HQState {
 function stepChoose(state: HQState, inputs: Inputs, tick: number): HQState {
   const timeout = state.idle + 1 >= DECISION_TIMEOUT;
   const pending: (Move | null)[] = [state.pending[0], state.pending[1]];
+  const raised: [boolean, boolean] = [state.raised[0], state.raised[1]];
   const timedOut: [boolean, boolean] = [state.timedOut[0], state.timedOut[1]];
   for (const side of [0, 1] as const) {
     if (pending[side] !== null) {
       continue;
     }
-    const pressed = moveFromButtons(inputs[side]);
+    const pressed = pressFromButtons(inputs[side]);
     if (pressed !== null) {
-      pending[side] = pressed;
+      pending[side] = pressed.move;
+      raised[side] = pressed.raised;
     } else if (timeout) {
       pending[side] = FOLD;
       timedOut[side] = true;
@@ -349,6 +485,7 @@ function stepChoose(state: HQState, inputs: Inputs, tick: number): HQState {
     ...state,
     tick,
     pending: pending as [Move | null, Move | null],
+    raised,
     timedOut,
     idle: state.idle + 1,
   };
@@ -362,6 +499,32 @@ function stepChoose(state: HQState, inputs: Inputs, tick: number): HQState {
     };
   }
   return moved;
+}
+
+/**
+ * 回應期：先 `RESPOND_PREP` 個 tick 兩邊的輸入都被忽略（加碼公開之前），之後沒加碼的那一邊可以回應：
+ * a 跟（照原本出的拳開牌）、b 棄牌（b 勝過 a）；超時（第 300 個 tick）還沒回應就自動棄牌。加碼的那一邊按什麼都沒用。
+ */
+function stepRespond(state: HQState, inputs: Inputs, tick: number): HQState {
+  if (!state.revealed) {
+    return state.wait <= 1
+      ? { ...state, tick, wait: 0, idle: 0, revealed: true }
+      : { ...state, tick, wait: state.wait - 1 };
+  }
+  const responder: Side = state.raised[0] ? 1 : 0;
+  const buttons = inputs[responder];
+  const timeout = state.idle + 1 >= DECISION_TIMEOUT;
+  if (buttons.b || (timeout && !buttons.a)) {
+    const pending: [Move | null, Move | null] = [state.pending[0], state.pending[1]];
+    pending[responder] = FOLD;
+    const timedOut: [boolean, boolean] = [state.timedOut[0], state.timedOut[1]];
+    timedOut[responder] = !buttons.b;
+    return settle({ ...state, tick, pending, timedOut }, tick);
+  }
+  if (buttons.a) {
+    return settle({ ...state, tick }, tick);
+  }
+  return { ...state, tick, idle: state.idle + 1 };
 }
 
 function stepHQ(state: HQState, inputs: Inputs): HQState {
@@ -380,7 +543,11 @@ function stepHQ(state: HQState, inputs: Inputs): HQState {
     after = stepChoose(state, inputs, tick);
   } else if (state.phase === 'locked') {
     after =
-      state.wait <= 1 ? settle({ ...state, tick }, tick) : { ...state, tick, wait: state.wait - 1 };
+      state.wait <= 1
+        ? settleOrRespond({ ...state, tick }, tick)
+        : { ...state, tick, wait: state.wait - 1 };
+  } else if (state.phase === 'respond') {
+    after = stepRespond(state, inputs, tick);
   } else if (state.wait <= 1) {
     const banked = bank({ ...state, tick });
     after = banked.round >= ROUNDS ? finish(banked) : nextRound(banked, tick);
@@ -400,13 +567,26 @@ function stepHQ(state: HQState, inputs: Inputs): HQState {
 // ---------------------------------------------------------------------------
 
 const ONLY_IDLE: readonly Buttons[] = Object.freeze([IDLE]);
+/** 出手：石頭、布、剪刀、棄牌（石頭排第一，見小規格「等級 1」），再來是加碼的石頭、布、剪刀。 */
+const CHOOSE_ACTIONS: readonly Buttons[] = Object.freeze([...MOVE_BUTTONS, ...RAISE_BUTTONS]);
+const RESPOND_ACTIONS: readonly Buttons[] = Object.freeze([
+  CALL_BUTTONS,
+  MOVE_BUTTONS[FOLD] as Buttons,
+]);
 
 function actionsHQ(state: HQState, side: Side): readonly Buttons[] {
-  // 只看自己有沒有出手，不看對手的 pending（不偷看）。
-  if (state.over || state.phase !== 'choose' || state.pending[side] !== null) {
+  if (state.over) {
     return ONLY_IDLE;
   }
-  return MOVE_BUTTONS;
+  // 出手：只看自己有沒有出手，不看對手的 pending（不偷看）。
+  if (state.phase === 'choose') {
+    return state.pending[side] === null ? CHOOSE_ACTIONS : ONLY_IDLE;
+  }
+  // 回應期：加碼公開之後，沒加碼的那一邊才有得選（公開之前是祕密，所以兩邊都只有全放開）。
+  if (state.phase === 'respond' && state.revealed && !state.raised[side]) {
+    return RESPOND_ACTIONS;
+  }
+  return ONLY_IDLE;
 }
 
 /** 習慣：這一手是不是贏對方上一手（歷史裡最後一筆）。 */
@@ -446,17 +626,29 @@ function evaluateHQ(state: HQState, side: Side): { gain: number; danger: number 
     case 'locked':
       // 只讀自己的 pending；淺搜尋（深度 1、2）只走到這裡，所以只剩習慣的小加分。
       return { gain: diff + habitBonus(state, side, state.pending[side]), danger: 0 };
+    case 'respond':
     case 'result': {
-      // 開牌：模擬走得到這裡（深度 3 以上）。對「對手真的出了什麼、這回合的結果」目盲：
-      // 用還沒入帳的籌碼與歷史，只讀自己的出手，對手由歷史建模。
+      // 回應期與開牌：模擬走得到這裡（深度 3 以上）。對「對手真的出了什麼、這回合的結果」目盲：
+      // 用還沒入帳的籌碼與歷史，只讀自己的出手與加碼，對手由歷史建模。
+      // 對手有沒有加碼：公開之前（`revealed` 為 false）當作沒加碼；公開之後（回應期開了）才讀。
       const mine = state.last === null ? state.pending[side] : state.last.moves[side];
       if (mine === null) {
         return { gain: diff, danger: 0 };
       }
-      const { probs } = predictOpponent(state.history, side);
+      const mineRaised = state.raised[side];
+      const theirsRaised = state.revealed && state.raised[otherSide(side)];
+      const probs = trustedProbs(state.history, side);
+      // 對手加碼了就一定是出拳，不會是棄牌：把棄牌的機率拿掉重新正規化。
+      const throwMass = probs[0] + probs[1] + probs[2];
       let expected = 0;
       for (let o = 0; o < 4; o += 1) {
-        expected += (probs[o] as number) * payoff(mine, o as Move, state.stake);
+        const p = theirsRaised
+          ? o < 3
+            ? (probs[o] as number) / throwMass
+            : 0
+          : (probs[o] as number);
+        expected +=
+          p * payoff(mine, o as Move, state.stake, mineRaised, theirsRaised, state.revealed);
       }
       const jitter = JITTER_SCALE * state.stake * jitterOf(state.salt, side, mine);
       return { gain: diff + expected + jitter, danger: 0 };
