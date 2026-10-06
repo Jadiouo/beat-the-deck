@@ -63,10 +63,9 @@ describe('A1–A5 接進了契約的檢查清單（AI_CHECKS）', () => {
     }
   });
 
-  it('種子清單是 0..199，共 200 個', () => {
-    expect(AI_SEEDS).toHaveLength(200);
-    expect(AI_SEEDS[0]).toBe(0);
-    expect(AI_SEEDS[199]).toBe(199);
+  it('種子清單是 0..N-1（N 只能是 200，或 TEST_PLAN 第 8 節授權的 100）', () => {
+    expect([100, 200]).toContain(AI_SEEDS.length);
+    expect(AI_SEEDS).toEqual(Array.from({ length: AI_SEEDS.length }, (_, i) => i));
   });
 });
 
