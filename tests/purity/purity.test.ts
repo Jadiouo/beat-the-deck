@@ -71,20 +71,17 @@ describe('isPureFile', () => {
 });
 
 describe('findImpurities', () => {
-  it.each([...FORBIDDEN_PATTERNS])(
-    '抓到 %s，並指出檔名與行號',
-    (pattern) => {
-      const source = ['const a = 1;', '', `const b = ${pattern};`].join('\n');
-      const found = findImpurities('src/core/rng.ts', source);
+  it.each([...FORBIDDEN_PATTERNS])('抓到 %s，並指出檔名與行號', (pattern) => {
+    const source = ['const a = 1;', '', `const b = ${pattern};`].join('\n');
+    const found = findImpurities('src/core/rng.ts', source);
 
-      expect(found).toHaveLength(1);
-      expect(found[0]).toMatchObject({
-        file: 'src/core/rng.ts',
-        line: 3,
-        pattern,
-      });
-    },
-  );
+    expect(found).toHaveLength(1);
+    expect(found[0]).toMatchObject({
+      file: 'src/core/rng.ts',
+      line: 3,
+      pattern,
+    });
+  });
 
   it('一個檔案裡的多處都會被列出來', () => {
     const source = [

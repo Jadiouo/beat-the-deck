@@ -27,13 +27,10 @@ const SNIPPETS: Record<string, string> = {
 };
 
 describe('ESLint 的純度規則', () => {
-  it.each([...FORBIDDEN_PATTERNS])(
-    '在 src/core 裡用 %s 會被擋下來',
-    async (pattern) => {
-      const messages = await messagesFor('src/core/probe.ts', SNIPPETS[pattern] ?? '');
-      expect(messages.join('\n')).toContain(pattern);
-    },
-  );
+  it.each([...FORBIDDEN_PATTERNS])('在 src/core 裡用 %s 會被擋下來', async (pattern) => {
+    const messages = await messagesFor('src/core/probe.ts', SNIPPETS[pattern] ?? '');
+    expect(messages.join('\n')).toContain(pattern);
+  });
 
   it('src/games/<id>/logic.ts 也被擋', async () => {
     const messages = await messagesFor('src/games/C-A/logic.ts', SNIPPETS['Math.random'] ?? '');
