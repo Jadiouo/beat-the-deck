@@ -574,7 +574,7 @@ export function describeSharedSnakeAi<S extends ClubsState>(suite: SnakeSuite<S>
       expect(game.evaluate(blocked, 0).danger).toBe(1);
     });
 
-    it('danger：往牆走越近越危險（前方 10 格內有牆開始算），貼著牆也有一點危險', () => {
+    it('danger：往牆走越近越危險（前方 14 格內有牆開始算），貼著牆也有一點危險', () => {
       const at = (x: number): number =>
         game.evaluate(
           makeState({
@@ -633,6 +633,78 @@ export function describeSharedSnakeAi<S extends ClubsState>(suite: SnakeSuite<S>
       expect(game.evaluate(over, 1).danger).toBe(0);
       expect(game.evaluate(over, 1).gain).toBeGreaterThan(0);
       expect(game.evaluate(over, 0).gain).toBeLessThan(0);
+    });
+
+    it('danger：前方第 14 格才是牆也要有一點（反應有延遲的 AI 看到的是將近兩格以前的畫面）', () => {
+      // 蛇頭 (x,12) 往右，下一步 (x+1,12)，牆在 x=32。x=17：下一步之後還有 13 個空格；x=18：只有 12 個。
+      const at = (x: number): number =>
+        game.evaluate(
+          makeState({
+            snakes: [{ body: body([x, 12], [x - 1, 12], [x - 2, 12]), dir: RIGHT }, {}],
+          }),
+          0,
+        ).danger;
+      expect(at(17)).toBe(0);
+      expect(at(18)).toBeGreaterThan(0);
+    });
+
+    it('gain：蛇頭下一步的左右兩側離牆越近扣越多（沿著牆走比走在中間差），7 格以上不扣', () => {
+      // AI 診斷（A1 勝率 78%）：AI 自己死的場次裡，124／130 次撞牆都發生在「隨機亂按之後 30 個 tick 內」，
+      // 而且亂按轉向的那一側離牆 0～3 格。反應延遲 11 個 tick 加上每 7 個 tick 才換一次動作，
+      // 轉錯之後要 3～4 格才修正得回來，所以蛇頭兩側有牆的位置要在 gain 裡扣分。
+      // 蛇頭 (5,y) 往右，食物與蛇頭同一列、同一個距離，所以比較的只有「兩側的牆」。
+      const gainAtRow = (y: number): number =>
+        game.evaluate(
+          makeState({
+            foods: [cell(20, y), cell(30, y === 12 ? 1 : 12)],
+            snakes: [{ body: body([5, y], [4, y], [3, y]), dir: RIGHT }, {}],
+          }),
+          0,
+        ).gain;
+      // 上緣：第 y 列離上牆的距離是 y + 1。0（貼牆）最差，越往中間越好，y = 6（距離 7）起不扣。
+      for (let y = 0; y < 6; y += 1) {
+        expect(gainAtRow(y + 1)).toBeGreaterThan(gainAtRow(y));
+      }
+      expect(gainAtRow(6)).toBe(gainAtRow(12));
+      // 下緣同理：第 y 列離下牆的距離是 24 − y。
+      for (let y = 23; y > 17; y -= 1) {
+        expect(gainAtRow(y - 1)).toBeGreaterThan(gainAtRow(y));
+      }
+      expect(gainAtRow(17)).toBe(gainAtRow(12));
+    });
+
+    it('gain：蛇頭兩側有蛇身也一樣扣分（亂按轉進蛇身一樣會死）', () => {
+      const open = makeState({
+        foods: [cell(20, 12), cell(30, 1)],
+        snakes: [{ body: body([5, 12], [4, 12], [3, 12]), dir: RIGHT }, {}],
+      });
+      // 對方的身體貼著我下一步 (6,12) 的上方：(6,11)。
+      const beside = makeState({
+        foods: [cell(20, 12), cell(30, 1)],
+        snakes: [
+          { body: body([5, 12], [4, 12], [3, 12]), dir: RIGHT },
+          { body: body([6, 11], [7, 11], [8, 11]), dir: LEFT },
+        ],
+      });
+      expect(game.evaluate(beside, 0).gain).toBeLessThan(game.evaluate(open, 0).gain);
+    });
+
+    it('gain：對方的蛇頭靠近我的下一步要扣分，越近扣越多（隨機亂按的對手隨時可能轉進來）', () => {
+      // AI 診斷：撞死的場次裡頭對頭佔 8.5%，那時候對方的下一步看起來不在同一格，所以 danger 的頭對頭是 0。
+      const withOther = (x: number): number =>
+        game.evaluate(
+          makeState({
+            foods: [cell(20, 12), cell(20, 1)],
+            snakes: [
+              { body: body([5, 12], [4, 12], [3, 12]), dir: RIGHT },
+              { body: body([x, 12], [x + 1, 12], [x + 2, 12]), dir: LEFT },
+            ],
+          }),
+          0,
+        ).gain;
+      // 我的下一步是 (6,12)。對方蛇頭在 x = 20 離 14 格；x = 10 離 4 格；x = 8 離 2 格。
+      expect(withOther(20)).toBeGreaterThan(withOther(10));
+      expect(withOther(10)).toBeGreaterThan(withOther(8));
     });
 
     it('局結束的排序：「分差 10 但自己撞死」的 gain 比「落後 5 但活著贏」低（勝負加成不可以被分差蓋過）', () => {

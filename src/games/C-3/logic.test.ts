@@ -460,6 +460,29 @@ describe('C-3 紅藍食物｜actions 與 evaluate', () => {
     expect(c3Game.evaluate(over, 0).gain).toBeLessThan(0);
   });
 
+  it('gain：蛇頭下一步的左右兩側離牆越近扣越多（與 C-A 共用同一個評估）；前方 14 格才是牆也有 danger', () => {
+    const gainAtRow = (y: number): number =>
+      c3Game.evaluate(
+        makeState({
+          foods: [cell(20, y), cell(30, y === 12 ? 1 : 12), cell(25, 20), cell(25, 3)],
+          foodColors: [RED, RED, BLUE, BLUE],
+          snakes: [{ body: body([5, y], [4, y], [3, y]), dir: RIGHT }, {}],
+        }),
+        0,
+      ).gain;
+    for (let y = 0; y < 6; y += 1) {
+      expect(gainAtRow(y + 1)).toBeGreaterThan(gainAtRow(y));
+    }
+    expect(gainAtRow(6)).toBe(gainAtRow(12));
+    const dangerAt = (x: number): number =>
+      c3Game.evaluate(
+        makeState({ snakes: [{ body: body([x, 12], [x - 1, 12], [x - 2, 12]), dir: RIGHT }, {}] }),
+        0,
+      ).danger;
+    expect(dangerAt(17)).toBe(0);
+    expect(dangerAt(18)).toBeGreaterThan(0);
+  });
+
   it('局結束的排序：「分差 10 但自己撞死」的 gain 比「落後 5 但活著贏」低', () => {
     const diedAhead = makeState({
       over: true,
