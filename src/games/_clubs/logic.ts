@@ -454,22 +454,44 @@ export function makeState(overrides: StateOverrides = {}): ClubsState {
 
 /** 每 1 分的 gain。比任何距離（最多 54）都大，所以吃到食物永遠比靠近食物重要。 */
 export const GAIN_PER_POINT = 100;
-/** 局結束時，贏或輸的 gain 加減多少。 */
-export const RESULT_BONUS = 500;
+/**
+ * 局結束時，贏或輸的 gain 加減多少。必須大到「任何分差都蓋不過」：一條撞死、另一條贏是不看分數的，
+ * 所以「分數高但撞死」不可以比「分數低但活著贏」好。一局最多走 600 格（3600 tick ÷ 6），
+ * C-3 吃錯扣 2 分，所以分差最大約 1800（gain 差 180000）；`RESULT_BONUS` 取 1000000，三張牌共用。
+ */
+export const RESULT_BONUS = 1_000_000;
 /** 蛇頭下一步與對方的下一步是同一格（頭對頭）的 danger。 */
 export const HEAD_ON_DANGER = 0.8;
 /** 被困住的程度（空間不夠）能貢獻的最大 danger。 */
 export const TRAP_DANGER = 0.9;
 /** 判斷被困住時，要數到「長度＋這個數字」個空格才算安全。 */
 export const ROOM_MARGIN = 2;
-/** 離牆幾格以內開始算危險（反應有延遲時，貼著牆走一個誤判就撞上去）。 */
-export const EDGE_RANGE = 3;
-/** 蛇頭下一步貼著牆（距離 0）時，因為「靠近牆」貢獻的 danger；每遠一格少 1 / EDGE_RANGE。 */
-export const EDGE_DANGER = 0.8;
-/** 往行進方向看幾格有沒有牆或蛇身。 */
-export const RUN_LOOKAHEAD = 10;
+/** 往行進方向看幾格有沒有牆或蛇身。比「反應延遲換算的格數」（等級 5 約 2 格）大很多。 */
+export const RUN_LOOKAHEAD = 20;
+/**
+ * 前方障礙的 danger 是 `RUN_DANGER × (1 − 格數 / RUN_LOOKAHEAD) ^ RUN_EXPONENT`：指數 3 讓遠處很輕、近處才重。
+ * 線性（指數 1）時離牆 6 格就有 0.57，搜尋型的 danger 權重是「這一層 gain 範圍」的 2 倍，連牆邊的食物都不敢吃。
+ */
+export const RUN_EXPONENT = 3;
 /** 前方 RUN_LOOKAHEAD 格內有障礙時，danger 最多多少（障礙在第 1 格就是這個值，越遠越小）。 */
 export const RUN_DANGER = 1.0;
+/**
+ * 蛇頭下一步的左右兩側，最近的牆或蛇身在第 r 格（r 從 1 算起，第 1 格是緊貼著）時，gain 扣多少。
+ * 單位與「距離食物的格數」相同，所以 50 等於「寧可多繞 50 格」；吃到食物是 +100，仍然比這個大。
+ *
+ * 為什麼扣在 gain 不是 danger：搜尋型的 danger 權重是「這一層 gain 的範圍」的 2 倍，範圍可能是 2（只在比距離）
+ * 也可能是 100（有一個候選吃到食物），所以 danger 的效果忽大忽小，加大它反而讓 AI 死更多（實測 78% → 69～74%）。
+ * gain 的單位固定，扣分的力道就固定。
+ * 為什麼是兩側：AI 的死因是「隨機亂按轉向之後修正不回來」（見 `docs/cards/C-A.md` 決定 15），亂按轉向的那一側有牆才會死。
+ */
+export const SIDE_PENALTY: readonly number[] = [50, 40, 30, 20, 10, 5];
+/**
+ * 下一步離最近的食物不到這麼多格時，兩側的扣分按「距離 ÷ 這個數」打折（吃到的那一格不扣）：
+ * 要吃牆邊的食物就得靠近牆，扣分不減輕的話 AI 只在中間繞圈、很少吃食物。
+ */
+export const SIDE_PENALTY_FOOD_RANGE = 8;
+/** 對方的蛇頭離我的下一步 d 格（曼哈頓距離，d 從 1 算起）時，gain 扣多少。對方可能隨時轉進我要去的格子。 */
+export const NEAR_HEAD_PENALTY: readonly number[] = [100, 60, 30, 12, 5];
 
 /** 最近的食物離 (x, y) 的曼哈頓距離；沒有食物是 0。 */
 function nearestFood(foods: readonly number[], x: number, y: number): number {
@@ -519,10 +541,33 @@ function reachable(generation: number, start: number, cap: number): number {
   return Math.min(tail, cap);
 }
 
+/** 從 (x, y) 往行進方向的左右兩側各看 `SIDE_PENALTY.length` 格，兩側各自最近的牆或蛇身的扣分加總。 */
+function sidePenalty(generation: number, x: number, y: number, dir: Dir): number {
+  let total = 0;
+  for (const side of [(dir + 1) % 4, (dir + 3) % 4]) {
+    for (let r = 1; r <= SIDE_PENALTY.length; r += 1) {
+      const sx = x + r * (DX[side] as number);
+      const sy = y + r * (DY[side] as number);
+      if (
+        sx < 0 ||
+        sx >= WIDTH ||
+        sy < 0 ||
+        sy >= HEIGHT ||
+        blockedStamp[cell(sx, sy)] === generation
+      ) {
+        total += SIDE_PENALTY[r - 1] as number;
+        break;
+      }
+    }
+  }
+  return total;
+}
+
 /**
  * 梅花共用的評估（公式見 `docs/cards/C-A.md`）：
- * `gain = 100 × (我的分數 − 對方分數) − 蛇頭下一步到最近食物的距離`；
- * `danger` = 下一步撞牆或撞蛇身 1、頭對頭 0.8、快被困死 0.9 × (1 − 空間 / (長度 + 2))，取最大。
+ * `gain = 100 × (我的分數 − 對方分數) − 蛇頭下一步到最近食物的距離 − 兩側有牆的扣分（離食物近時打折） − 對方蛇頭太近的扣分`；
+ * `danger` = 下一步撞牆或撞蛇身 1、前方 20 格內有障礙 1 × (1 − 格數 / 20)³、頭對頭 0.8、
+ * 快被困死 0.9 × (1 − 空間 / (長度 + 2))，取最大。
  * 「下一步」用 state 裡已經鎖定的 `turn`，所以按一個方向鍵在下一個 tick 就看得出差別。
  */
 export function evaluateClubs(state: ClubsState, side: Side): { gain: number; danger: number } {
@@ -538,7 +583,7 @@ export function evaluateClubs(state: ClubsState, side: Side): { gain: number; da
   const head = me.body[0] as number;
   const nx = cellX(head) + (DX[me.turn] as number);
   const ny = cellY(head) + (DY[me.turn] as number);
-  const gain = lead - nearestFood(state.foods, nx, ny);
+  let gain = lead - nearestFood(state.foods, nx, ny);
 
   if (nx < 0 || nx >= WIDTH || ny < 0 || ny >= HEIGHT) {
     return { gain, danger: 1 };
@@ -573,16 +618,20 @@ export function evaluateClubs(state: ClubsState, side: Side): { gain: number; da
     }
     run += 1;
   }
-  let danger = run < RUN_LOOKAHEAD ? RUN_DANGER * (1 - run / RUN_LOOKAHEAD) : 0;
-  const edge = Math.min(nx, WIDTH - 1 - nx, ny, HEIGHT - 1 - ny);
-  if (edge < EDGE_RANGE) {
-    danger = Math.max(danger, (EDGE_DANGER * (EDGE_RANGE - edge)) / EDGE_RANGE);
-  }
+  let danger =
+    run < RUN_LOOKAHEAD ? RUN_DANGER * Math.pow(1 - run / RUN_LOOKAHEAD, RUN_EXPONENT) : 0;
+  const foodDistance = nearestFood(state.foods, nx, ny);
+  gain -=
+    sidePenalty(generation, nx, ny, me.turn) * Math.min(1, foodDistance / SIDE_PENALTY_FOOD_RANGE);
   const otherHead = other.body[0] as number;
-  const otherX = cellX(otherHead) + (DX[other.turn] as number);
-  const otherY = cellY(otherHead) + (DY[other.turn] as number);
-  if (other.alive && otherX === nx && otherY === ny) {
-    danger = Math.max(danger, HEAD_ON_DANGER);
+  if (other.alive) {
+    const distance = Math.abs(cellX(otherHead) - nx) + Math.abs(cellY(otherHead) - ny);
+    gain -= NEAR_HEAD_PENALTY[distance - 1] ?? 0;
+    const otherX = cellX(otherHead) + (DX[other.turn] as number);
+    const otherY = cellY(otherHead) + (DY[other.turn] as number);
+    if (otherX === nx && otherY === ny) {
+      danger = Math.max(danger, HEAD_ON_DANGER);
+    }
   }
   const cap = me.body.length + ROOM_MARGIN;
   const room = reachable(generation, next, cap);

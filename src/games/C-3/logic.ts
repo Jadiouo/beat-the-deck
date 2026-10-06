@@ -41,8 +41,6 @@ export const FOODS_PER_COLOR = FOOD_COUNT;
 /** 吃對加幾分、吃錯扣幾分。 */
 export const RIGHT_POINTS = 1;
 export const WRONG_POINTS = 2;
-/** 局結束時，贏或輸的 gain 加減多少：比任何分差（100 × 分差）都大。 */
-export const RESULT_BONUS = 100000;
 
 export interface C3State extends ClubsState {
   /** 與 `foods` 一一對應的顏色。 */
@@ -212,17 +210,9 @@ export const c3Game: Game<C3State> = {
   },
 
   evaluate(state: C3State, side: Side): { gain: number; danger: number } {
+    // 結束的局：勝負加成（`RESULT_BONUS`）在共用的評估裡，比任何分差都大，不用另外算。
     const { gain, danger } = evaluateClubs(correctOnly(state), side);
-    if (state.over) {
-      // 分數可以是負的、分差可以很大，而且一條死另一條贏不看分數：勝負加成要比任何分差都大，
-      // 否則「分數高但撞死」的那一邊評估起來會比「分數低但活著贏了」的那一邊好。
-      const lead =
-        GAIN_PER_POINT * (state.snakes[side].score - state.snakes[side === 0 ? 1 : 0].score);
-      const bonus =
-        state.winner === null ? 0 : state.winner === side ? RESULT_BONUS : -RESULT_BONUS;
-      return { gain: lead + bonus, danger };
-    }
-    return { gain: gain - wrongFoodPenalty(state, side), danger };
+    return state.over ? { gain, danger } : { gain: gain - wrongFoodPenalty(state, side), danger };
   },
 };
 
