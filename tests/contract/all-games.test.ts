@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { CARD_IDS, registry } from '../../src/games/registry';
 import { PALETTE } from '../../src/shell/palette';
 import { counterEntry } from '../fixtures/counter-entry';
-import { AI_CHECKS, CHECKS, CONTRACT_SEEDS, runCheck } from './checks';
+import { CHECKS, CONTRACT_SEEDS, runCheck } from './checks';
 
 /**
  * TEST_PLAN 第 4 節｜契約測試。
@@ -13,9 +13,9 @@ import { AI_CHECKS, CHECKS, CONTRACT_SEEDS, runCheck } from './checks';
  * 加一筆，不用改這個檔案。檢查本身寫在 `checks.ts`（`bad-games.test.ts` 也用同一份，
  * 用故意違約的假遊戲證明這些檢查真的抓得到問題）。
  *
- * A1–A5（AI 行為，TEST_PLAN 5.1）放在 `AI_CHECKS`，同一個迴圈就會跑：
- * `meta.defaultPolicy` 是 null 的牌（替身牌）與鬼牌自動標成「不適用」，
- * 第一張有預設性格的真牌登記進來，就會自動被測。K11、K12 用預設性格、等級 5。
+ * A1–A5（AI 行為，TEST_PLAN 5.1）不在這裡：它們慢（A4 一張牌 20 多秒），而 vitest 以檔案為並行單位，
+ * 所以搬到 `tests/ai/a-checks.<花色>.test.ts` 分檔跑，來源同樣是 `[...registry, counterEntry]` 的過濾。
+ * K11、K12 用預設性格、等級 5。
  */
 
 describe('登記表', () => {
@@ -53,7 +53,7 @@ describe('色盤', () => {
 
 /** 真牌（登記表）加上替身牌（只存在於 tests/）。新增一張真牌只要改 `registry.ts`。 */
 describe.each([...registry, counterEntry])('$id', (entry) => {
-  for (const check of [...CHECKS, ...AI_CHECKS]) {
+  for (const check of CHECKS) {
     const title = `${check.code} ${check.title}`;
     if (!check.applies(entry)) {
       it.skip(`${title}（這張牌不適用）`, () => undefined);

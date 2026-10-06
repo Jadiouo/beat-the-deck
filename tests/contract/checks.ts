@@ -27,6 +27,7 @@ import { asRenderingContext, createFakeContext, LOGIC_HEIGHT, LOGIC_WIDTH } from
 import type { FakeContext } from './fake-context';
 import { deepFreeze } from './freeze';
 import { measureDecideTimes, seedList, winRate } from '../ai/harness';
+import { AI_SEEDS } from '../ai/seeds';
 import type { DecideTimes } from '../ai/harness';
 
 // ---------------------------------------------------------------------------
@@ -64,8 +65,8 @@ export const SYMMETRY_SEEDS: readonly number[] = Array.from({ length: 200 }, (_,
 /** SPEC 第 9 節：除非小規格另外寫，一局 3600 tick。 */
 export const CONTRACT_CONFIG: GameConfig = { maxTicks: 3600, params: {} };
 
-/** A1–A5 用 200 個種子（TEST_PLAN 5.1），固定為 0..199。 */
-export const AI_SEEDS: readonly number[] = seedList(200);
+/** A1–A5 的種子（TEST_PLAN 5.1），固定為 0..N-1；N 是 `tests/ai/seeds.ts` 的 `AI_SEED_COUNT`（目前 200）。 */
+export { AI_SEEDS };
 /** A5 量 decide() 用的種子數：夠多場、又不要太慢。 */
 const SPEED_SEEDS: readonly number[] = seedList(5);
 /** human-model 的四個參數，A3、A4 用它當 `winRate` 的「等級」。 */
