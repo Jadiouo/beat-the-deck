@@ -10,6 +10,10 @@ import { dAGame } from '../D-A/logic';
 import type { DAState } from '../D-A/logic';
 import { dAMeta } from '../D-A/meta';
 import { dARender } from '../D-A/render';
+import { dQGame } from '../D-Q/logic';
+import type { DQState } from '../D-Q/logic';
+import { dQMeta } from '../D-Q/meta';
+import { dQRender } from '../D-Q/render';
 import type { RegistryEntry } from '../types';
 import { defineEntry } from '../types';
 
@@ -35,5 +39,12 @@ export const diamondsEntries: readonly RegistryEntry[] = [
     game: d3Game,
     render: d3Render,
     meta: d3Meta,
+  }),
+  defineEntry<DQState>({
+    id: dQMeta.id,
+    kind: 'card',
+    game: dQGame,
+    render: dQRender,
+    meta: dQMeta,
   }),
 ];

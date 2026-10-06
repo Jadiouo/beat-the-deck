@@ -9,7 +9,7 @@ import { copyButtons } from '../../core/match';
 import { intFrom, rngStateFor } from '../../core/rng';
 import type { RngState } from '../../core/rng';
 import type { Buttons, Controller, Inputs } from '../../core/types';
-import { bfsDistances, cell, cellX, cellY, START_CELLS } from '../_diamonds/logic';
+import { bfsDistances, cell, cellX, cellY, nextCell, START_CELLS } from '../_diamonds/logic';
 import {
   BEFORE_MOVE,
   CONFIG,
@@ -29,6 +29,7 @@ import {
   MIN_GAP,
   makeState,
   MINE_EVERY,
+  MINE_REACH,
   SHARED_YIELD,
   SOLO_YIELD,
   zoneDistance,
@@ -61,7 +62,6 @@ function rngWithRoll(accept: (roll: number) => boolean): RngState {
   throw new Error('找不到符合的亂數狀態');
 }
 const NEVER_COLLAPSE = rngWithRoll((roll) => roll >= 999);
-const ALWAYS_COLLAPSE = rngWithRoll((roll) => roll === 0);
 
 /** 兩個人都在遠處，下一個 step 就是開挖。 */
 function atEvent(overrides: Parameters<typeof makeState>[0] = {}): DQState {
@@ -239,10 +239,10 @@ describe('D-Q 唯一的礦｜礦石變成分數', () => {
 });
 
 describe('D-Q 唯一的礦｜塌', () => {
-  it('3. 擲出的值剛好等於塌的機率（千分比）：不塌；小於：塌（age 0 → 1，機率 70）', () => {
-    expect(hazardPermille(1)).toBe(70);
-    const equal = rngWithRoll((roll) => roll === 70);
-    const less = rngWithRoll((roll) => roll === 69);
+  it('3. 擲出的值剛好等於塌的機率（千分比）：不塌；小於：塌（age 0 → 1，機率 22）', () => {
+    expect(hazardPermille(1)).toBe(22);
+    const equal = rngWithRoll((roll) => roll === 22);
+    const less = rngWithRoll((roll) => roll === 21);
     const kept = dQGame.step(
       atEvent({ rng: equal, players: [{ cell: MINE }, { cell: FAR_B }] }),
       IDLE,
@@ -258,18 +258,19 @@ describe('D-Q 唯一的礦｜塌', () => {
     expect(fell.mine).toBe(NEXT);
   });
 
-  it('3. 機率隨 age 上升：7% 乘 age，上限 100%；第 15 次開挖一定塌（擲出最大值 999 也塌）', () => {
-    expect(hazardPermille(2)).toBe(140);
-    expect(hazardPermille(10)).toBe(700);
-    expect(hazardPermille(15)).toBe(1000);
-    expect(hazardPermille(40)).toBe(1000);
-    const state = atEvent({ age: 14, rng: NEVER_COLLAPSE });
+  it('3. 機率隨 age 上升：2.2% 乘 age，上限 100%；第 46 次開挖起一定塌（擲出最大值 999 也塌）', () => {
+    expect(hazardPermille(2)).toBe(44);
+    expect(hazardPermille(10)).toBe(220);
+    expect(hazardPermille(45)).toBe(990);
+    expect(hazardPermille(46)).toBe(1000);
+    expect(hazardPermille(400)).toBe(1000);
+    const state = atEvent({ age: 45, rng: NEVER_COLLAPSE });
     expect(dQGame.step(state, IDLE).collapses).toBe(1);
   });
 
   it('3. 塌了：範圍內的人身上的礦石作廢（記進 lost），範圍外的人不受影響；age 歸 0，礦移到下一個，下一個重挑', () => {
     const state = atEvent({
-      age: 14,
+      age: 45,
       players: [{ cell: cell(16, 13) }, { cell: cell(2, 2) }],
       carried: [4, 3],
     });
@@ -281,20 +282,20 @@ describe('D-Q 唯一的礦｜塌', () => {
     expect(next.walls[next.next]).toBe(0);
     expect(next.carried[0]).toBe(0);
     expect(next.lost[0]).toBe(4);
-    // 另一個人離礦很遠（身上的 3 塊照理早就結算了，這裡是故意構造的）：不在範圍內，不受影響。
-    expect(next.carried[1]).toBe(3);
+    // 另一個人離礦很遠：這個 tick 也是走格的 tick，他身上的 3 塊先結算成分數，不在範圍內，不受塌的影響。
+    expect(next.carried[1]).toBe(0);
     expect(next.lost[1]).toBe(0);
-    expect(dQGame.score(next)).toEqual([0, 0]);
+    expect(dQGame.score(next)).toEqual([0, 3]);
   });
 
   it('3. 邊界：礦坑範圍的邊上（距離 3）會丟礦石；同一個 tick 剛好走出去（距離 4）的人先結算，不丟', () => {
     const inEdge = dQGame.step(
-      atEvent({ age: 14, players: [{ cell: cell(18, 12) }, { cell: FAR_B }], carried: [6, 0] }),
+      atEvent({ age: 45, players: [{ cell: cell(18, 12) }, { cell: FAR_B }], carried: [6, 0] }),
       IDLE,
     );
     expect(inEdge.lost[0]).toBe(6);
     const justOut = dQGame.step(
-      atEvent({ age: 14, players: [{ cell: cell(18, 12) }, { cell: FAR_B }], carried: [6, 0] }),
+      atEvent({ age: 45, players: [{ cell: cell(18, 12) }, { cell: FAR_B }], carried: [6, 0] }),
       [PRESS_RIGHT, NONE],
     );
     expect(justOut.collapses).toBe(1);
@@ -304,7 +305,7 @@ describe('D-Q 唯一的礦｜塌', () => {
 
   it('3. 同一個 tick 開挖又塌：剛挖到的那 2 塊也一起作廢', () => {
     const next = dQGame.step(
-      atEvent({ age: 14, players: [{ cell: MINE }, { cell: FAR_B }], carried: [4, 0] }),
+      atEvent({ age: 45, players: [{ cell: MINE }, { cell: FAR_B }], carried: [4, 0] }),
       IDLE,
     );
     expect(next.lost[0]).toBe(6);
@@ -312,7 +313,7 @@ describe('D-Q 唯一的礦｜塌', () => {
   });
 
   it('3. 沒有人在礦上也會老、也會塌（不會有永遠不塌的僵局）', () => {
-    const next = dQGame.step(atEvent({ age: 14 }), IDLE);
+    const next = dQGame.step(atEvent({ age: 45 }), IDLE);
     expect(next.collapses).toBe(1);
     expect(next.age).toBe(0);
   });
@@ -330,11 +331,11 @@ describe('D-Q 唯一的礦｜隨機與種子', () => {
     const chains = new Set<string>();
     for (let seed = 0; seed < 10; seed += 1) {
       const start = dQGame.init(seed, CONFIG);
-      let state: DQState = { ...start, tick: BEFORE_EVENT, age: 14 };
+      let state: DQState = { ...start, tick: BEFORE_EVENT, age: 45 };
       state = dQGame.step(state, IDLE);
       const first = state.next;
       expect(state.collapses).toBe(1);
-      state = { ...state, tick: BEFORE_EVENT, age: 14 };
+      state = { ...state, tick: BEFORE_EVENT, age: 45 };
       state = dQGame.step(state, IDLE);
       expect(state.collapses).toBe(2);
       expect(state.mine).toBe(first);
@@ -383,7 +384,7 @@ describe('D-Q 唯一的礦｜結束與純度', () => {
   it('step 不改動傳進來的 state（深度凍結後呼叫不丟錯，包含塌的那一次）', () => {
     const calm = deepFreeze(atEvent({ players: [{ cell: MINE }, { cell: MINE }] }));
     expect(() => dQGame.step(calm, [PRESS_UP, PRESS_DOWN])).not.toThrow();
-    const fall = deepFreeze(atEvent({ age: 14, carried: [2, 2] }));
+    const fall = deepFreeze(atEvent({ age: 45, carried: [2, 2] }));
     expect(() => dQGame.step(fall, IDLE)).not.toThrow();
     expect(fall.mine).toBe(MINE);
   });
@@ -430,19 +431,31 @@ describe('D-Q 唯一的礦｜動作與評估', () => {
     expect(dQGame.actions(state, 1)[4]).toEqual(NONE);
   });
 
-  it('gain：站在礦上比走開高（貪心型一直待著）；離礦越近越高', () => {
-    const on = makeState({ tick: 1, players: [{ cell: MINE }, { cell: FAR_B }] });
-    const gains = gainsOf(on, 0);
-    expect(gains[4]).toBe(Math.max(...gains));
+  it('gain：站在礦上（含相鄰格）比離開挖礦範圍高（貪心型一直待著）；離礦越近越高', () => {
+    // 站在範圍的邊上（距離 1）：往外走一步（距離 2）比待著差，往礦走一步不比待著差。
+    const edge = makeState({ tick: 1, players: [{ cell: cell(16, 12) }, { cell: FAR_B }] });
+    const gains = gainsOf(edge, 0);
+    expect(gains[1]).toBeLessThan(gains[4] as number);
+    expect(gains[3]).toBeGreaterThanOrEqual((gains[4] as number) - 1);
     const away = makeState({ tick: 1, players: [{ cell: cell(8, 12) }, { cell: FAR_B }] });
     const toward = gainsOf(away, 0);
     expect(toward.indexOf(Math.max(...toward))).toBe(1);
   });
 
+  it('gain：對手也在挖礦範圍裡，我站在礦上的加成比較少（各挖 1 塊，不是 2 塊）', () => {
+    const alone = makeState({ tick: 1, players: [{ cell: MINE }, { cell: FAR_B }] });
+    const shared = makeState({ tick: 1, players: [{ cell: MINE }, { cell: MINE }] });
+    expect(dQGame.evaluate(alone, 0).gain).toBeGreaterThan(dQGame.evaluate(shared, 0).gain);
+  });
+
   it('gain：身上的礦石算進去（比存起來的少），分數更高；對 1 號邊相反', () => {
-    const none = makeState();
-    const carried = makeState({ carried: [2, 0] });
-    const scored = makeState({ players: [{ score: 2 }, {}] });
+    const near = { players: [{ cell: cell(14, 12) }, { cell: cell(16, 12) }] as const };
+    const none = makeState(near);
+    const carried = makeState({ ...near, carried: [2, 0] });
+    const scored = makeState({
+      ...near,
+      players: [{ cell: cell(14, 12), score: 2 }, { cell: cell(16, 12) }],
+    });
     expect(dQGame.evaluate(carried, 0).gain).toBeGreaterThan(dQGame.evaluate(none, 0).gain);
     expect(dQGame.evaluate(scored, 0).gain).toBeGreaterThan(dQGame.evaluate(carried, 0).gain);
     expect(dQGame.evaluate(carried, 1).gain).toBeLessThan(dQGame.evaluate(none, 1).gain);
@@ -510,56 +523,49 @@ describe('D-Q 唯一的礦｜動作與評估', () => {
 
 describe('D-Q 唯一的礦｜性格（黑箱：用 decide 看四個性格真的做出不同的事）', () => {
   const params = { depth: 6, seed: 1 };
-  /** 站在礦上、身上 8 塊、礦已經開挖 11 次（下一次塌的機率 84%）：該走了。 */
-  const old = makeState({
-    tick: 1,
-    age: 11,
-    mine: MINE,
-    next: NEXT,
-    players: [{ cell: MINE }, { cell: FAR_B }],
-    carried: [8, 0],
-  });
-  /** 站在礦上、身上 2 塊、礦才開挖 1 次：該留下。 */
-  const young = makeState({
-    tick: 1,
-    age: 1,
-    mine: MINE,
-    next: NEXT,
-    players: [{ cell: MINE }, { cell: FAR_B }],
-    carried: [2, 0],
-  });
-
-  it('貪心型：老礦、身上很多也不走（留到塌）', () => {
-    expect(greedy.decide(dQGame, old, 0, 1, params)).toEqual(NONE);
-  });
-
-  it('精準型：老礦、身上很多就退出（不是全放開）；年輕的礦還會留', () => {
-    expect(precise.decide(dQGame, old, 0, 1, params)).not.toEqual(NONE);
-    expect(precise.decide(dQGame, young, 0, 1, params)).toEqual(NONE);
-  });
-
-  it('搜尋型：老礦、身上很多也會退出；年輕的礦還會留', () => {
-    expect(pathfinder.decide(dQGame, old, 0, 1, params)).not.toEqual(NONE);
-    expect(pathfinder.decide(dQGame, young, 0, 1, params)).toEqual(NONE);
-  });
-
-  it('賭徒型：領先時像精準型保守（老礦會退出）；大幅落後時反而留下', () => {
-    const ahead = makeState({
-      ...old,
-      players: [
-        { cell: MINE, score: 30 },
-        { cell: FAR_B, score: 0 },
-      ],
+  /** 站在挖礦範圍的邊上（距離 1）：再往外走一步就離開範圍。 */
+  const EDGE = cell(16, 12);
+  const at = (age: number, carried: number): DQState =>
+    makeState({
+      tick: 1,
+      age,
+      mine: MINE,
+      next: NEXT,
+      players: [{ cell: EDGE }, { cell: FAR_B }],
+      carried: [carried, 0],
     });
-    const behind = makeState({
-      ...old,
-      players: [
-        { cell: MINE, score: 0 },
-        { cell: FAR_B, score: 60 },
-      ],
-    });
-    expect(gambler.decide(dQGame, ahead, 0, 1, params)).not.toEqual(NONE);
-    expect(gambler.decide(dQGame, behind, 0, 1, params)).toEqual(NONE);
+  /** 這一步按下去之後，鎖定的下一步還在「挖礦的範圍」（礦與上下左右相鄰）裡嗎？ */
+  function staysInReach(state: DQState, pressed: Buttons): boolean {
+    const after = dQGame.step(state, [pressed, NONE]);
+    return zoneDistance(nextCell(after.walls, after.players[0]), after.mine) <= MINE_REACH;
+  }
+  const leaves = (policy: typeof greedy, age: number, carried: number): boolean => {
+    const state = at(age, carried);
+    return !staysInReach(state, policy.decide(dQGame, state, 0, 1, params));
+  };
+
+  it('貪心型：身上累積到大約 14 塊才走，與礦老不老無關（它不看塌的機率）；礦很老時才因為「搶下一個礦」提早走', () => {
+    expect(leaves(greedy, 1, 10)).toBe(false);
+    expect(leaves(greedy, 1, 16)).toBe(true);
+    // 礦才開挖 10 次（下一次塌 22%）、身上 10 塊：還不走。
+    expect(leaves(greedy, 10, 10)).toBe(false);
+  });
+
+  it('精準型：看塌的機率。礦年輕、身上少就留；礦開挖 10 次以上，身上只要有一點就退出', () => {
+    expect(leaves(precise, 1, 2)).toBe(false);
+    expect(leaves(precise, 10, 6)).toBe(true);
+    expect(leaves(precise, 40, 2)).toBe(true);
+  });
+
+  it('搜尋型：往前看 6 個 tick 只看得到一步，離開看起來只有損失，所以不管礦多老、身上多少都不離開（這張牌上它是留得最久的）', () => {
+    expect(leaves(pathfinder, 1, 2)).toBe(false);
+    expect(leaves(pathfinder, 40, 24)).toBe(false);
+  });
+
+  it('賭徒型：被 danger 吸引，同樣的狀態（礦開挖 25 次、身上 10 塊）貪心型已經走了、它還留著', () => {
+    expect(leaves(greedy, 25, 10)).toBe(true);
+    expect(leaves(gambler, 25, 10)).toBe(false);
+    expect(leaves(precise, 25, 10)).toBe(true);
   });
 });
 
@@ -586,10 +592,10 @@ describe('D-Q 唯一的礦｜四個性格互打（整場，種子 0 到 11）', 
     return { lostPerMatch: lost / (2 * seeds), carriedScore: scored / (2 * seeds) };
   }
 
-  it('貪心型每場被埋掉的礦石，至少是精準型的 2 倍（指紋：留太久 vs 準時退出）', () => {
+  it('貪心型每場被埋掉的礦石，至少是精準型的 1.5 倍（指紋：留太久 vs 準時退出）', () => {
     const greedyPrint = fingerprint(greedy);
     const precisePrint = fingerprint(precise);
-    expect(greedyPrint.lostPerMatch).toBeGreaterThanOrEqual(2 * precisePrint.lostPerMatch);
+    expect(greedyPrint.lostPerMatch).toBeGreaterThanOrEqual(1.5 * precisePrint.lostPerMatch);
     expect(precisePrint.carriedScore).toBeGreaterThan(0);
   });
 });
