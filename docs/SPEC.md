@@ -2,6 +2,8 @@
 
 版本 0.1（2026-10-06）。這份文件定義要做什麼；怎麼驗證在 `TEST_PLAN.md`，做的順序在 `TASKS.md`。
 
+2026-10-06 依實作中證實的問題訂正了幾處，每一處都標了「訂正」，並寫出原文與原因；沒標的都是原本的內容。
+
 ## 1. 這是什麼
 
 一副 54 張牌的 AI 對戰街機，跑在瀏覽器裡。
@@ -70,31 +72,43 @@ src/
 │   ├── replay.ts         紀錄與重播
 │   └── hash.ts           state 的雜湊，用來比對重播
 ├── ai/                   通用的 AI（第 7 節），全部是純的
-│   ├── policies/         safe.ts greedy.ts gambler.ts predictor.ts random.ts
+│   ├── policies/         precise.ts greedy.ts gambler.ts pathfinder.ts random.ts
 │   ├── level.ts          等級 1–10 對應的參數
+│   ├── evolution.ts      兩個等級對打的勝率（「AI 進化」畫面用，第 7.5 節）
 │   └── human-model.ts    模擬人類反應的測試用控制器
 ├── games/
-│   ├── registry.ts       54 張牌的登記表
+│   ├── registry.ts       54 張牌的登記表（把 registry/ 底下的合起來）
+│   ├── registry/         每個花色一個模組：clubs.ts spades.ts diamonds.ts hearts.ts jokers.ts
+│   ├── _clubs/           同花色的牌共用的邏輯與繪圖（_spades、_diamonds、_hearts 同理）
 │   └── <card-id>/        一張牌一個資料夾
 │       ├── logic.ts      init／step／score／isOver／observe／actions（純）
 │       ├── render.ts     畫面
 │       ├── meta.ts       名稱、說明、花色、點數、操作方式
 │       └── logic.test.ts 這張牌的規則測試
 ├── shell/                外殼：選單、牌桌、結算、進度、文字
+│   ├── app.ts            畫面流程：標題、牌桌、說明、對局、結算
+│   ├── screens.ts        標題、說明頁、結算頁
 │   ├── loop.ts           把真實時間換成固定 tick 的主迴圈
 │   ├── input.ts          鍵盤與手把 → 抽象按鍵
 │   ├── deck-view.ts      54 張牌的選擇畫面
 │   ├── progress.ts       進度存取（localStorage）
+│   ├── evolve.ts         「AI 進化」畫面的數字（分散到多個 frame 跑）
+│   ├── audio.ts          音效
+│   ├── palette.ts        16 色色盤
 │   ├── taunts.ts         AI 的台詞
 │   └── strings.ts        畫面文字
 └── main.ts
 tests/
 ├── contract/             對登記表裡每一張牌自動跑的契約測試
 ├── ai/                   AI 行為的統計測試
+├── purity/               純度檢查（TEST_PLAN 3.8）
+├── fixtures/             測試專用的小遊戲（counter-game）
 └── e2e/                  Playwright
 docs/
 └── cards/<card-id>.md    每張牌的小規格
 ```
+
+（2026-10-06 訂正：原本 `policies/` 寫 `safe.ts`、`predictor.ts`，與 7.1 的表和 `TASKS.md` 的 T3 不符，改成 `precise.ts`、`pathfinder.ts`；另外照實際的 `src/` 補上 `evolution.ts`、`registry/`、`_<花色>/`、`shell/` 與 `tests/` 的幾個檔案。這是示意圖，不是完整清單。）
 
 牌的 id：花色字母加點數，`C-A`、`C-2` … `C-10`、`C-J`、`C-Q`、`C-K`；花色字母 `C` 梅花、`S` 黑桃、`D` 方塊、`H` 紅心；鬼牌 `JK-R`、`JK-B`。
 
@@ -172,6 +186,7 @@ export interface Controller<S> {
 
 - **決定性**：同樣的 `seed`、`config`、輸入序列，一定得到逐位元相同的 state。
 - **公平**：兩邊拿到的隨機事件要對等。鏡像場地（各玩各的）用 `rng.fork` 讓兩邊拿到同一串；共用場地（搶同一批東西）天然對等。
+- **`step` 裡的亂數**（2026-10-06 補）：`step(state, inputs)` 的簽名裡沒有 `Rng`，而 `Rng` 是閉包，放進 state 會被 `hashState` 判定「是函式」而丟錯，K2 的 JSON 來回也會弄掉它的方法。所以 `Rng` 這個有狀態的介面只適合在 `init` 與外殼使用。要在 `step` 裡產生隨機事件時，把 `RngState`（`core/rng.ts` 的一個整數）存進自己的 state：`init` 用 `rngStateFor(seed, label)` 取得初始值，`step` 用 `nextFrom(s)`／`intFrom(s, n)` 推進，拿到 `[值, 新狀態]`，再把新狀態寫回回傳的新 state。這組函式是 `core/rng.ts` 另外新增的，上面的 `Rng` 與 `Game` 沒有改。
 - **一定會結束**：`maxTicks` 之內 `isOver` 必須變成 true。
 - **資訊限制寫在畫面層**：像「人只看得到蛇頭附近」這種規則，state 裡是完整資訊，由 `render` 決定畫多少給人看。AI 那一邊要不要也受限，寫在那張牌的小規格裡，用 `evaluate` 與 `actions` 實作，不要偷看。
 - **不對稱的牌**（例如人控蛇、AI 控障礙）：`actions` 對兩邊回傳不同的動作集合；計分規則在小規格裡定義，並且要打兩局、交換角色，兩局加總。
@@ -203,10 +218,14 @@ export function playMatch<S>(
 
 | 性格 | 花色 | 怎麼選動作 |
 |---|---|---|
-| 搜尋型 Pathfinder | ♣ 梅花 | 往前模擬 d 步（對手假設維持上一個動作），選模擬終點 `gain − w·danger` 最高的第一步 |
+| 搜尋型 Pathfinder | ♣ 梅花 | 往前模擬 d 步（對手假設全放開，即 `actions(對手)` 的第一個），選模擬終點 `gain − w·danger` 最高的第一步 |
 | 精準型 Precise | ♠ 黑桃 | 每個 tick 都重新決定；先排除 danger 超過門檻的動作，剩下的選 gain 最高的 |
 | 貪心型 Greedy | ♦ 方塊 | 只看一步，選下一個 tick `gain` 最高的動作，不看 danger |
-| 賭徒型 Gambler | ♥ 紅心 | 用偏好風險的效用 `gain · (1 + r·danger)` 選動作；落後越多 r 越大 |
+| 賭徒型 Gambler | ♥ 紅心 | 先把候選動作的 `gain` 平移成正值 `g'`，再用偏好風險的效用 `g' · (1 + r·danger)` 選動作；落後越多 r 越大 |
+
+> 訂正（2026-10-06）：
+> - 搜尋型：原文是「對手假設維持上一個動作」。但 `Controller.decide(state, side, tick)` 拿不到對手上一個輸入，而性格又不准知道自己在玩哪張牌，所以無法從 state 反推；實作改成假設對手一直「全放開」。
+> - 賭徒型：原文是直接用 `gain · (1 + r·danger)`。但落後時 `gain` 是負的，乘上 `(1 + r·danger)` 會讓危險動作的效用更低，賭徒變成「落後時怕危險」，與意圖相反。所以先把 `gain` 平移成正值（`g' = gain − 最小 gain + 範圍`，範圍是候選動作 `gain` 的最大減最小），效用才會永遠為正、`danger` 一定是加成。
 
 另有 `random`（測試的基準線）與 `human-model`（第 7.3 節）。
 
@@ -229,7 +248,9 @@ export function playMatch<S>(
 
 ### 7.3 人類模型
 
-`ai/human-model.ts`：一個有 0.2 秒反應延遲、每 6 個 tick 才能換動作、8% 機率按錯、只看一步的控制器。它不出現在遊戲裡，只在測試裡代替真人，用來檢查「這張牌人打得贏嗎」（見 TEST_PLAN 第 5 節）。
+`ai/human-model.ts`：一個有 0.2 秒反應延遲、每 6 個 tick 才能換動作、8% 機率按錯（每次決定有 8% 觸發一次「按錯」，觸發後從 `actions()` 均勻亂選一個，所以可能剛好選回本來要按的）、只看一步的控制器。它不出現在遊戲裡，只在測試裡代替真人，用來檢查「這張牌人打得贏嗎」（見 TEST_PLAN 第 5 節）。
+
+> 訂正（2026-10-06）：原文只寫「8% 機率按錯」。第一版實作讀成「必定避開本來要按的動作」，在只有兩個動作的牌裡等於必定選到最糟的那個；紅心整個花色都是二選一，`H-2` 的 A3 因此只有 38.75%（門檻 45%）。改成從 `actions()` 均勻亂選。
 
 ### 7.4 AI 的台詞
 
@@ -237,7 +258,9 @@ export function playMatch<S>(
 
 ### 7.5 「AI 進化」畫面
 
-全域等級上升時，顯示一個 5 秒的畫面：新舊兩個等級的 AI 在這張牌上對打 20 場的勝率。**這個數字要是真的**，在瀏覽器裡當場用 `playMatch` 跑出來（不開畫面跑 20 場應該在一秒內），不可以是寫死的假動畫。
+全域等級上升時，顯示一個 5 秒的畫面：新舊兩個等級的 AI 在這張牌上對打 20 場的勝率。**這個數字要是真的**，在瀏覽器裡當場用 `playMatch` 跑出來（不開畫面跑 20 場，搜尋型的牌在高等級要好幾秒：實測 `C-A` 從 1 級到 2 級約 22 毫秒，8 級到 9 級約 1.5 秒，9 級到 10 級約 2.6 秒，所以要把 20 場分散到多個 frame 跑，不可以在一個 frame 裡跑完，否則畫面會凍住），不可以是寫死的假動畫。
+
+> 訂正（2026-10-06）：括號裡原文是「應該在一秒內」，對搜尋型的牌高等級不成立（數字見括號）。
 
 ## 8. 外殼
 
