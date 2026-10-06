@@ -224,17 +224,16 @@ export function describeSharedDiamondsRules<S extends DiamondsBase>(suite: Diamo
       expect(s.players[0].cell).toBe(cell(6, 5));
     });
 
-    it('3. 待走方向：同一個週期裡第一個按的算（先按上、再按左 → 往上，左被忽略，跟梅花的轉向鎖定一樣）', () => {
+    it('3. 待走方向：同一個週期裡最後按的算（先按上、再按左 → 往左），走格之後歸零，下一個週期可以改方向', () => {
       const state = makeState({ players: [{ cell: cell(5, 5) }, { cell: cell(20, 20) }] });
       let s = game.step(state, [PRESS_UP, NONE]);
       expect(s.players[0].pending).toBe(0);
       s = game.step(s, [PRESS_LEFT, NONE]);
-      expect(s.players[0].pending).toBe(0);
+      expect(s.players[0].pending).toBe(3);
       s = run(game, s, 3, IDLE);
-      expect(s.players[0].cell).toBe(cell(5, 4));
-      // 走格之後待走方向歸零，下一個週期可以改按別的方向。
+      expect(s.players[0].cell).toBe(cell(4, 5));
       expect(s.players[0].pending).toBe(-1);
-      s = run(game, s, MOVE_EVERY, [PRESS_LEFT, NONE]);
+      s = run(game, s, MOVE_EVERY, [PRESS_UP, NONE]);
       expect(s.players[0].cell).toBe(cell(4, 4));
     });
 

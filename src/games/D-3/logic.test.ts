@@ -263,8 +263,10 @@ describe('D-3 會貶值的寶石｜TEST_PLAN 第 6 節', () => {
 });
 
 describe('D-3 會貶值的寶石｜動作與評估（給貪心型用）', () => {
+  /** 固定的五個動作（索引固定，不依賴 `actions()` 的排法）。 */
+  const ACTIONS = [PRESS_UP, PRESS_RIGHT, PRESS_DOWN, PRESS_LEFT, NONE];
   const gainsOf = (state: D3State, side: 0 | 1): number[] =>
-    d3Game.actions(state, side).map((action) => {
+    ACTIONS.map((action) => {
       const inputs: Inputs = side === 0 ? [action, NONE] : [NONE, action];
       return d3Game.evaluate(d3Game.step(state, inputs), side).gain;
     });
@@ -273,10 +275,38 @@ describe('D-3 會貶值的寶石｜動作與評估（給貪心型用）', () => 
   const gem = (x: number, y: number, born = 0): Gem => ({ cell: cell(x, y), born });
   const FAR = [gem(2, 2), gem(2, 3), gem(3, 2), gem(3, 3)];
 
-  it('actions：同 D-A（5 個不同的動作，1 號邊的順序轉 180 度，全放開排最後）', () => {
-    const state = makeState();
+  it('actions：兩邊都是 5 個不同的動作，全放開排最後；沒有目標時 0 號邊是上、右、下、左，1 號邊轉 180 度（下、左、上、右）', () => {
+    const state = makeState({ gems: [] });
+    for (const side of [0, 1] as const) {
+      const actions = d3Game.actions(state, side);
+      expect(actions).toHaveLength(5);
+      expect(new Set(actions.map((a) => JSON.stringify(a))).size).toBe(5);
+      expect(actions[4]).toEqual(NONE);
+    }
     expect(d3Game.actions(state, 0)).toEqual([PRESS_UP, PRESS_RIGHT, PRESS_DOWN, PRESS_LEFT, NONE]);
     expect(d3Game.actions(state, 1)).toEqual([PRESS_DOWN, PRESS_LEFT, PRESS_UP, PRESS_RIGHT, NONE]);
+  });
+
+  it('actions：有目標時，最靠近目標的方向排最前面（搜尋型平手取排最前面的，才不會「再等一下」或往錯的方向）；全放開還是最後', () => {
+    const right = makeState({
+      players: [{ cell: cell(10, 10) }, { cell: cell(30, 1) }],
+      gems: [gem(14, 10, 1)],
+    });
+    expect(d3Game.actions(right, 0)[0]).toEqual(PRESS_RIGHT);
+    expect(d3Game.actions(right, 0)[4]).toEqual(NONE);
+    const up = makeState({
+      players: [{ cell: cell(10, 10) }, { cell: cell(30, 1) }],
+      gems: [gem(10, 4, 1)],
+    });
+    expect(d3Game.actions(up, 0)[0]).toEqual(PRESS_UP);
+    expect(d3Game.actions(up, 1)[4]).toEqual(NONE);
+    // 兩顆一樣遠：往價值高的那顆（左邊，剛出生）排最前面。
+    const rich = makeState({
+      tick: 421,
+      players: [{ cell: cell(10, 10) }, { cell: cell(30, 1) }],
+      gems: [gem(15, 10, 0), gem(5, 10, 420)],
+    });
+    expect(d3Game.actions(rich, 0)[0]).toEqual(PRESS_LEFT);
   });
 
   it('gain：往最近的寶石走一步最高（價值一樣的時候）', () => {

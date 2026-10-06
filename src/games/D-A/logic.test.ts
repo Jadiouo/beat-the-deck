@@ -207,12 +207,37 @@ describe('D-A 搶金幣｜動作與評估（給貪心型用）', () => {
     return dAGame.step(state, inputs);
   };
 
-  it('actions：兩邊都是 5 個不同的動作；0 號邊的順序是上、右、下、左、全放開，1 號邊轉 180 度（全放開排最後）', () => {
-    const state = makeState();
-    const a0 = dAGame.actions(state, 0);
-    const a1 = dAGame.actions(state, 1);
-    expect(a0).toEqual([PRESS_UP, PRESS_RIGHT, PRESS_DOWN, PRESS_LEFT, NONE]);
-    expect(a1).toEqual([PRESS_DOWN, PRESS_LEFT, PRESS_UP, PRESS_RIGHT, NONE]);
+  it('actions：兩邊都是 5 個不同的動作，全放開排最後；沒有目標時 0 號邊是上、右、下、左，1 號邊轉 180 度（下、左、上、右）', () => {
+    const state = makeState({ coins: [] });
+    for (const side of [0, 1] as const) {
+      const actions = dAGame.actions(state, side);
+      expect(actions).toHaveLength(5);
+      expect(new Set(actions.map((a) => JSON.stringify(a))).size).toBe(5);
+      expect(actions[4]).toEqual(NONE);
+    }
+    expect(dAGame.actions(state, 0)).toEqual([PRESS_UP, PRESS_RIGHT, PRESS_DOWN, PRESS_LEFT, NONE]);
+    expect(dAGame.actions(state, 1)).toEqual([PRESS_DOWN, PRESS_LEFT, PRESS_UP, PRESS_RIGHT, NONE]);
+  });
+
+  it('actions：有目標時，最靠近目標的方向排最前面（搜尋型平手取排最前面的，才不會「再等一下」或往錯的方向）；全放開還是最後', () => {
+    const right = makeState({
+      players: [{ cell: cell(10, 10) }, { cell: cell(30, 1) }],
+      coins: [cell(14, 10)],
+    });
+    expect(dAGame.actions(right, 0)[0]).toEqual(PRESS_RIGHT);
+    expect(dAGame.actions(right, 0)[4]).toEqual(NONE);
+    const up = makeState({
+      players: [{ cell: cell(10, 10) }, { cell: cell(30, 1) }],
+      coins: [cell(10, 4)],
+    });
+    expect(dAGame.actions(up, 0)[0]).toEqual(PRESS_UP);
+    expect(dAGame.actions(up, 1)[4]).toEqual(NONE);
+    // 1 號邊（右上角）：金幣在牠的下方 → 下排最前面。
+    const down = makeState({
+      players: [{ cell: cell(10, 10) }, { cell: cell(30, 1) }],
+      coins: [cell(30, 8)],
+    });
+    expect(dAGame.actions(down, 1)[0]).toEqual(PRESS_DOWN);
   });
 
   it('gain：往最近的金幣走一步（只看下一個 tick），比別的方向、比不動都高', () => {

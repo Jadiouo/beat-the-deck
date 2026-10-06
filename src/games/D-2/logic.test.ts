@@ -284,18 +284,48 @@ describe('D-2 背包上限｜TEST_PLAN 第 6 節', () => {
 });
 
 describe('D-2 背包上限｜動作與評估（給貪心型用）', () => {
+  /** 固定的五個動作（索引固定，不依賴 `actions()` 的排法）。 */
+  const ACTIONS = [PRESS_UP, PRESS_RIGHT, PRESS_DOWN, PRESS_LEFT, NONE];
   const gainsOf = (state: D2State, side: 0 | 1): number[] =>
-    d2Game.actions(state, side).map((action) => {
+    ACTIONS.map((action) => {
       const inputs: Inputs = side === 0 ? [action, NONE] : [NONE, action];
       return d2Game.evaluate(d2Game.step(state, inputs), side).gain;
     });
   const best = (values: readonly number[]): number => values.indexOf(Math.max(...values));
   const [, ACT_RIGHT, ACT_DOWN, ACT_LEFT, ACT_NONE] = [0, 1, 2, 3, 4];
 
-  it('actions：同 D-A（5 個不同的動作，1 號邊的順序轉 180 度，全放開排最後）', () => {
-    const state = makeState();
+  it('actions：兩邊都是 5 個不同的動作，全放開排最後；沒有目標時 0 號邊是上、右、下、左，1 號邊轉 180 度（下、左、上、右）', () => {
+    const state = makeState({ coins: [] });
+    for (const side of [0, 1] as const) {
+      const actions = d2Game.actions(state, side);
+      expect(actions).toHaveLength(5);
+      expect(new Set(actions.map((a) => JSON.stringify(a))).size).toBe(5);
+      expect(actions[4]).toEqual(NONE);
+    }
     expect(d2Game.actions(state, 0)).toEqual([PRESS_UP, PRESS_RIGHT, PRESS_DOWN, PRESS_LEFT, NONE]);
     expect(d2Game.actions(state, 1)).toEqual([PRESS_DOWN, PRESS_LEFT, PRESS_UP, PRESS_RIGHT, NONE]);
+  });
+
+  it('actions：有目標時，最靠近目標的方向排最前面（搜尋型平手取排最前面的，才不會「再等一下」或往錯的方向）；全放開還是最後', () => {
+    const right = makeState({
+      players: [{ cell: cell(10, 10) }, { cell: cell(30, 1) }],
+      coins: [cell(14, 10)],
+    });
+    expect(d2Game.actions(right, 0)[0]).toEqual(PRESS_RIGHT);
+    expect(d2Game.actions(right, 0)[4]).toEqual(NONE);
+    const up = makeState({
+      players: [{ cell: cell(10, 10) }, { cell: cell(30, 1) }],
+      coins: [cell(10, 4)],
+    });
+    expect(d2Game.actions(up, 0)[0]).toEqual(PRESS_UP);
+    expect(d2Game.actions(up, 1)[4]).toEqual(NONE);
+    // 背包滿了：目標是自己的基地（左下角）→ 往左或往下排最前面，不是往金幣。
+    const full = makeState({
+      players: [{ cell: cell(10, 10) }, { cell: cell(30, 1) }],
+      coins: [cell(14, 10)],
+      bags: [3, 0],
+    });
+    expect([PRESS_LEFT, PRESS_DOWN]).toContainEqual(d2Game.actions(full, 0)[0]);
   });
 
   it('gain：背包空的時候往最近的金幣走一步最高', () => {
