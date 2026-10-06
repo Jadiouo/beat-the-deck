@@ -1,6 +1,6 @@
 import { intFrom, rngStateFor } from '../../core/rng';
 import type { RngState } from '../../core/rng';
-import type { Buttons, GameConfig, Side } from '../../core/types';
+import type { Buttons, GameConfig, Inputs, Side } from '../../core/types';
 
 /**
  * 梅花三張牌（C-A、C-2、C-3）共用的格子世界邏輯：格子與方向、蛇的轉向與走格、
@@ -323,6 +323,55 @@ export function refillFoods(
     free.splice(pick, 1);
   }
   return { foods: next, rng: state };
+}
+
+// ---------------------------------------------------------------------------
+// 一個 tick（C-A 的規則；C-2 直接用，C-3 用同樣的順序但自己處理計分與食物）
+// ---------------------------------------------------------------------------
+
+/**
+ * 依 C-A 的規則走一個 tick（`docs/cards/C-A.md` 決定 3–7）：先讀兩邊的輸入鎖定轉向，
+ * 每 `MOVE_EVERY` 個 tick 走一格；死亡優先於時間到；沒人死才補食物。
+ * 回傳新的 state，不改動傳進來的。額外的欄位（例如 C-2 的 `viewRotation`）原樣保留。
+ * 補食物用掉亂數，新的 `RngState` 一定寫回新 state。
+ */
+export function stepClubs<S extends ClubsState>(state: S, inputs: Inputs): S {
+  if (state.over) {
+    return state;
+  }
+  const tick = state.tick + 1;
+  let snakes: readonly [Snake, Snake] = [
+    steerSnake(state.snakes[0], inputs[0]),
+    steerSnake(state.snakes[1], inputs[1]),
+  ];
+  let foods = state.foods;
+  let rng = state.rng;
+  let over = false;
+  let winner: Side | null = null;
+
+  if (tick % MOVE_EVERY === 0) {
+    const moved = moveSnakes(snakes, foods);
+    snakes = ([0, 1] as const).map((i): Snake => ({
+      ...moved.snakes[i],
+      score: moved.snakes[i].score + (moved.ate[i] >= 0 ? 1 : 0),
+    })) as [Snake, Snake];
+    foods = moved.foods;
+    if (moved.dead[0] || moved.dead[1]) {
+      // 死亡優先：只有一條死，另一條贏（不看分數）；兩條都死才比分數。
+      over = true;
+      winner = moved.dead[0] && moved.dead[1] ? winnerByScore(snakes) : moved.dead[0] ? 1 : 0;
+    } else {
+      const refilled = refillFoods(rng, snakes, foods, FOOD_COUNT);
+      foods = refilled.foods;
+      rng = refilled.rng;
+    }
+  }
+
+  if (!over && tick >= state.maxTicks) {
+    over = true;
+    winner = winnerByScore(snakes);
+  }
+  return { ...state, tick, snakes, foods, rng, over, winner };
 }
 
 // ---------------------------------------------------------------------------

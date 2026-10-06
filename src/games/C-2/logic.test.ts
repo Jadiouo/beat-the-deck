@@ -29,7 +29,24 @@ const PRESS_UP: Buttons = { ...NONE, up: true };
 const PRESS_DOWN: Buttons = { ...NONE, down: true };
 const IDLE: Inputs = [NONE, NONE];
 
+const PRESS_RIGHT: Buttons = { ...NONE, right: true };
+const PRESS_LEFT: Buttons = { ...NONE, left: true };
+
 const ROTATIONS = [0, 1, 2, 3] as const;
+
+/**
+ * 讓兩條蛇各自繞一個 5×5 的方圈走（人：右、下、左、上；AI：左、上、右、下），永遠不撞任何東西。
+ * `t` 是「即將進行的第 t 次 step」；每 30 個 tick（5 格）在第一個 tick 按下一個方向。
+ */
+function loopInputs(t: number): Inputs {
+  if ((t - 1) % 30 !== 0 || t === 1) {
+    return IDLE;
+  }
+  const n = (t - 1) / 30;
+  const human = [PRESS_RIGHT, PRESS_DOWN, PRESS_LEFT, PRESS_UP][n % 4] as Buttons;
+  const ai = [PRESS_LEFT, PRESS_UP, PRESS_RIGHT, PRESS_DOWN][n % 4] as Buttons;
+  return [human, ai];
+}
 
 function body(...points: [number, number][]): number[] {
   return points.map(([x, y]) => cell(x, y));
@@ -71,7 +88,7 @@ describe('C-2 旋轉的房間｜TEST_PLAN 第 6 節', () => {
     const changes: [number, number][] = [];
     let previous = state.viewRotation;
     for (let t = 1; t <= 2500; t += 1) {
-      state = c2Game.step(state, IDLE);
+      state = c2Game.step(state, loopInputs(t));
       expect(state.tick).toBe(t);
       if (state.viewRotation !== previous) {
         changes.push([t, state.viewRotation]);
@@ -115,7 +132,8 @@ describe('C-2 旋轉的房間｜TEST_PLAN 第 6 節', () => {
 
   it('4. 給 step 的輸入是世界方向：不管 viewRotation 是多少，輸入「上」蛇就往世界的上走', () => {
     for (const viewRotation of ROTATIONS) {
-      let state = calm(0, { viewRotation });
+      // tick 是 600 的倍數，viewRotation 與 tick 一致（step 會依 tick 重算）。
+      let state = calm(viewRotation * 600, { viewRotation });
       state = c2Game.step(state, [PRESS_UP, NONE]);
       for (let i = 1; i < MOVE_EVERY; i += 1) {
         state = c2Game.step(state, IDLE);
@@ -127,7 +145,7 @@ describe('C-2 旋轉的房間｜TEST_PLAN 第 6 節', () => {
     }
     // 往下也一樣（原本往右，按下 = 世界的下）。
     for (const viewRotation of ROTATIONS) {
-      const state = c2Game.step(calm(0, { viewRotation }), [PRESS_DOWN, NONE]);
+      const state = c2Game.step(calm(viewRotation * 600, { viewRotation }), [PRESS_DOWN, NONE]);
       expect(state.snakes[0].turn).toBe(DOWN);
     }
   });
@@ -281,7 +299,7 @@ describe('C-2 旋轉的房間｜state 與畫面', () => {
 describe('C-2 旋轉的房間｜AI 那一側也是世界方向', () => {
   it('AI（往左走）在任何 viewRotation 下按「上」都是世界的上', () => {
     for (const viewRotation of ROTATIONS) {
-      let state = calm(0, { viewRotation });
+      let state = calm(viewRotation * 600, { viewRotation });
       state = c2Game.step(state, [NONE, PRESS_UP]);
       for (let i = 1; i < MOVE_EVERY; i += 1) {
         state = c2Game.step(state, IDLE);

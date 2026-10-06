@@ -1,3 +1,7 @@
+import { c2Game } from './C-2/logic';
+import type { C2State } from './C-2/logic';
+import { c2Meta } from './C-2/meta';
+import { c2Render } from './C-2/render';
 import { cAGame } from './C-A/logic';
 import type { ClubsState } from './C-A/logic';
 import { cAMeta } from './C-A/meta';
@@ -38,6 +42,13 @@ export const registry: readonly RegistryEntry[] = [
     game: cAGame,
     render: cARender,
     meta: cAMeta,
+  }),
+  defineEntry<C2State>({
+    id: c2Meta.id,
+    kind: 'card',
+    game: c2Game,
+    render: c2Render,
+    meta: c2Meta,
   }),
 ];
 
