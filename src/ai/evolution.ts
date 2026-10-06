@@ -26,7 +26,7 @@ function makeController<S>(
 ): Controller<S> {
   return typeof level === 'number'
     ? levelController(game, policy, level, seed)
-    : wrapPolicy(game, policy, level, seed, { avoidIntended: true });
+    : wrapPolicy(game, policy, level, seed);
 }
 
 /**
