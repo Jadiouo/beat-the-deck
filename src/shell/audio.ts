@@ -1,7 +1,9 @@
 /**
  * 音效（SPEC 8.4）：用 Web Audio 即時合成的方波與雜訊，不放音檔。
  *
- * - 預設靜音（`isEnabled()` 一開始是 false；開關存在 `progress.settings.sound`，由外殼讀寫）。
+ * - SPEC 8.4 原文：「預設靜音，要玩家按過一次鍵才啟動」。字面解讀：「靜音」是第一次互動之前（瀏覽器不准沒互動
+ *   就發聲，所以一個節點都不建立）；「按過一次鍵才啟動」是第一次按鍵、點擊或觸控之後音效就是開的。
+ *   所以開關（`isEnabled()`）預設是 true，標題選單的開關讓玩家關掉；開關存在 `progress.settings.sound`，由外殼讀寫。
  * - 瀏覽器要求使用者互動過才能啟動 `AudioContext`：外殼在第一次按鍵、點擊、觸控時呼叫 `unlock()`，
  *   那時才建立 context 並 `resume()`。在這之前，不管開關是什麼，都不建立任何節點。
  * - 可測：`AudioContext` 是注入的依賴（`createContext`），測試用假的記錄節點。
@@ -161,7 +163,7 @@ export interface Audio {
 }
 
 export function createAudio(deps: AudioDeps): Audio {
-  let enabled = false;
+  let enabled = true;
   let unlocked = false;
   let ctx: AudioContextLike | null = null;
   let master: GainLike | null = null;

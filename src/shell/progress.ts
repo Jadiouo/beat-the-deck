@@ -24,7 +24,10 @@ export interface CardRecord {
 export interface Settings {
   /** 掃描線效果。 */
   readonly scanlines: boolean;
-  /** 音效（SPEC 8.4）：預設關（靜音）。舊存檔沒有這個欄位，讀到時當成關。 */
+  /**
+   * 音效（SPEC 8.4「預設靜音，要玩家按過一次鍵才啟動」）：字面解讀是第一次互動之後就是開的，所以預設開。
+   * 舊存檔沒有這個欄位算開；存檔裡明確寫 false 的玩家照舊關著。
+   */
   readonly sound: boolean;
 }
 
@@ -52,7 +55,7 @@ export function defaultProgress(): Progress {
     cards: {},
     globalLevel: 1,
     lossStreak: 0,
-    settings: { scanlines: false, sound: false },
+    settings: { scanlines: false, sound: true },
   };
 }
 
@@ -92,7 +95,8 @@ export function parseProgress(text: string | null): Progress {
 
   const rawSettings = raw['settings'];
   const scanlines = isRecord(rawSettings) && rawSettings['scanlines'] === true;
-  const sound = isRecord(rawSettings) && rawSettings['sound'] === true;
+  // 只有明確的 false 才算關；沒有欄位或壞掉的值退回預設的開。
+  const sound = !(isRecord(rawSettings) && rawSettings['sound'] === false);
   const rawStreak = raw['lossStreak'];
   const lossStreak =
     typeof rawStreak === 'number' && Number.isInteger(rawStreak) && rawStreak > 0 ? rawStreak : 0;

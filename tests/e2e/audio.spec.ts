@@ -2,8 +2,8 @@ import { expect, test } from '@playwright/test';
 import type { Page } from '@playwright/test';
 
 /**
- * 音效（SPEC 8.4）的端到端：預設靜音、玩家按過鍵才建立 AudioContext、
- * 在設定裡打開之後真的有方波振盪器在響，而且設定會存起來。
+ * 音效（SPEC 8.4）的端到端：玩家按過鍵才建立 AudioContext、之後預設就會響（方波）、
+ * 在設定裡關掉就安靜，而且設定會存起來。
  * 在頁面載入前把 AudioContext 換成會記錄的版本。
  */
 
@@ -47,23 +47,25 @@ const readSpy = (page: Page): Promise<{ contexts: number; types: string[]; sourc
     };
   });
 
-test('音效：預設靜音，沒按鍵之前不建立 AudioContext；開關預設是關', async ({ page }) => {
+test('音效：沒按鍵之前不建立 AudioContext；第一次按鍵之後預設就會響（開關預設是開）', async ({
+  page,
+}) => {
   await spyOnAudio(page);
   await page.goto('/');
   await expect(page.locator('#mirror')).toHaveAttribute('data-screen', 'title');
-  await expect(page.getByTestId('menu-sound')).toHaveText('音效：關');
+  await expect(page.getByTestId('menu-sound')).toHaveText('音效：開');
+  // SPEC 8.4：互動之前什麼都沒有（瀏覽器不准沒互動就發聲）。
   expect((await readSpy(page)).contexts).toBe(0);
 
-  // 按了鍵、但開關是關的：AudioContext 被啟動（互動過了），仍然沒有任何聲音。
   await page.keyboard.press('ArrowDown');
   await expect(page.locator('#mirror')).toHaveAttribute('data-cursor', '1');
-  const quiet = await readSpy(page);
-  expect(quiet.contexts).toBe(1);
-  expect(quiet.types).toEqual([]);
-  expect(quiet.sources).toBe(0);
+  const loud = await readSpy(page);
+  expect(loud.contexts).toBe(1);
+  expect(loud.types.length).toBeGreaterThan(0);
+  expect(loud.types.every((type) => type === 'square')).toBe(true);
 });
 
-test('音效：在標題打開音效之後會響（只有方波與雜訊），設定存在 localStorage，重新整理還在', async ({
+test('音效：在標題把音效關掉之後就安靜，設定存在 localStorage，重新整理還是關', async ({
   page,
 }) => {
   await spyOnAudio(page);
@@ -72,17 +74,25 @@ test('音效：在標題打開音效之後會響（只有方波與雜訊），�
   await page.keyboard.press('ArrowDown');
   await expect(page.locator('#mirror')).toHaveAttribute('data-cursor', '2');
   await page.keyboard.press('Enter');
-  await expect(page.getByTestId('menu-sound')).toHaveText('音效：開');
-
-  const loud = await readSpy(page);
-  expect(loud.contexts).toBe(1);
-  expect(loud.types.length).toBeGreaterThan(0);
-  expect(loud.types.every((type) => type === 'square')).toBe(true);
+  await expect(page.getByTestId('menu-sound')).toHaveText('音效：關');
 
   const stored = await page.evaluate(() => window.localStorage.getItem('btd.v1'));
-  expect(JSON.parse(stored ?? '{}').settings.sound).toBe(true);
+  expect(JSON.parse(stored ?? '{}').settings.sound).toBe(false);
   expect(JSON.parse(stored ?? '{}').version).toBe(1);
 
+  // 關掉之後再按鍵，不會再多出振盪器。
+  const before = (await readSpy(page)).types.length;
+  await page.keyboard.press('ArrowUp');
+  await expect(page.locator('#mirror')).toHaveAttribute('data-cursor', '1');
+  expect((await readSpy(page)).types.length).toBe(before);
+
+  // 重新整理：存檔裡明確關過的，仍然是關，而且按鍵之後也沒有聲音。
   await page.reload();
-  await expect(page.getByTestId('menu-sound')).toHaveText('音效：開');
+  await expect(page.getByTestId('menu-sound')).toHaveText('音效：關');
+  await page.keyboard.press('ArrowDown');
+  await expect(page.locator('#mirror')).toHaveAttribute('data-cursor', '1');
+  const after = await readSpy(page);
+  expect(after.contexts).toBe(1);
+  expect(after.types).toEqual([]);
+  expect(after.sources).toBe(0);
 });
