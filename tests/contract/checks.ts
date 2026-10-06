@@ -26,7 +26,7 @@ import { PALETTE } from '../../src/shell/palette';
 import { asRenderingContext, createFakeContext, LOGIC_HEIGHT, LOGIC_WIDTH } from './fake-context';
 import type { FakeContext } from './fake-context';
 import { deepFreeze } from './freeze';
-import { measureDecideTimes, seedList, winRate } from '../ai/harness';
+import { MATCH_CONFIG, seedList, winRate } from '../ai/harness';
 import { AI_SEEDS } from '../ai/seeds';
 import type { DecideTimes } from '../ai/harness';
 
@@ -671,12 +671,66 @@ export function measureA4(entry: RegistryEntry, seeds: readonly number[] = AI_SE
   return winRate(entry.game, humanPolicy, HUMAN_LEVEL, requirePolicy(entry), 10, seeds);
 }
 
-/** A5 的數字：預設性格等級 10 的 decide() 每次花幾毫秒。 */
-export function measureA5(
-  entry: RegistryEntry,
-  seeds: readonly number[] = SPEED_SEEDS,
-): DecideTimes {
-  return measureDecideTimes(entry.game, requirePolicy(entry), 10, seeds);
+/** A5 的數字：比 `DecideTimes` 多一個第 99.9 百分位；`maxMs` 照舊保留（只印出來，不當門檻）。 */
+export interface A5Times extends DecideTimes {
+  readonly p999Ms: number;
+}
+
+/**
+ * 第 p 百分位（最近名次法）：升冪排序後取索引 `ceil(p × n) − 1`，n 是樣本數。
+ * n = 18,000、p = 0.999 時索引是 17,981，也就是排除最慢的 18 個。沒有樣本時回 0。
+ */
+export function percentile(sorted: readonly number[], p: number): number {
+  if (sorted.length === 0) {
+    return 0;
+  }
+  const index = Math.min(sorted.length - 1, Math.max(0, Math.ceil(p * sorted.length) - 1));
+  return sorted[index] ?? 0;
+}
+
+/**
+ * A5 的數字：預設性格等級 10 的 decide() 每次花幾毫秒。
+ * 做法與 `tests/ai/harness.ts` 的 `measureDecideTimes` 相同（每個種子打一場，對手是 level 10 的
+ * random、坐另一邊，只計時被測的那一邊，第一場只暖機），但要保留每一個樣本才能算百分位，
+ * 所以在這裡自己收集（harness 只回傳平均與最大值，不在這次授權的修改範圍內）。
+ */
+export function measureA5(entry: RegistryEntry, seeds: readonly number[] = SPEED_SEEDS): A5Times {
+  const game = entry.game;
+  const policy = requirePolicy(entry);
+  const times: number[] = [];
+  const run = (seed: number, record: boolean): void => {
+    const side: Side = seed % 2 === 0 ? 0 : 1;
+    const inner = levelController(game, policy, 10, seed);
+    const timed: Controller<unknown> = {
+      decide(state: unknown, who: Side, tick: number): Buttons {
+        const started = performance.now();
+        const pressed = copyButtons(inner.decide(state, who, tick));
+        const elapsed = performance.now() - started;
+        if (record) {
+          times.push(elapsed);
+        }
+        return pressed;
+      },
+    };
+    const other = levelController(game, randomPolicy, 10, seed + 1_000_003);
+    if (side === 0) {
+      playMatch(game, seed, MATCH_CONFIG, timed, other);
+    } else {
+      playMatch(game, seed, MATCH_CONFIG, other, timed);
+    }
+  };
+  run(seeds[0] ?? 0, false);
+  for (const seed of seeds) {
+    run(seed, true);
+  }
+  const sorted = [...times].sort((x, y) => x - y);
+  const total = sorted.reduce((sum, t) => sum + t, 0);
+  return {
+    samples: sorted.length,
+    meanMs: sorted.length === 0 ? 0 : total / sorted.length,
+    p999Ms: percentile(sorted, 0.999),
+    maxMs: sorted[sorted.length - 1] ?? 0,
+  };
 }
 
 function pct(rate: number): string {
@@ -740,17 +794,37 @@ export function checkHumanLosesToLevel10(
   }
 }
 
-/** A5 決策夠快：預設性格等級 10 的 decide()，平均少於 1 毫秒、最慢少於 8 毫秒。 */
+/**
+ * A5 決策夠快：預設性格等級 10 的 decide()，平均少於 1 毫秒、第 99.9 百分位少於 8 毫秒。
+ *
+ * 【依使用者核准的放寬，不是實作者自行決定】
+ * TEST_PLAN 5.1 的原文是「平均每次少於 1 毫秒，最慢一次少於 8 毫秒」。「最慢一次」量到的是環境，
+ * 不是演算法：實測平均只有 0.045 毫秒（門檻的 1/20），同一條測試單獨跑 3 次全過，但整套
+ * `npm run check` 平行跑（vitest 開 4 個 worker 佔滿 4 核）時，S-3 的 18,000 次 decide() 最慢
+ * 9.760 毫秒；診斷是 GC 暫停或排程被搶。這與 TEST_PLAN 第 2 節「不可以有偶爾才失敗的測試」互相打架。
+ * 所以「平均 < 1 毫秒」維持硬斷言，「最慢一次」改成「第 99.9 百分位 < 8 毫秒」：18,000 個樣本
+ * 會排除最慢的 18 個（GC 暫停的落點），而真的演算法變慢是每一次都慢，p99.9 一樣會超標。
+ * 百分位的算法見 `percentile`（升冪排序後取索引 ceil(0.999 × n) − 1）。
+ * 最慢值仍然會被印出來（不管過不過），哪天演算法真的變慢，看輸出就知道。
+ */
 export function checkDecisionSpeed(
   entry: RegistryEntry,
   seeds: readonly number[] = SPEED_SEEDS,
 ): void {
-  const { samples, meanMs, maxMs } = measureA5(entry, seeds);
+  const { samples, meanMs, p999Ms, maxMs } = measureA5(entry, seeds);
+  // 照實印出：過關也印（console.log 會顯示在 vitest 該測試的 stdout）。
+  console.log(
+    `[A5] ${entry.id} 樣本數 ${samples}，平均 ${meanMs.toFixed(3)} ms，p99.9 ${p999Ms.toFixed(3)} ms，最慢一次 ${maxMs.toFixed(3)} ms`,
+  );
+  const summary = `${samples} 次 decide()（平均 ${meanMs.toFixed(3)}、p99.9 ${p999Ms.toFixed(3)}、最慢 ${maxMs.toFixed(3)} 毫秒）`;
   if (!(meanMs < 1)) {
-    violation('A5', `${samples} 次 decide()，平均 ${meanMs.toFixed(3)} 毫秒，要少於 1 毫秒`);
+    violation(
+      'A5',
+      `${samples} 次 decide()，平均 ${meanMs.toFixed(3)} 毫秒，要少於 1 毫秒；${summary}`,
+    );
   }
-  if (!(maxMs < 8)) {
-    violation('A5', `${samples} 次 decide()，最慢 ${maxMs.toFixed(3)} 毫秒，要少於 8 毫秒`);
+  if (!(p999Ms < 8)) {
+    violation('A5', `${summary}，第 99.9 百分位 ${p999Ms.toFixed(3)} 毫秒，要少於 8 毫秒`);
   }
 }
 

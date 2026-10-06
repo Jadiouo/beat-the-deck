@@ -91,7 +91,7 @@ describe('用臨時登記項（counter-game ＋ 預設性格 greedy）實際跑 
     const a3 = measureA3(greedyEntry);
     const a4 = measureA4(greedyEntry);
     const a5 = measureA5(greedyEntry);
-    for (const value of [a1, a2, a3, a4, a5.meanMs, a5.maxMs]) {
+    for (const value of [a1, a2, a3, a4, a5.meanMs, a5.p999Ms, a5.maxMs]) {
       expect(Number.isFinite(value)).toBe(true);
     }
     expect(a1).toBeGreaterThanOrEqual(0.75);
@@ -100,7 +100,8 @@ describe('用臨時登記項（counter-game ＋ 預設性格 greedy）實際跑 
     expect(a4).toBeLessThanOrEqual(0.35);
     expect(a5.samples).toBeGreaterThan(0);
     expect(a5.meanMs).toBeLessThan(1);
-    expect(a5.maxMs).toBeLessThan(8);
+    expect(a5.p999Ms).toBeLessThan(8);
+    expect(a5.maxMs).toBeGreaterThanOrEqual(a5.p999Ms);
     for (const code of A_CODES) {
       const check = AI_CHECKS.find((c) => c.code === code);
       expect(check).toBeDefined();
