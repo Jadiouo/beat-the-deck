@@ -8,12 +8,16 @@ import { playMatch } from '../../core/match';
 import type { Buttons, Controller, Inputs, Side } from '../../core/types';
 import { AI_WAIT_TICKS, DECISION_TIMEOUT, IDLE } from '../_hearts/logic';
 import {
+  CALL_BUTTONS,
   CHIPS,
   FOLD,
   LOCK_TICKS,
   MOVE_BUTTONS,
   PAPER,
   predictOpponent,
+  RAISE_BUTTONS,
+  readAccuracy,
+  RESPOND_PREP,
   RESULT_TICKS,
   ROCK,
   ROUNDS,
@@ -21,6 +25,7 @@ import {
   foldCost,
   hQGame,
   makeState,
+  raiseFee,
   stakeFor,
 } from './logic';
 import type { HQState, Move } from './logic';
@@ -112,6 +117,82 @@ function moveOf(buttons: Buttons): Move | null {
   );
   return found ?? null;
 }
+
+/** 這個按鍵是哪個出手、有沒有加碼（沒有對應回傳 null）。 */
+function decode(buttons: Buttons): { move: Move; raised: boolean } | null {
+  for (const m of [ROCK, PAPER, SCISSORS, FOLD] as const) {
+    if (sameButtons(MOVE_BUTTONS[m], buttons)) {
+      return { move: m, raised: false };
+    }
+  }
+  for (const m of [ROCK, PAPER, SCISSORS] as const) {
+    if (sameButtons(RAISE_BUTTONS[m] as Buttons, buttons)) {
+      return { move: m, raised: true };
+    }
+  }
+  return null;
+}
+
+/** 回應期的按鍵：a 跟、b 棄牌、其他是沒按。 */
+function respondOf(buttons: Buttons): 'call' | 'fold' | 'none' {
+  if (sameButtons(buttons, CALL_BUTTONS)) {
+    return 'call';
+  }
+  if (sameButtons(buttons, MOVE_BUTTONS[FOLD])) {
+    return 'fold';
+  }
+  return 'none';
+}
+
+/** 出手的按鍵：`raised` 是 a 加上那一拳（棄牌沒有加碼）。 */
+function press(move: Move, raised = false): Buttons {
+  return raised && move !== FOLD ? (RAISE_BUTTONS[move] as Buttons) : MOVE_BUTTONS[move];
+}
+
+/** 從 choose 開始：兩邊出手（可以加碼），走完鎖定的 2 個 tick。 */
+function lockAndSettle(state: HQState, b0: Buttons, b1: Buttons): HQState {
+  return stepN(hQGame.step(state, [b0, b1]), LOCK_TICKS);
+}
+
+/** 再走 RESPOND_PREP 個 tick：只有一邊加碼的回合，回應期開了。 */
+function openRespond(state: HQState, b0: Buttons, b1: Buttons): HQState {
+  return stepN(lockAndSettle(state, b0, b1), RESPOND_PREP);
+}
+
+/** 從 choose 開始走完一整回合（含回應期；`response` 是沒加碼的那一邊的回應），回傳入帳之後的 state。 */
+function playFull(
+  state: HQState,
+  b0: Buttons,
+  b1: Buttons,
+  response: 'call' | 'fold' = 'call',
+): HQState {
+  let s = lockAndSettle(state, b0, b1);
+  if (s.phase === 'respond') {
+    s = stepN(s, RESPOND_PREP);
+    const responder: Side = s.raised[0] ? 1 : 0;
+    const reply = response === 'call' ? CALL_BUTTONS : MOVE_BUTTONS[FOLD];
+    s = hQGame.step(s, responder === 0 ? [reply, IDLE] : [IDLE, reply]);
+  }
+  return stepN(s, RESULT_TICKS);
+}
+
+/** 對手（1 號邊，AI）一直出石頭 5 次：AI 讀得很準。 */
+const STEADY = historyOf([
+  [ROCK, PAPER],
+  [ROCK, SCISSORS],
+  [ROCK, ROCK],
+  [ROCK, PAPER],
+  [ROCK, PAPER],
+]);
+/** 亂出的人：AI 預測的命中率只有三分之一。 */
+const MESSY = historyOf([
+  [ROCK, PAPER],
+  [SCISSORS, SCISSORS],
+  [PAPER, ROCK],
+  [PAPER, PAPER],
+  [SCISSORS, ROCK],
+  [ROCK, SCISSORS],
+]);
 
 describe('H-Q 加碼｜初始與常數', () => {
   it('第 0 回合、賭注 1、準備階段（還要等 45 tick）、籌碼各 100、歷史是空的、salt 由種子決定', () => {
@@ -436,11 +517,13 @@ describe('H-Q 加碼｜規則', () => {
 });
 
 describe('H-Q 加碼｜actions 與 evaluate', () => {
-  it('actions：choose 而且還沒出手是 [石頭、布、剪刀、棄牌]（沒有全放開，石頭排第一）；其他階段只有 [全放開]', () => {
-    const four = hQGame.actions(choosing(), 1);
-    expect(four).toHaveLength(4);
-    expect(four.map(moveOf)).toEqual([ROCK, PAPER, SCISSORS, FOLD]);
-    expect(hQGame.actions(choosing(), 0).map(moveOf)).toEqual([ROCK, PAPER, SCISSORS, FOLD]);
+  it('actions：choose 而且還沒出手是 [石頭、布、剪刀、棄牌、加碼石頭、加碼布、加碼剪刀]（沒有全放開，石頭排第一）；其他階段只有 [全放開]', () => {
+    const seven = hQGame.actions(choosing(), 1);
+    expect(seven).toHaveLength(7);
+    // 前四個與加碼之前一模一樣（石頭排第一、棄牌第四），後三個是加碼的拳。
+    expect(seven.slice(0, 4).map(moveOf)).toEqual([ROCK, PAPER, SCISSORS, FOLD]);
+    expect(seven.slice(4)).toEqual([...RAISE_BUTTONS]);
+    expect(hQGame.actions(choosing(), 0)).toEqual(seven);
     // 已經出手、準備、鎖定、開牌、結束：只有全放開。
     const onlyIdle = (state: HQState, side: Side): void => {
       const actions = hQGame.actions(state, side);
@@ -757,5 +840,480 @@ describe('H-Q 加碼｜AI 能不能玩', () => {
     const b = levelController(hQGame, random, 10, 2);
     const result = playMatch(hQGame, 1, CONFIG, a, b);
     expect(result.ticks).toBeLessThanOrEqual(CONFIG.maxTicks);
+  });
+});
+
+describe('H-Q 加碼｜第二層規則：加碼、回應、結算', () => {
+  it('R1. 按鍵：a 加上一拳是加碼的拳；a 單獨沒有作用；b 勝過 a 與拳（棄牌不算加碼）；出手之後加碼與拳都不能改', () => {
+    expect(RAISE_BUTTONS).toHaveLength(3);
+    expect(RAISE_BUTTONS[ROCK]).toEqual({ ...IDLE, a: true, left: true });
+    expect(RAISE_BUTTONS[PAPER]).toEqual({ ...IDLE, a: true, up: true });
+    expect(RAISE_BUTTONS[SCISSORS]).toEqual({ ...IDLE, a: true, right: true });
+    expect(CALL_BUTTONS).toEqual({ ...IDLE, a: true });
+
+    const commit = (buttons: Partial<Buttons>): HQState =>
+      hQGame.step(choosing(), [{ ...IDLE, ...buttons }, IDLE]);
+    for (const move of [ROCK, PAPER, SCISSORS] as const) {
+      const raised = hQGame.step(choosing(), [press(move, true), IDLE]);
+      expect(raised.pending[0]).toBe(move);
+      expect(raised.raised).toEqual([true, false]);
+      const plain = hQGame.step(choosing(), [press(move), IDLE]);
+      expect(plain.pending[0]).toBe(move);
+      expect(plain.raised).toEqual([false, false]);
+    }
+    // a 單獨：沒有出手，也沒有加碼。
+    expect(commit({ a: true }).pending[0]).toBeNull();
+    expect(commit({ a: true }).raised).toEqual([false, false]);
+    // b 勝過 a 與拳：棄牌，而且不算加碼。
+    const folded = commit({ a: true, b: true, left: true });
+    expect(folded.pending[0]).toBe(FOLD);
+    expect(folded.raised).toEqual([false, false]);
+    // 出手之後不能改：不能把沒加碼的拳補成加碼，也不能撤掉加碼。
+    const plain = hQGame.step(choosing(), [press(ROCK), IDLE]);
+    expect(hQGame.step(plain, [press(ROCK, true), IDLE]).raised).toEqual([false, false]);
+    const raised = hQGame.step(choosing(), [press(ROCK, true), IDLE]);
+    const later = hQGame.step(raised, [press(PAPER), IDLE]);
+    expect(later.raised).toEqual([true, false]);
+    expect(later.pending[0]).toBe(ROCK);
+    // 兩邊同時、一邊加碼：各記各的。
+    const both = hQGame.step(choosing(), [press(PAPER, true), press(SCISSORS)]);
+    expect(both.raised).toEqual([true, false]);
+    expect(both.phase).toBe('locked');
+  });
+
+  it('R2. 加碼費是賭注的四分之一（進位），付給對方：1、1、1、2', () => {
+    expect([1, 2, 4, 8].map(raiseFee)).toEqual([1, 1, 1, 2]);
+  });
+
+  it('R3. 結算：一邊加碼，贏輸都是 2 倍賭注；加碼費付給對方（贏、輸、平手都付）；兩邊加碼是 3 倍而費用互相抵銷；總籌碼不變', () => {
+    const base = choosing({ stake: 8, round: 4 });
+    const chips = (b0: Buttons, b1: Buttons, response: 'call' | 'fold' = 'call'): number[] => [
+      ...playFull(base, b0, b1, response).chips,
+    ];
+    // 人加碼、AI 跟（沒加碼）：贏 16 再收到 2 的費用；輸付 16 再付 2；平手只有費用。
+    expect(chips(press(PAPER, true), press(ROCK))).toEqual([CHIPS + 14, CHIPS - 14]);
+    expect(chips(press(ROCK, true), press(PAPER))).toEqual([CHIPS - 18, CHIPS + 18]);
+    expect(chips(press(PAPER, true), press(PAPER))).toEqual([CHIPS - 2, CHIPS + 2]);
+    // AI 加碼、人跟：鏡像。
+    expect(chips(press(ROCK), press(PAPER, true))).toEqual([CHIPS - 14, CHIPS + 14]);
+    expect(chips(press(PAPER), press(PAPER, true))).toEqual([CHIPS + 2, CHIPS - 2]);
+    // 回應期棄牌：棄牌的人付 foldCost（賭注 8 是 6），仍然收到加碼費 2。
+    expect(chips(press(ROCK, true), press(SCISSORS), 'fold')).toEqual([CHIPS + 4, CHIPS - 4]);
+    expect(chips(press(SCISSORS), press(ROCK, true), 'fold')).toEqual([CHIPS - 4, CHIPS + 4]);
+    // 兩邊加碼：3 倍賭注，費用抵銷。
+    expect(chips(press(PAPER, true), press(ROCK, true))).toEqual([CHIPS + 24, CHIPS - 24]);
+    expect(chips(press(PAPER, true), press(PAPER, true))).toEqual([CHIPS, CHIPS]);
+    // 加碼的同時對方棄牌（出手時就棄牌，沒有回應期）：棄牌的人付 foldCost，加碼的人付加碼費。
+    expect(chips(press(ROCK, true), press(FOLD))).toEqual([CHIPS + 4, CHIPS - 4]);
+    expect(chips(press(FOLD), press(ROCK, true))).toEqual([CHIPS - 4, CHIPS + 4]);
+    // 賭注小的時候：賭注 1 加碼贏 2、付費 1 → 淨贏 1。
+    const cheap = playFull(choosing({ stake: 1 }), press(PAPER, true), press(ROCK));
+    expect(cheap.chips).toEqual([CHIPS + 1, CHIPS - 1]);
+    // 總籌碼不變。
+    for (const [b0, b1] of [
+      [press(PAPER, true), press(ROCK)],
+      [press(FOLD), press(SCISSORS, true)],
+      [press(ROCK, true), press(ROCK, true)],
+    ] as const) {
+      const after = chips(b0, b1);
+      expect((after[0] as number) + (after[1] as number)).toBe(2 * CHIPS);
+    }
+  });
+
+  it('R4. 回應期：一邊加碼、另一邊出拳 → 鎖定之後不開牌，進 respond；其他組合（都沒加碼、都加碼、一邊棄牌）直接開牌', () => {
+    const base = choosing({ stake: 8, round: 4 });
+    const respond = lockAndSettle(base, press(PAPER, true), press(ROCK));
+    expect(respond.phase).toBe('respond');
+    expect(respond.wait).toBe(RESPOND_PREP);
+    expect(respond.revealed).toBe(false);
+    expect(respond.last).toBeNull();
+    expect(respond.pending).toEqual([PAPER, ROCK]);
+    expect(respond.raised).toEqual([true, false]);
+    expect(respond.chips).toEqual([CHIPS, CHIPS]);
+    // 鏡像：AI 加碼。
+    expect(lockAndSettle(base, press(ROCK), press(PAPER, true)).phase).toBe('respond');
+    for (const [b0, b1] of [
+      [press(PAPER), press(ROCK)],
+      [press(PAPER, true), press(ROCK, true)],
+      [press(PAPER, true), press(FOLD)],
+      [press(FOLD), press(ROCK, true)],
+      [press(FOLD), press(FOLD)],
+    ] as const) {
+      const direct = lockAndSettle(base, b0, b1);
+      expect(direct.phase).toBe('result');
+      expect(direct.last).not.toBeNull();
+    }
+  });
+
+  it('R5. 回應期的前 30 個 tick 兩邊的輸入都被忽略（邊界：第 30 個 tick 按無效，第 31 個才算）；之後只有沒加碼的那一邊能回應', () => {
+    const base = choosing({ stake: 8, round: 4 });
+    let s = lockAndSettle(base, press(PAPER, true), press(ROCK));
+    // 人是加碼的那一邊，AI（1 號邊）是回應的那一邊。
+    s = stepN(s, RESPOND_PREP - 1, [MOVE_BUTTONS[FOLD], MOVE_BUTTONS[FOLD]]);
+    expect(s.phase).toBe('respond');
+    expect(s.revealed).toBe(false);
+    s = hQGame.step(s, [MOVE_BUTTONS[FOLD], MOVE_BUTTONS[FOLD]]);
+    expect(s.phase).toBe('respond');
+    expect(s.wait).toBe(0);
+    expect(s.revealed).toBe(true);
+    expect(s.pending).toEqual([PAPER, ROCK]);
+    // 加碼的那一邊按什麼都沒有用。
+    const ignored = hQGame.step(s, [MOVE_BUTTONS[FOLD], IDLE]);
+    expect(ignored.phase).toBe('respond');
+    expect(ignored.pending).toEqual([PAPER, ROCK]);
+    // 回應的那一邊：a 是跟，b 是棄牌，b 勝過 a。
+    const called = hQGame.step(s, [IDLE, CALL_BUTTONS]);
+    expect(called.phase).toBe('result');
+    expect(called.last?.moves).toEqual([PAPER, ROCK]);
+    expect(called.last?.delta).toEqual([14, -14]);
+    const folded = hQGame.step(s, [IDLE, MOVE_BUTTONS[FOLD]]);
+    expect(folded.last?.moves).toEqual([PAPER, FOLD]);
+    expect(folded.last?.delta).toEqual([4, -4]);
+    expect(hQGame.step(s, [IDLE, { ...IDLE, a: true, b: true }]).last?.moves).toEqual([
+      PAPER,
+      FOLD,
+    ]);
+    // 回應的那一邊按了拳：沒有作用（出手不能改）。
+    expect(hQGame.step(s, [IDLE, MOVE_BUTTONS[SCISSORS]]).phase).toBe('respond');
+    // 開牌之後照常停 30 個 tick 才入帳；歷史與加碼紀錄各加一筆。
+    const banked = stepN(called, RESULT_TICKS);
+    expect(banked.chips).toEqual([CHIPS + 14, CHIPS - 14]);
+    expect(banked.history).toEqual([[PAPER, ROCK]]);
+    expect(banked.raises).toEqual([[true, false]]);
+    expect(banked.phase).toBe('prep');
+    expect(banked.raised).toEqual([false, false]);
+    expect(banked.revealed).toBe(false);
+  });
+
+  it('R6.（邊界）回應期超時：第 300 個 tick 還沒回應就自動棄牌（保守的那個），記成超時；第 300 個 tick 按了 a 算跟，不算超時', () => {
+    const base = choosing({ stake: 8, round: 4 });
+    const open = openRespond(base, press(PAPER, true), press(ROCK));
+    expect(open.phase).toBe('respond');
+    const late = hQGame.step({ ...open, idle: DECISION_TIMEOUT - 1 }, idle());
+    expect(late.phase).toBe('result');
+    expect(late.last?.moves).toEqual([PAPER, FOLD]);
+    expect(late.last?.timeout).toEqual([false, true]);
+    expect(late.last?.delta).toEqual([4, -4]);
+    const edge = hQGame.step({ ...open, idle: DECISION_TIMEOUT - 1 }, [IDLE, CALL_BUTTONS]);
+    expect(edge.last?.moves).toEqual([PAPER, ROCK]);
+    expect(edge.last?.timeout).toEqual([false, false]);
+    const waiting = hQGame.step({ ...open, idle: DECISION_TIMEOUT - 2 }, idle());
+    expect(waiting.phase).toBe('respond');
+  });
+
+  it('R7. 時間到（maxTicks）時還在回應期：這一回合不算（和 choose、locked 一樣）', () => {
+    const open = openRespond(
+      choosing({ stake: 8, round: 4, maxTicks: 1000 }),
+      press(PAPER, true),
+      press(ROCK),
+    );
+    const cut = hQGame.step({ ...open, tick: 999 }, idle());
+    expect(cut.over).toBe(true);
+    expect(cut.chips).toEqual([CHIPS, CHIPS]);
+    expect(cut.history).toEqual([]);
+    expect(hQGame.winner(cut)).toBeNull();
+  });
+
+  it('R8. actions：回應期的前 30 個 tick 兩邊只有 [全放開]；之後回應的那一邊是 [跟、棄牌]，加碼的那一邊是 [全放開]', () => {
+    const base = choosing({ stake: 8, round: 4 });
+    const closed = lockAndSettle(base, press(PAPER, true), press(ROCK));
+    for (const side of [0, 1] as const) {
+      expect(hQGame.actions(closed, side)).toEqual([IDLE]);
+    }
+    const open = openRespond(base, press(PAPER, true), press(ROCK));
+    expect(hQGame.actions(open, 1).map(respondOf)).toEqual(['call', 'fold']);
+    expect(hQGame.actions(open, 0)).toEqual([IDLE]);
+    // 鏡像：AI 加碼、人回應。
+    const mirrored = openRespond(base, press(ROCK), press(PAPER, true));
+    expect(hQGame.actions(mirrored, 0).map(respondOf)).toEqual(['call', 'fold']);
+    expect(hQGame.actions(mirrored, 1)).toEqual([IDLE]);
+  });
+
+  it('R9. step 不改動傳進來的 state 與輸入：回應期的各個階段也一樣；加碼紀錄存在 state 裡，JSON 來回不變，大小有上限', () => {
+    const base = choosing({ stake: 8, round: 4 });
+    const states: HQState[] = [
+      hQGame.step(base, [press(PAPER, true), IDLE]),
+      lockAndSettle(base, press(PAPER, true), press(ROCK)),
+      openRespond(base, press(PAPER, true), press(ROCK)),
+    ];
+    for (const state of states) {
+      const frozen = deepFreeze(JSON.parse(JSON.stringify(state)) as HQState);
+      const before = JSON.stringify(frozen);
+      const inputs = deepFreeze<Inputs>([{ ...CALL_BUTTONS }, { ...MOVE_BUTTONS[FOLD] }]);
+      expect(() => hQGame.step(frozen, inputs)).not.toThrow();
+      expect(JSON.stringify(frozen)).toBe(before);
+    }
+    const a = levelController(hQGame, pathfinder, 8, 3);
+    const b = levelController(hQGame, random, 5, 4);
+    let s = hQGame.init(11, CONFIG);
+    for (let tick = 0; !hQGame.isOver(s); tick += 1) {
+      s = hQGame.step(s, [a.decide(s, 0, tick), b.decide(s, 1, tick)]);
+      expect(s.raises.length).toBeLessThanOrEqual(ROUNDS);
+      expect(s.raises.length).toBe(s.history.length);
+    }
+    expect(JSON.parse(JSON.stringify(s))).toEqual(s);
+  });
+});
+
+describe('H-Q 加碼｜第二層：AI 什麼時候加碼', () => {
+  /** AI（1 號邊）出 `move`（可以加碼），人出石頭；走到「還看不到對手出什麼」的終點，回傳 AI 的 gain。 */
+  const gainOf = (state: HQState, move: 0 | 1 | 2, raised: boolean): number =>
+    hQGame.evaluate(lockAndSettle(state, press(ROCK), press(move, raised)), 1).gain;
+
+  it('P1. 命中率：規律的歷史 AI 一直讀對，命中率高；亂出的歷史只有三分之一左右；沒有歷史是三分之一', () => {
+    expect(readAccuracy([], 1)).toBeCloseTo(1 / 3, 10);
+    expect(readAccuracy(STEADY, 1)).toBeGreaterThan(0.6);
+    expect(readAccuracy(MESSY, 1)).toBeLessThan(0.4);
+    // 只讀 history，不改動傳進來的陣列。
+    const frozen = deepFreeze(historyOf(STEADY));
+    expect(readAccuracy(frozen, 1)).toBe(readAccuracy(STEADY, 1));
+  });
+
+  it('P2. AI 只在有把握時加碼：歷史有明顯規律 → evaluate 偏好加碼；歷史是亂的 → 每一手加碼都比不加碼差；淺搜尋（等級 1 到 3）看不到，不加碼', () => {
+    const steady = choosing({ history: STEADY, stake: 8, round: 5 });
+    const messy = choosing({ history: MESSY, stake: 8, round: 6 });
+    // 前提：兩個局面的預測確實一個集中、一個平。
+    expect(predictOpponent(STEADY, 1).probs[ROCK]).toBeGreaterThan(0.8);
+    // 有規律：剋它的布，加碼比不加碼好，而且好得比加碼費多。
+    expect(gainOf(steady, PAPER, true)).toBeGreaterThan(gainOf(steady, PAPER, false) + raiseFee(8));
+    // 亂的：每一手加碼都比不加碼差（差不多一個加碼費）。
+    for (const move of [ROCK, PAPER, SCISSORS] as const) {
+      expect(gainOf(messy, move, true)).toBeLessThan(gainOf(messy, move, false) - 1);
+    }
+    // 實際按的鍵：等級 10（深度 6）。
+    expect(decode(decideAtDepth(steady, 1, 6))).toEqual({ move: PAPER, raised: true });
+    for (let salt = 0; salt < 40; salt += 1) {
+      const pick = decode(decideAtDepth({ ...messy, salt: salt * 7919 + 3 }, 1, 6));
+      expect(pick?.raised).toBe(false);
+    }
+    // 深度 1、2 看不到開牌，所有出手的 evaluate 都只差習慣：不加碼。
+    for (const depth of [1, 2]) {
+      expect(decode(decideAtDepth(steady, 1, depth))?.raised).toBe(false);
+    }
+    // 沒有歷史：不加碼。
+    for (let salt = 0; salt < 20; salt += 1) {
+      expect(decode(decideAtDepth(choosing({ salt: salt * 31 + 5, stake: 8 }), 1, 6))?.raised).toBe(
+        false,
+      );
+    }
+  });
+
+  it('P3. 賭注小的時候不加碼：同樣一眼就讀出來的規律，賭注 1 時加碼費（1）比多賺的還多', () => {
+    const cheap = choosing({ history: STEADY, stake: 1, round: 0 });
+    expect(decode(decideAtDepth(cheap, 1, 6))?.raised).toBe(false);
+    const dear = choosing({ history: STEADY, stake: 8, round: 5 });
+    expect(decode(decideAtDepth(dear, 1, 6))?.raised).toBe(true);
+  });
+
+  it('P4. 被加碼的時候 AI 照 evaluate 回應：自己出的拳會被預測剋住 → 棄牌；不會被剋 → 跟', () => {
+    const base = choosing({ history: STEADY, stake: 8, round: 5 });
+    // 人（0 號邊）加碼出石頭；AI 事先出的是 `ai`。AI 預測人一直出石頭。
+    const reply = (ai: Move, depth: number): 'call' | 'fold' | 'none' =>
+      respondOf(decideAtDepth(openRespond(base, press(ROCK, true), press(ai)), 1, depth));
+    for (const depth of [1, 3, 6]) {
+      expect(reply(SCISSORS, depth)).toBe('fold');
+      expect(reply(PAPER, depth)).toBe('call');
+      expect(reply(ROCK, depth)).toBe('call');
+    }
+  });
+});
+
+describe('H-Q 加碼｜第二層：三個選項各有對的時候', () => {
+  /** 人（0 號邊）出 `commit`，AI（1 號邊，等級 10）照它自己的 decide 打，回應期人照 `response` 回應。回傳人這回合的籌碼變化。 */
+  function humanDelta(
+    state: HQState,
+    commit: Buttons,
+    response: 'call' | 'fold',
+  ): { delta: number; ai: { move: Move; raised: boolean } | null } {
+    let s = state;
+    for (let guard = 0; guard < 2000 && !(s.phase === 'result' && s.last !== null); guard += 1) {
+      const humanIsResponder = s.phase === 'respond' && s.wait === 0 && s.raised[1] && !s.raised[0];
+      const mine: Buttons =
+        s.phase === 'choose' && s.pending[0] === null
+          ? commit
+          : humanIsResponder
+            ? response === 'call'
+              ? CALL_BUTTONS
+              : MOVE_BUTTONS[FOLD]
+            : IDLE;
+      s = hQGame.step(s, [mine, decideAtDepth(s, 1, 6)]);
+    }
+    expect(s.last).not.toBeNull();
+    const aiMove = s.pending[1];
+    return {
+      delta: (s.last as NonNullable<HQState['last']>).delta[0],
+      ai: aiMove === null ? null : { move: aiMove, raised: s.raised[1] },
+    };
+  }
+
+  // 人一直出石頭（5 次），AI 讀得很準，這回合賭注 8。AI 會加碼出布（見 P2）。
+  const locked = choosing({ history: STEADY, stake: 8, round: 5 });
+
+  it('T1. 棄牌的時候：我出的正是它讀到的那一手 → 它加碼了，跟會輸 2 倍賭注（再加收到的加碼費：-14），棄牌只付 foldCost（-4）→ 棄牌最好', () => {
+    const call = humanDelta(locked, press(ROCK), 'call');
+    const fold = humanDelta(locked, press(ROCK), 'fold');
+    expect(call.ai).toEqual({ move: PAPER, raised: true });
+    expect(call.delta).toBe(-14);
+    expect(fold.delta).toBe(-4);
+    expect(fold.delta).toBeGreaterThan(call.delta);
+    // 自己也加碼更慘：3 倍賭注。
+    expect(humanDelta(locked, press(ROCK, true), 'call').delta).toBe(-24);
+  });
+
+  it('T2. 跟的時候：我出的不是它讀到的那一手（騙它）→ 它加碼了，跟贏 2 倍賭注（+18），棄牌只是 -4 → 跟最好', () => {
+    const call = humanDelta(locked, press(SCISSORS), 'call');
+    const fold = humanDelta(locked, press(SCISSORS), 'fold');
+    expect(call.ai).toEqual({ move: PAPER, raised: true });
+    expect(call.delta).toBe(18);
+    expect(fold.delta).toBe(-4);
+    expect(call.delta).toBeGreaterThan(fold.delta);
+  });
+
+  it('T3. 換手的時候：被讀的規律已經鎖死 → 繼續出同一手，最好也只能棄牌（-4）；換一手打破規律並跟，贏 18 → 換手最好', () => {
+    const stay = Math.max(
+      humanDelta(locked, press(ROCK), 'call').delta,
+      humanDelta(locked, press(ROCK), 'fold').delta,
+    );
+    const switched = Math.max(
+      humanDelta(locked, press(SCISSORS), 'call').delta,
+      humanDelta(locked, press(SCISSORS), 'fold').delta,
+    );
+    // 一出手就棄牌也是 -4（對方加碼的費用照收）。
+    const foldAtOnce = humanDelta(locked, press(FOLD), 'call').delta;
+    expect(stay).toBe(-4);
+    expect(foldAtOnce).toBe(-4);
+    expect(switched).toBe(18);
+    expect(switched).toBeGreaterThan(stay);
+    // 換到另一個錯的拳（出布：和它的布平手）也比留在石頭好，但不如剪刀。
+    const tie = humanDelta(locked, press(PAPER), 'call').delta;
+    expect(tie).toBe(2);
+    expect(tie).toBeGreaterThan(stay);
+    expect(switched).toBeGreaterThan(tie);
+  });
+
+  it('T4. 沒有一個選項永遠最好：T1 跟輸給棄牌、T2 棄牌輸給跟；AI 沒有把握（亂出的歷史）的時候它不加碼，沒有回應期可言，三種拳的期望值一樣', () => {
+    const messy = choosing({ history: MESSY, stake: 8, round: 6 });
+    let raises = 0;
+    const deltas = new Map<number, number>();
+    for (let salt = 0; salt < 60; salt += 1) {
+      const state = { ...messy, salt: salt * 7919 + 3 };
+      for (const move of [ROCK, PAPER, SCISSORS] as const) {
+        const result = humanDelta(state, press(move), 'call');
+        raises += result.ai?.raised ? 1 : 0;
+        deltas.set(move, (deltas.get(move) ?? 0) + result.delta);
+      }
+    }
+    expect(raises).toBe(0);
+    // 沒有資訊的時候，哪一手都一樣（平均起來差得遠小於一個賭注）。
+    const values = [...deltas.values()].map((total) => total / 60);
+    expect(Math.max(...values) - Math.min(...values)).toBeLessThan(8);
+  });
+});
+
+describe('H-Q 加碼｜第二層：不偷看（含加碼）', () => {
+  const history = historyOf([
+    [ROCK, PAPER],
+    [ROCK, SCISSORS],
+    [PAPER, ROCK],
+    [ROCK, PAPER],
+  ]);
+  /** 對手可能的 pending（出手、有沒有加碼）。 */
+  const variants: readonly (readonly [Move | null, boolean])[] = [
+    [null, false],
+    [ROCK, false],
+    [ROCK, true],
+    [PAPER, false],
+    [PAPER, true],
+    [SCISSORS, false],
+    [SCISSORS, true],
+    [FOLD, false],
+  ];
+
+  it('N1. choose 階段：只有對手的 pending（出手與加碼與否）不同的兩個 state，evaluate 與 actions 完全相同；兩邊都成立', () => {
+    for (const aiSide of [0, 1] as const) {
+      const states = variants.map(([move, raised]) => {
+        const pending: [Move | null, Move | null] = aiSide === 1 ? [move, null] : [null, move];
+        const flags: [boolean, boolean] = aiSide === 1 ? [raised, false] : [false, raised];
+        return choosing({ history, pending, raised: flags, stake: 8, round: 4 });
+      });
+      for (const other of states) {
+        expect(hQGame.evaluate(other, aiSide)).toEqual(
+          hQGame.evaluate(states[0] as HQState, aiSide),
+        );
+        expect(hQGame.actions(other, aiSide)).toEqual(hQGame.actions(states[0] as HQState, aiSide));
+      }
+    }
+  });
+
+  it('N2. locked 階段（兩邊都出手了、對手的加碼還沒公開）：對手的出手與加碼不同，AI 側的 evaluate 與 actions 相同', () => {
+    const states = variants
+      .filter(([move]) => move !== null)
+      .map(([move, raised]) =>
+        makeState({
+          phase: 'locked',
+          wait: LOCK_TICKS,
+          pending: [move, PAPER],
+          raised: [raised, true],
+          history,
+          stake: 8,
+          round: 4,
+        }),
+      );
+    for (const other of states) {
+      expect(hQGame.evaluate(other, 1)).toEqual(hQGame.evaluate(states[0] as HQState, 1));
+      expect(hQGame.actions(other, 1)).toEqual(hQGame.actions(states[0] as HQState, 1));
+    }
+  });
+
+  it('N3. 鎖定走完、回應期的準備（對手的加碼還沒公開）與開牌：AI 出的拳一樣、對手的出手與加碼不同，往前模擬走得到的每一種終點 evaluate 都相同', () => {
+    const base = choosing({ history, stake: 8, round: 4 });
+    for (const ai of [PAPER, ROCK, SCISSORS] as const) {
+      for (const aiRaised of [false, true]) {
+        const ends = variants
+          .filter(([move]) => move !== null)
+          .map(([move, raised]) =>
+            lockAndSettle(base, press(move as Move, raised), press(ai, aiRaised)),
+          );
+        // 這些 state 的階段不同（respond、result），但在沒有公開之前 evaluate 一樣。
+        expect(new Set(ends.map((s) => s.phase)).size).toBeGreaterThan(1);
+        for (const other of ends) {
+          expect(hQGame.evaluate(other, 1)).toEqual(hQGame.evaluate(ends[0] as HQState, 1));
+        }
+      }
+    }
+  });
+
+  it('N4. 整個決定：深度 1、3、6 的搜尋型，在只有對手 pending（含加碼與否）不同的 choose 局面，實際按的鍵都相同；兩邊都成立；規律集中的局面也成立', () => {
+    const histories: readonly (readonly [string, HQState['history']])[] = [
+      ['mixed', history],
+      ['steady', STEADY],
+      ['messy', MESSY],
+    ];
+    for (const [, hist] of histories) {
+      for (const depth of [1, 3, 6]) {
+        for (const aiSide of [0, 1] as const) {
+          const presses = variants.map(([move, raised]) => {
+            const pending: [Move | null, Move | null] = aiSide === 1 ? [move, null] : [null, move];
+            const flags: [boolean, boolean] = aiSide === 1 ? [raised, false] : [false, raised];
+            return decideAtDepth(
+              choosing({ history: hist, pending, raised: flags, stake: 8, round: 5 }),
+              aiSide,
+              depth,
+            );
+          });
+          for (const one of presses) {
+            expect(one).toEqual(presses[0]);
+          }
+        }
+      }
+    }
+  });
+
+  it('N5. 公開之後才看得到：回應期開了以後，AI 的回應確實依據對手有沒有加碼（沒有加碼的人沒有回應期，所以用「人加碼」與「人沒加碼但 AI 加碼」比較 AI 側的 actions）', () => {
+    const base = choosing({ history: STEADY, stake: 8, round: 5 });
+    const humanRaised = openRespond(base, press(ROCK, true), press(SCISSORS));
+    const aiRaised = openRespond(base, press(ROCK), press(SCISSORS, true));
+    expect(hQGame.actions(humanRaised, 1).map(respondOf)).toEqual(['call', 'fold']);
+    expect(hQGame.actions(aiRaised, 1)).toEqual([IDLE]);
   });
 });
