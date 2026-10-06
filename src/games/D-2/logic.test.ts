@@ -157,6 +157,20 @@ describe('D-2 背包上限｜TEST_PLAN 第 6 節', () => {
     expect(d2Game.score(later)).toEqual([2, 0]);
   });
 
+  it('3. 只有「走進」基地才存：站在基地上沒有移動（朝牆走、沒按鍵）不會結算', () => {
+    const state = makeState({
+      tick: BEFORE_MOVE,
+      players: [{ cell: cell(0, 23) }, { cell: cell(25, 20) }],
+      bags: [2, 0],
+    });
+    const idle = d2Game.step(state, IDLE);
+    expect(idle.bags).toEqual([2, 0]);
+    expect(d2Game.score(idle)).toEqual([0, 0]);
+    // 朝牆（出界）走：沒有移動，也不結算。
+    const bump = d2Game.step(state, [PRESS_LEFT, NONE]);
+    expect(bump.bags).toEqual([2, 0]);
+  });
+
   it('4. 走到對方的基地：什麼都不發生（背包、分數都不變）', () => {
     const state = makeState({
       tick: BEFORE_MOVE,
@@ -331,7 +345,7 @@ describe('D-2 背包上限｜動作與評估（給貪心型用）', () => {
 
   it('gain：時間快到了而且背包裡有金幣：往基地走，不去撿別的金幣', () => {
     const state = makeState({
-      tick: 3560,
+      tick: 3530,
       players: [{ cell: cell(10, 20) }, { cell: cell(30, 1) }],
       bags: [1, 0],
       coins: [cell(11, 20), cell(25, 5), cell(26, 5), cell(27, 5), cell(28, 5), cell(29, 5)],
@@ -340,7 +354,7 @@ describe('D-2 背包上限｜動作與評估（給貪心型用）', () => {
   });
 
   it('gain：背包領先越多越高；分數領先更高；對 1 號邊相反', () => {
-    const bag = makeState({ bags: [2, 0] });
+    const bag = makeState({ bags: [1, 0] });
     const score = makeState({ players: [{ score: 1 }, {}] });
     const none = makeState();
     expect(d2Game.evaluate(bag, 0).gain).toBeGreaterThan(d2Game.evaluate(none, 0).gain);
