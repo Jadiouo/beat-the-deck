@@ -644,6 +644,7 @@ export function describeSharedSnakeAi<S extends ClubsState>(suite: SnakeSuite<S>
 
     it('danger：前方 20 格內有牆就有一點，但遠的牆很輕、近的牆很重（越近越陡）', () => {
       // 蛇頭 (x,12) 往右，下一步 (x+1,12)，牆在 x=32。x=11：下一步之後有 19 個空格；x=12：只有 18 個。
+      // 第一個障礙在第 20 格以外（含）就是 0。
       const at = (x: number): number =>
         game.evaluate(
           makeState({
@@ -651,8 +652,8 @@ export function describeSharedSnakeAi<S extends ClubsState>(suite: SnakeSuite<S>
           }),
           0,
         ).danger;
-      expect(at(10)).toBe(0);
-      expect(at(11)).toBeGreaterThan(0);
+      expect(at(11)).toBe(0);
+      expect(at(12)).toBeGreaterThan(0);
       // 診斷：danger 隨距離線性增加時，離牆 6 格的 danger 就有 0.57，搜尋型為了避開它連牆邊的食物都不敢吃
       // （L10 對 L10 對打，每 3600 tick 平均只吃到 0.5 個食物，多數的局打到時間到平手）。
       // 所以遠處要很輕、近處才重：離牆 11 格還不到 0.2，離牆 3 格超過 0.5。
