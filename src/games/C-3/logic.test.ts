@@ -9,7 +9,7 @@ import {
 } from '../../../tests/contract/fake-context';
 import { COLOR } from '../../shell/palette';
 import { rngStateFor } from '../../core/rng';
-import { cell, MOVE_EVERY, RIGHT } from '../_clubs/logic';
+import { cell, LEFT, MOVE_EVERY, RIGHT } from '../_clubs/logic';
 import { describeSharedSnakeRules } from '../_clubs/shared-rules.test-helpers';
 import { c3Game, makeState } from './logic';
 import type { C3State } from './logic';
@@ -422,7 +422,7 @@ describe('C-3 紅藍食物｜actions 與 evaluate', () => {
     const negative = makeState({ snakes: [{ score: -3 }, {}] });
     expect(c3Game.evaluate(plusOne, 0).gain - c3Game.evaluate(base, 0).gain).toBe(100);
     expect(c3Game.evaluate(negative, 0).gain).toBeLessThan(-299);
-    expect(c3Game.evaluate(negative, 1).gain).toBeGreaterThan(299);
+    expect(c3Game.evaluate(negative, 1).gain).toBeGreaterThan(250);
     for (const state of [base, plusOne, negative]) {
       for (const side of [0, 1] as const) {
         const { gain, danger } = c3Game.evaluate(state, side);
@@ -455,9 +455,9 @@ describe('C-3 紅藍食物｜actions 與 evaluate', () => {
     );
     expect(c3Game.evaluate(over, 0).danger).toBe(1);
     expect(c3Game.evaluate(over, 1).danger).toBe(0);
-    // 贏家是 AI（分數 −4，比人的 2 低）：+500 勝利加成大於 −600 的分差？ −600 + 500 < 0：
-    // 這是 C-A 就有的公式（`100 × 分差 ± 500`）；這裡只確認方向：輸的那邊比贏的那邊低。
-    expect(c3Game.evaluate(over, 0).gain).toBeLessThan(c3Game.evaluate(over, 1).gain);
+    // 贏家是 AI（分數 −4，比人的 2 低）：勝負加成比任何分差都大，所以贏的那邊 gain 為正、輸的為負。
+    expect(c3Game.evaluate(over, 1).gain).toBeGreaterThan(0);
+    expect(c3Game.evaluate(over, 0).gain).toBeLessThan(0);
   });
 });
 

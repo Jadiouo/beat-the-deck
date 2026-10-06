@@ -491,20 +491,22 @@ export function describeSharedSnakeRules<S extends ClubsState>(
     });
   });
 
-  describe(`${label}｜種子`, () => {
-    itAll('隨機事件在不同種子下不全相同：10 個種子的初始食物位置不可以全部一樣', () => {
-      const layouts = new Set<string>();
-      for (let seed = 0; seed < 10; seed += 1) {
-        const foods = [...game.init(seed, CONFIG).foods].sort((a, b) => a - b);
-        layouts.add(foods.join(','));
-      }
-      expect(layouts.size).toBeGreaterThan(1);
-    });
+  if (scope === 'all') {
+    describe(`${label}｜種子`, () => {
+      it('隨機事件在不同種子下不全相同：10 個種子的初始食物位置不可以全部一樣', () => {
+        const layouts = new Set<string>();
+        for (let seed = 0; seed < 10; seed += 1) {
+          const foods = [...game.init(seed, CONFIG).foods].sort((a, b) => a - b);
+          layouts.add(foods.join(','));
+        }
+        expect(layouts.size).toBeGreaterThan(1);
+      });
 
-    itAll('同一個種子，初始 state 完全相同', () => {
-      expect(game.init(7, CONFIG)).toEqual(game.init(7, CONFIG));
+      it('同一個種子，初始 state 完全相同', () => {
+        expect(game.init(7, CONFIG)).toEqual(game.init(7, CONFIG));
+      });
     });
-  });
+  }
 }
 
 /** actions 與 evaluate：C-A 與 C-2 共用（C-3 的評估多了顏色，另寫）。 */
