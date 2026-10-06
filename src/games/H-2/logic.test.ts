@@ -7,7 +7,7 @@ import { precise } from '../../ai/policies/precise';
 import { playMatch } from '../../core/match';
 import { rngStateFor } from '../../core/rng';
 import type { Buttons, Inputs } from '../../core/types';
-import { IDLE, PRESS_A, ROUNDS, ROUND_PAUSE } from '../_hearts/logic';
+import { IDLE, PRESS_A, PRESS_B, ROUNDS, ROUND_PAUSE } from '../_hearts/logic';
 import { FUSE_MAX, FUSE_MIN, h2Game, makeState, START_LIMIT } from './logic';
 import type { H2State, Racer } from './logic';
 
@@ -298,6 +298,21 @@ describe('H-2 引信｜其他規則', () => {
     expect(done.roundScores).toEqual([[0], [80]]);
   });
 
+  it('b 也算按住（a 或 b 都可以，同時按也只是按住）：按下、累積、放開都一樣', () => {
+    let s = makeState({ fuse: 500 });
+    s = h2Game.step(s, [PRESS_B, PRESS_A]);
+    expect(s.players[0]).toEqual({ status: 'holding', acc: 1 });
+    expect(s.players[1]).toEqual({ status: 'holding', acc: 1 });
+    // 中途換成另一個鍵，不算放開。
+    s = h2Game.step(s, [PRESS_A, PRESS_B]);
+    expect(s.players[0].acc).toBe(2);
+    expect(s.players[1].acc).toBe(2);
+    s = h2Game.step(s, [{ ...PRESS_A, b: true }, IDLE]);
+    expect(s.players[0].acc).toBe(3);
+    expect(s.players[1].status).toBe('banked');
+    expect(s.totals).toEqual([0, 2]);
+  });
+
   it('兩邊都沒按（都 late）：一局以 60 個 tick 結束，兩邊都 0 分', () => {
     let s = makeState({ fuse: 500 });
     s = stepN(s, START_LIMIT, inputs(false, false));
@@ -368,10 +383,10 @@ describe('H-2 引信｜其他規則', () => {
 });
 
 describe('H-2 引信｜actions 與 evaluate', () => {
-  it('還在玩的一邊是 [全放開, a]，全放開排第一；結束、停頓、整局結束時只有 [全放開]', () => {
+  it('還在玩的一邊是 [全放開, a, b]（a 或 b 都算按住），全放開排第一；結束、停頓、整局結束時只有 [全放開]', () => {
     const live = makeState({ players: [waiting, holding(3)] });
-    expect(h2Game.actions(live, 0)).toEqual([IDLE, PRESS_A]);
-    expect(h2Game.actions(live, 1)).toEqual([IDLE, PRESS_A]);
+    expect(h2Game.actions(live, 0)).toEqual([IDLE, PRESS_A, PRESS_B]);
+    expect(h2Game.actions(live, 1)).toEqual([IDLE, PRESS_A, PRESS_B]);
     const ended = makeState({ players: [banked(3), { status: 'boom', acc: 0 }] });
     expect(h2Game.actions(ended, 0)).toEqual([IDLE]);
     expect(h2Game.actions(ended, 1)).toEqual([IDLE]);
@@ -389,7 +404,7 @@ describe('H-2 引信｜actions 與 evaluate', () => {
         expect(danger).toBeLessThanOrEqual(1);
       }
     }
-    const won = makeState({ over: true, totals: [900, 500] });
+    const won = makeState({ over: true, winner: 0, totals: [900, 500] });
     expect(h2Game.evaluate(won, 0).gain).toBeGreaterThan(900000);
     expect(h2Game.evaluate(won, 1).gain).toBeLessThan(-900000);
   });

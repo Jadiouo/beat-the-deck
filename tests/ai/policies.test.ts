@@ -9,6 +9,8 @@ import { random } from '../../src/ai/policies/random';
 import type { Policy } from '../../src/ai/types';
 import { cAGame } from '../../src/games/C-A/logic';
 import { dAGame } from '../../src/games/D-A/logic';
+import { h2Game } from '../../src/games/H-2/logic';
+import type { H2State } from '../../src/games/H-2/logic';
 import type { ClubsState } from '../../src/games/_clubs/logic';
 import { sAGame } from '../../src/games/S-A/logic';
 import type { SpadesState } from '../../src/games/S-A/logic';
@@ -70,6 +72,31 @@ function meanHits(policy: Policy, seeds: readonly number[]): number {
   return total / seeds.length;
 }
 
+/**
+ * P2 的「總分」：被測的性格（等級 5）對 random（等級 10）打 `seeds.length` 場 H-2，
+ * 回傳被測的那一邊每一場的總分。坐哪一邊由種子的奇偶決定（與 harness 的 `winRate` 同一個做法）。
+ */
+function h2Totals(policy: Policy, seeds: readonly number[]): number[] {
+  return seeds.map((seed) => {
+    const mine: 0 | 1 = seed % 2 === 0 ? 0 : 1;
+    const a = levelController(h2Game, policy, 5, seed);
+    const b = levelController(h2Game, random, 10, seed + 1_000_003);
+    const [c0, c1] = mine === 0 ? [a, b] : [b, a];
+    let state: H2State = h2Game.init(seed, { maxTicks: 3600, params: {} });
+    for (let tick = 0; !h2Game.isOver(state); tick += 1) {
+      state = h2Game.step(state, [c0.decide(state, 0, tick), c1.decide(state, 1, tick)]);
+    }
+    return state.totals[mine];
+  });
+}
+
+/** 標準差（母體；200 場全部都算進來）。 */
+function standardDeviation(values: readonly number[]): number {
+  const mean = values.reduce((sum, v) => sum + v, 0) / values.length;
+  const variance = values.reduce((sum, v) => sum + (v - mean) ** 2, 0) / values.length;
+  return Math.sqrt(variance);
+}
+
 describe('5.2 性格真的不一樣', () => {
   it('P1（S-A 落雨）精準型比賭徒型少挨打：兩種性格各打 200 場（種子 0..199）對 random，精準型的平均命中數要低於賭徒型', () => {
     const seeds = seedList(200);
@@ -80,9 +107,18 @@ describe('5.2 性格真的不一樣', () => {
     );
     expect(preciseHits).toBeLessThan(gamblerHits);
   }, 120_000);
-  it.todo(
-    'P2（H-2 引信）賭徒型的分數起伏大：兩種性格各打 200 場（種子 0..199），賭徒型總分的標準差要高於精準型',
-  );
+  it('P2（H-2 引信）賭徒型的分數起伏大：兩種性格各打 200 場（種子 0..199）對 random，賭徒型總分的標準差要高於精準型', () => {
+    const seeds = seedList(200);
+    const gamblerTotals = h2Totals(gambler, seeds);
+    const preciseTotals = h2Totals(precise, seeds);
+    const mean = (v: readonly number[]): number => v.reduce((s, x) => s + x, 0) / v.length;
+    const gamblerStd = standardDeviation(gamblerTotals);
+    const preciseStd = standardDeviation(preciseTotals);
+    console.log(
+      `P2 H-2 總分（等級 5 對 random，200 場）：賭徒型 平均 ${mean(gamblerTotals).toFixed(1)}、標準差 ${gamblerStd.toFixed(1)}；精準型 平均 ${mean(preciseTotals).toFixed(1)}、標準差 ${preciseStd.toFixed(1)}`,
+    );
+    expect(gamblerStd).toBeGreaterThan(preciseStd);
+  }, 120_000);
   it('P3（C-A 貪食蛇對決）貪心型不看危險：等級 5，200 場（種子 0..199），貪心型的死亡率要高於搜尋型', () => {
     const seeds = seedList(200);
     const pct = (rate: number): string => `${(rate * 100).toFixed(1)}%`;
