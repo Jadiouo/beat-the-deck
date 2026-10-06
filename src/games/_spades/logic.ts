@@ -39,6 +39,10 @@ export const INVULN_TICKS = 60;
 export const START_X = FIELD_W / 2;
 export const START_Y = 190;
 
+/** 擦彈：中心距離小於 10（而且沒有命中）。S-3 每顆子彈最多算一次。 */
+export const GRAZE_DIST = 10;
+/** S-3 的分數：每次被打中扣幾分（擦彈一次加 1 分）。 */
+export const GRAZE_HIT_PENALTY = 5;
 /** 瞄準彈的速度。 */
 export const AIMED_SPEED = 1.6;
 /** S-2、S-3：一般子彈固定每 15 tick 一顆、瞄準彈每 45 tick 一顆。 */
@@ -177,24 +181,40 @@ interface Spawns {
 }
 
 /** 一個場地走一個 tick：玩家移動、子彈移動並移除、命中判定、無敵倒數、生成新的子彈。 */
-function stepField(field: Field, buttons: Buttons, spawns: Spawns): Field {
+function stepField(field: Field, buttons: Buttons, spawns: Spawns, mode: Mode): Field {
   const player = movePlayer(field, buttons);
 
   let hits = player.hits;
+  let grazes = player.grazes;
   let invulnerable = player.invuln > 0;
   let hitNow = false;
   const kept: Bullet[] = [];
   for (const bullet of player.bullets) {
-    const moved: Bullet = { ...bullet, x: bullet.x + bullet.vx, y: bullet.y + bullet.vy };
+    const moved: Bullet = {
+      x: bullet.x + bullet.vx,
+      y: bullet.y + bullet.vy,
+      vx: bullet.vx,
+      vy: bullet.vy,
+      grazed: bullet.grazed,
+    };
     if (moved.y > BULLET_LEAVE || moved.x < -BULLET_R || moved.x > FIELD_W + BULLET_R) {
       continue;
     }
     const dx = moved.x - player.px;
     const dy = moved.y - player.py;
-    if (!invulnerable && dx * dx + dy * dy < HIT_DIST * HIT_DIST) {
+    const squared = dx * dx + dy * dy;
+    if (!invulnerable && squared < HIT_DIST * HIT_DIST) {
       hits += 1;
       invulnerable = true;
       hitNow = true;
+      continue;
+    }
+    if (mode === 'graze' && !moved.grazed && squared < GRAZE_DIST * GRAZE_DIST) {
+      // 擦彈：每顆最多一次。無敵期間（含同一個 tick 剛被打中之後）經過的子彈「用掉」但不加分。
+      if (!invulnerable) {
+        grazes += 1;
+      }
+      kept.push({ x: moved.x, y: moved.y, vx: moved.vx, vy: moved.vy, grazed: true });
       continue;
     }
     kept.push(moved);
@@ -214,7 +234,7 @@ function stepField(field: Field, buttons: Buttons, spawns: Spawns): Field {
     kept.push(bullet);
     rng = next;
   }
-  return { ...player, hits, invuln, rng, bullets: kept };
+  return { ...player, hits, grazes, invuln, rng, bullets: kept };
 }
 
 export function isOverSpades(state: SpadesState): boolean {
@@ -245,14 +265,18 @@ export function stepSpades(state: SpadesState, inputs: Inputs): SpadesState {
     tick,
     phase,
     fields: [
-      stepField(state.fields[0], inputs[0], spawns),
-      stepField(state.fields[1], inputs[1], spawns),
+      stepField(state.fields[0], inputs[0], spawns, state.mode),
+      stepField(state.fields[1], inputs[1], spawns, state.mode),
     ],
   };
 }
 
 export function scoreSpades(state: SpadesState): readonly [number, number] {
-  // 用 0 減而不是取負號，免得 0 變成 -0。
+  // 寫成「0 −」或「擦彈 −」而不是取負號，免得 0 變成 -0。
+  if (state.mode === 'graze') {
+    const [a, b] = state.fields;
+    return [a.grazes - GRAZE_HIT_PENALTY * a.hits, b.grazes - GRAZE_HIT_PENALTY * b.hits];
+  }
   return [0 - state.fields[0].hits, 0 - state.fields[1].hits];
 }
 
@@ -302,10 +326,19 @@ export const HORIZON = 24;
 const D_HIT = HIT_DIST;
 /** 預測的最近距離大於等於這個值：完全安全（danger = 0）。 */
 const D_FAR = 14;
+/**
+ * S-3 的 `D_FAR`：擦彈要靠近到 10 以內才算，所以安全的門檻要比躲子彈寬鬆；
+ * 精準型的 danger 門檻是 0.3，對應「預測最近距離不到約 8.85 就不碰」（命中是 5、擦彈是 10：只有 8.85 到 10 之間的擦過會被選）。
+ */
+const D_FAR_GRAZE = 10.5;
 /** 一分的 gain。 */
 export const SCORE_UNIT = 1000;
 /** 離子彈的距離超過這個值就不再加分。 */
 const CLEAR_CAP = 40;
+/** S-3：預測會擦到的每一顆（還沒擦過的）子彈，gain 加這麼多（遠小於一分，所以不會為了預測的擦彈去冒險）。 */
+const GRAZE_BONUS = 10;
+/** S-3：離子彈遠一點的偏好（比落雨小，不然會一直躲著不去擦）。 */
+const CLEAR_WEIGHT_GRAZE = 0.3;
 
 export function evaluateSpades(state: SpadesState, side: Side): { gain: number; danger: number } {
   const me = state.fields[side];
@@ -314,27 +347,42 @@ export function evaluateSpades(state: SpadesState, side: Side): { gain: number; 
   if (isOverSpades(state)) {
     return { gain: SCORE_UNIT * lead, danger: 0 };
   }
+  const graze = state.mode === 'graze';
 
   // 預測：玩家照目前的速度一直走（碰到邊緣就停），每顆子彈照原本的方向飛，
-  // 在接下來 HORIZON 個 tick 裡最近會靠到多近。無敵期間的 tick 不算（碰不到）。
+  // 在接下來 HORIZON 個 tick 裡最近會靠到多近。無敵期間的 tick 不算（碰不到、也不算擦彈）。
   let nearest = Number.POSITIVE_INFINITY;
-  for (let t = me.invuln + 1; t <= HORIZON; t += 1) {
-    const px = clamp(me.px + me.vx * t, PLAYER_R, FIELD_W - PLAYER_R);
-    const py = clamp(me.py + me.vy * t, PLAYER_R, FIELD_H - PLAYER_R);
-    for (const b of me.bullets) {
+  let prospects = 0;
+  for (const b of me.bullets) {
+    let closest = Number.POSITIVE_INFINITY;
+    for (let t = me.invuln + 1; t <= HORIZON; t += 1) {
+      const px = clamp(me.px + me.vx * t, PLAYER_R, FIELD_W - PLAYER_R);
+      const py = clamp(me.py + me.vy * t, PLAYER_R, FIELD_H - PLAYER_R);
       const dx = b.x + b.vx * t - px;
       const dy = b.y + b.vy * t - py;
       const d2 = dx * dx + dy * dy;
-      if (d2 < nearest) {
-        nearest = d2;
+      if (d2 < closest) {
+        closest = d2;
       }
+    }
+    nearest = Math.min(nearest, closest);
+    if (graze && !b.grazed && closest < GRAZE_DIST * GRAZE_DIST) {
+      prospects += 1;
     }
   }
   const distance = Math.sqrt(nearest);
-  const danger = clamp((D_FAR - distance) / (D_FAR - D_HIT), 0, 1);
-  const clearance = Math.min(distance, CLEAR_CAP);
+  const danger = clamp(
+    ((graze ? D_FAR_GRAZE : D_FAR) - distance) / ((graze ? D_FAR_GRAZE : D_FAR) - D_HIT),
+    0,
+    1,
+  );
+  const clearance = Math.min(distance, CLEAR_CAP) * (graze ? CLEAR_WEIGHT_GRAZE : 1);
   const gain =
-    SCORE_UNIT * lead + clearance - 0.05 * Math.abs(me.px - START_X) - 0.02 * (FIELD_H - me.py);
+    SCORE_UNIT * lead +
+    GRAZE_BONUS * prospects +
+    clearance -
+    0.05 * Math.abs(me.px - START_X) -
+    0.02 * (FIELD_H - me.py);
   return { gain, danger };
 }
 
