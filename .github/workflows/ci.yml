@@ -32,16 +32,16 @@ jobs:
 
       - run: npm run test:light
 
-  # 逐張牌的契約檢查（K1–K13、R1–R3）與 A1–A5 統計檢查，分成 SHARDS 份、每份一台機器並行跑。
+  # 逐張牌的契約檢查（K1–K13、R1–R3）與 A1–A5 統計檢查，分成 6 份、每份一台機器並行跑。
   # 檔案已經依牌的序號分成 13 份（tests/ai/a-checks.shared.ts 的 SLOT_COUNT），所以 --shard 切得平均。
-  # 要加快就把 shard 清單加長（例如 [1, 2, 3, 4, 5, 6]）並把 --shard 的分母改成同一個數字。
+  # 要加快就把 shard 清單加長（例如 [1, …, 8]）並把 --shard 的分母改成同一個數字。
   ai-stats:
-    name: ai-stats (${{ matrix.shard }}/4)
+    name: ai-stats (${{ matrix.shard }}/6)
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4]
+        shard: [1, 2, 3, 4, 5, 6]
     steps:
       - uses: actions/checkout@v4
 
@@ -52,7 +52,7 @@ jobs:
 
       - run: npm ci
 
-      - run: npx vitest run --project heavy --shard=${{ matrix.shard }}/4
+      - run: npx vitest run --project heavy --shard=${{ matrix.shard }}/6
 
   # 端到端測試（TEST_PLAN 第 7 節）。和 check 並行跑、各自回報，不互相等；
   # 失敗的時候看 check 是不是也紅了就知道是外殼還是核心的問題。
