@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { CARD_IDS, registry } from '../../src/games/registry';
 import { PALETTE } from '../../src/shell/palette';
-import { CHECKS, CONTRACT_SEEDS, runCheck } from './checks';
+import { AI_CHECKS, CHECKS, CONTRACT_SEEDS, runCheck } from './checks';
 
 /**
  * TEST_PLAN 第 4 節｜契約測試。
@@ -11,8 +11,9 @@ import { CHECKS, CONTRACT_SEEDS, runCheck } from './checks';
  * 不用改這個檔案。檢查本身寫在 `checks.ts`（`bad-games.test.ts` 也用同一份，
  * 用故意違約的假遊戲證明這些檢查真的抓得到問題）。
  *
- * T3 之後這裡要加 A1–A5（AI 行為），並把 K11、K12 的控制器換成預設性格；
- * 見 checks.ts 裡 K11、K12 的註解。
+ * A1–A5（AI 行為，TEST_PLAN 5.1）放在 `AI_CHECKS`，同一個迴圈就會跑：
+ * `meta.defaultPolicy` 是 null 的牌（替身牌）與鬼牌自動標成「不適用」，
+ * 第一張有預設性格的真牌登記進來，就會自動被測。K11、K12 用預設性格、等級 5。
  */
 
 describe('登記表', () => {
@@ -49,7 +50,7 @@ describe('色盤', () => {
 });
 
 describe.each(registry)('$id', (entry) => {
-  for (const check of CHECKS) {
+  for (const check of [...CHECKS, ...AI_CHECKS]) {
     const title = `${check.code} ${check.title}`;
     if (!check.applies(entry)) {
       it.skip(`${title}（這張牌不適用）`, () => undefined);

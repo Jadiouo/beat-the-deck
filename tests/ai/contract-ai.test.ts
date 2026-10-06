@@ -6,6 +6,7 @@ import { defineEntry } from '../../src/games/types';
 import { counterGame } from '../fixtures/counter-game';
 import type { CounterState } from '../fixtures/counter-game';
 import {
+  AI_CHECKS,
   AI_SEEDS,
   CHECKS,
   CONTRACT_CONFIG,
@@ -40,16 +41,16 @@ const greedyEntry = withMeta({ defaultPolicy: 'greedy' });
 
 const A_CODES = ['A1', 'A2', 'A3', 'A4', 'A5'] as const;
 
-describe('A1–A5 接進了契約的檢查清單', () => {
-  it('CHECKS 裡有 A1 到 A5', () => {
+describe('A1–A5 接進了契約的檢查清單（AI_CHECKS）', () => {
+  it('AI_CHECKS 裡有 A1 到 A5', () => {
     for (const code of A_CODES) {
-      expect(CHECKS.some((check) => check.code === code)).toBe(true);
+      expect(AI_CHECKS.some((check) => check.code === code)).toBe(true);
     }
   });
 
   it('沒有預設性格的牌（替身牌）跳過；有預設性格的牌要跑', () => {
     for (const code of A_CODES) {
-      const check = CHECKS.find((c) => c.code === code);
+      const check = AI_CHECKS.find((c) => c.code === code);
       expect(check?.applies(counterEntry)).toBe(false);
       expect(check?.applies(greedyEntry)).toBe(true);
     }
@@ -58,7 +59,7 @@ describe('A1–A5 接進了契約的檢查清單', () => {
   it('鬼牌不跑 5.1，就算有預設性格', () => {
     const joker = withMeta({ defaultPolicy: 'gambler', suit: 'JK', rank: 'R' });
     for (const code of A_CODES) {
-      expect(CHECKS.find((c) => c.code === code)?.applies(joker)).toBe(false);
+      expect(AI_CHECKS.find((c) => c.code === code)?.applies(joker)).toBe(false);
     }
   });
 
@@ -102,7 +103,7 @@ describe('用臨時登記項（counter-game ＋ 預設性格 greedy）實際跑 
     expect(a5.meanMs).toBeLessThan(1);
     expect(a5.maxMs).toBeLessThan(8);
     for (const code of A_CODES) {
-      const check = CHECKS.find((c) => c.code === code);
+      const check = AI_CHECKS.find((c) => c.code === code);
       expect(check).toBeDefined();
       expect(runCheck(check as NonNullable<typeof check>, greedyEntry)).toBe('pass');
     }
@@ -123,7 +124,7 @@ describe('用臨時登記項（counter-game ＋ 預設性格 greedy）實際跑 
       meta: { ...counterMeta, defaultPolicy: 'greedy' },
     });
     expect(measureA1(inverted)).toBeLessThan(0.75);
-    const a1 = CHECKS.find((c) => c.code === 'A1');
+    const a1 = AI_CHECKS.find((c) => c.code === 'A1');
     const outcome = runCheck(a1 as NonNullable<typeof a1>, inverted);
     expect(typeof outcome).toBe('object');
     expect(JSON.stringify(outcome)).toContain('A1');

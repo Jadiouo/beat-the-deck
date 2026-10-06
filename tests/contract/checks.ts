@@ -15,13 +15,19 @@ import { hashState } from '../../src/core/hash';
 import { copyButtons, playMatch } from '../../src/core/match';
 import { replay } from '../../src/core/replay';
 import { createRng } from '../../src/core/rng';
+import { levelController, policyByName } from '../../src/ai/level';
+import { HUMAN_PARAMS, humanPolicy } from '../../src/ai/human-model';
+import { random as randomPolicy } from '../../src/ai/policies/random';
+import type { Policy } from '../../src/ai/types';
 import type { Buttons, Controller, Game, GameConfig, Inputs, Side } from '../../src/core/types';
 import { CARD_IDS } from '../../src/games/registry';
-import type { RegistryEntry } from '../../src/games/types';
+import type { CardMeta, RegistryEntry } from '../../src/games/types';
 import { PALETTE } from '../../src/shell/palette';
 import { asRenderingContext, createFakeContext, LOGIC_HEIGHT, LOGIC_WIDTH } from './fake-context';
 import type { FakeContext } from './fake-context';
 import { deepFreeze } from './freeze';
+import { measureDecideTimes, seedList, winRate } from '../ai/harness';
+import type { DecideTimes } from '../ai/harness';
 
 // ---------------------------------------------------------------------------
 // 共用常數
@@ -40,6 +46,11 @@ export type CheckCode =
   | 'K10'
   | 'K11'
   | 'K12'
+  | 'A1'
+  | 'A2'
+  | 'A3'
+  | 'A4'
+  | 'A5'
   | 'R1'
   | 'R2'
   | 'R3'
@@ -51,6 +62,15 @@ export const CONTRACT_SEEDS: readonly number[] = Array.from({ length: 20 }, (_, 
 export const SYMMETRY_SEEDS: readonly number[] = Array.from({ length: 200 }, (_, i) => i);
 /** SPEC 第 9 節：除非小規格另外寫，一局 3600 tick。 */
 export const CONTRACT_CONFIG: GameConfig = { maxTicks: 3600, params: {} };
+
+/** A1–A5 用 200 個種子（TEST_PLAN 5.1），固定為 0..199。 */
+export const AI_SEEDS: readonly number[] = seedList(200);
+/** A5 量 decide() 用的種子數：夠多場、又不要太慢。 */
+const SPEED_SEEDS: readonly number[] = seedList(5);
+/** human-model 的四個參數，A3、A4 用它當 `winRate` 的「等級」。 */
+const HUMAN_LEVEL = HUMAN_PARAMS;
+/** K11、K12 用的等級：兩邊都是預設性格、等級 5。 */
+const CONTRACT_LEVEL = 5;
 
 /** K11：一場完整對局的時間上限（毫秒）。 */
 export const SPEED_LIMIT_MS = 2000;
@@ -90,8 +110,8 @@ const RELEASED: Buttons = { up: false, down: false, left: false, right: false, a
  * 隨機控制器：從遊戲自己的 `actions()` 裡亂挑一個。
  *
  * 亂數由「種子＋邊」推導（`fork`），所以兩邊彼此對稱、同一個種子永遠同一串。
- * 這是 T2 的暫代：T3 做完預設性格之後，K11、K12 要換成「兩個等級 5／同一個
- * 預設性格」，其他檢查維持用隨機輸入（它們要的是廣泛的輸入，不是聰明的）。
+ * 其他檢查都用它：它們要的是廣泛的輸入，不是聰明的。K11、K12 與 A1–A5 改用預設性格
+ * （見 `contractController`）。
  *
  * `actions()` 回傳空陣列時退回「全放開」，讓 K8 去報告它，而不是讓每個檢查都爆。
  */
@@ -107,6 +127,29 @@ export function randomController<S>(game: Game<S>, seed: number, side: Side): Co
 
 export function randomPair<S>(game: Game<S>, seed: number): [Controller<S>, Controller<S>] {
   return [randomController(game, seed, 0), randomController(game, seed, 1)];
+}
+
+/** 這張牌的預設性格；沒有（替身牌、還沒指定的牌）是 null。 */
+function defaultPolicyOf(meta: CardMeta): Policy | null {
+  return meta.defaultPolicy === null ? null : policyByName(meta.defaultPolicy);
+}
+
+/**
+ * K11、K12 用的控制器：這張牌的預設性格、指定的等級；沒有預設性格的牌退回隨機控制器
+ * （T2 的行為，替身牌與故意違約的假遊戲都走這條）。
+ * 亂數由「種子＋邊」推導，所以兩邊彼此對稱、同一個種子永遠同一串。
+ */
+export function contractController<S>(
+  entry: RegistryEntry<S>,
+  seed: number,
+  side: Side,
+  level: number = CONTRACT_LEVEL,
+): Controller<S> {
+  const policy = defaultPolicyOf(entry.meta);
+  if (policy === null) {
+    return randomController(entry.game, seed, side);
+  }
+  return levelController(entry.game, policy, level, seed * 2 + side);
 }
 
 interface RunResult<S> {
@@ -471,17 +514,18 @@ export function checkReplay<S>(game: Game<S>, seed: number, config: GameConfig):
 
 /**
  * K11 夠快：不開畫面跑一場完整對局要少於 2 秒。
- * （T3 之後：「兩個等級 5 的預設性格」，現在是兩個隨機控制器。）
+ * 兩邊是這張牌的預設性格、等級 5；沒有預設性格的牌用隨機控制器。
  */
 export function checkSpeed<S>(
-  game: Game<S>,
+  entry: RegistryEntry<S>,
   seed: number,
   config: GameConfig,
   limitMs: number = SPEED_LIMIT_MS,
 ): void {
-  const [c0, c1] = randomPair(game, seed);
+  const c0 = contractController(entry, seed, 0);
+  const c1 = contractController(entry, seed, 1);
   const started = performance.now();
-  playMatch(game, seed, config, c0, c1);
+  playMatch(entry.game, seed, config, c0, c1);
   const elapsed = performance.now() - started;
   if (elapsed >= limitMs) {
     violation('K11', `一場對局花了 ${elapsed.toFixed(0)} 毫秒，上限是 ${limitMs} 毫秒`);
@@ -491,19 +535,18 @@ export function checkSpeed<S>(
 /**
  * K12 對稱（只對 `meta.symmetric` 的牌）：兩邊用同一種控制器，200 個種子，
  * 任一邊的勝率（平手算半場）在 40% 到 60% 之間。
- *
- * 暫代：現在兩邊用「同一個種子推導的隨機控制器」。T3 做完後，換成
- * 這張牌的預設性格、同一個等級。
+ * 控制器是這張牌的預設性格、同一個等級 5；沒有預設性格的牌用隨機控制器。
  */
 export function checkSymmetry<S>(
-  game: Game<S>,
+  entry: RegistryEntry<S>,
   seeds: readonly number[],
   config: GameConfig,
 ): void {
   let points = 0;
   for (const seed of seeds) {
-    const [c0, c1] = randomPair(game, seed);
-    const { winner } = playMatch(game, seed, config, c0, c1);
+    const c0 = contractController(entry, seed, 0);
+    const c1 = contractController(entry, seed, 1);
+    const { winner } = playMatch(entry.game, seed, config, c0, c1);
     points += winner === 0 ? 1 : winner === null ? 0.5 : 0;
   }
   const rate = points / seeds.length;
@@ -512,6 +555,140 @@ export function checkSymmetry<S>(
       'K12',
       `${seeds.length} 個種子，0 號邊的勝率是 ${(rate * 100).toFixed(1)}%，應該在 40% 到 60% 之間`,
     );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// A1–A5：AI 行為（TEST_PLAN 5.1）
+// ---------------------------------------------------------------------------
+
+export interface AiThresholds {
+  readonly a1: number;
+  readonly a2: number;
+  readonly a3: number;
+  readonly a4: number;
+}
+
+/** 門檻（TEST_PLAN 5.1）。運氣成分高的牌（`meta.luckHeavy`，紅心）A1 降為 60%、A2 降為 55%。 */
+export function aiThresholds(meta: CardMeta): AiThresholds {
+  const lucky = meta.luckHeavy === true;
+  return { a1: lucky ? 0.6 : 0.75, a2: lucky ? 0.55 : 0.6, a3: 0.45, a4: 0.35 };
+}
+
+/** A1–A5 的前提：有預設性格、而且不是鬼牌（鬼牌不跑 5.1）。 */
+export function runsAiChecks(entry: RegistryEntry): boolean {
+  return entry.meta.defaultPolicy !== null && entry.meta.suit !== 'JK';
+}
+
+function requirePolicy(entry: RegistryEntry): Policy {
+  const policy = defaultPolicyOf(entry.meta);
+  if (policy === null) {
+    throw new Error(`${entry.id} 沒有預設性格，不該跑 A1–A5`);
+  }
+  return policy;
+}
+
+/** A1 的數字：預設性格等級 5 對 random 的勝率。 */
+export function measureA1(entry: RegistryEntry, seeds: readonly number[] = AI_SEEDS): number {
+  return winRate(entry.game, requirePolicy(entry), 5, randomPolicy, 10, seeds);
+}
+
+/** A2 的數字：預設性格等級 9 對等級 2 的勝率。 */
+export function measureA2(entry: RegistryEntry, seeds: readonly number[] = AI_SEEDS): number {
+  const policy = requirePolicy(entry);
+  return winRate(entry.game, policy, 9, policy, 2, seeds);
+}
+
+/** A3 的數字：human-model 對預設性格等級 1 的勝率。 */
+export function measureA3(entry: RegistryEntry, seeds: readonly number[] = AI_SEEDS): number {
+  return winRate(entry.game, humanPolicy, HUMAN_LEVEL, requirePolicy(entry), 1, seeds);
+}
+
+/** A4 的數字：human-model 對預設性格等級 10 的勝率。 */
+export function measureA4(entry: RegistryEntry, seeds: readonly number[] = AI_SEEDS): number {
+  return winRate(entry.game, humanPolicy, HUMAN_LEVEL, requirePolicy(entry), 10, seeds);
+}
+
+/** A5 的數字：預設性格等級 10 的 decide() 每次花幾毫秒。 */
+export function measureA5(
+  entry: RegistryEntry,
+  seeds: readonly number[] = SPEED_SEEDS,
+): DecideTimes {
+  return measureDecideTimes(entry.game, requirePolicy(entry), 10, seeds);
+}
+
+function pct(rate: number): string {
+  return `${(rate * 100).toFixed(1)}%`;
+}
+
+/** A1 AI 比亂按強：預設性格等級 5 對 random，勝率至少 75%（luckHeavy 60%）。 */
+export function checkAiBeatsRandom(
+  entry: RegistryEntry,
+  seeds: readonly number[] = AI_SEEDS,
+): void {
+  const need = aiThresholds(entry.meta).a1;
+  const rate = measureA1(entry, seeds);
+  if (!(rate >= need)) {
+    violation(
+      'A1',
+      `${seeds.length} 場，勝率 ${pct(rate)}，至少要 ${pct(need)}（等級 5 對 random）`,
+    );
+  }
+}
+
+/** A2 等級有意義：預設性格等級 9 對等級 2，勝率至少 60%（luckHeavy 55%）。 */
+export function checkLevelMatters(entry: RegistryEntry, seeds: readonly number[] = AI_SEEDS): void {
+  const need = aiThresholds(entry.meta).a2;
+  const rate = measureA2(entry, seeds);
+  if (!(rate >= need)) {
+    violation(
+      'A2',
+      `${seeds.length} 場，勝率 ${pct(rate)}，至少要 ${pct(need)}（等級 9 對等級 2）`,
+    );
+  }
+}
+
+/** A3 人打得贏第一級：human-model 對預設性格等級 1，勝率至少 45%。 */
+export function checkHumanBeatsLevel1(
+  entry: RegistryEntry,
+  seeds: readonly number[] = AI_SEEDS,
+): void {
+  const need = aiThresholds(entry.meta).a3;
+  const rate = measureA3(entry, seeds);
+  if (!(rate >= need)) {
+    violation(
+      'A3',
+      `${seeds.length} 場，human-model 的勝率 ${pct(rate)}，至少要 ${pct(need)}（對等級 1）`,
+    );
+  }
+}
+
+/** A4 人打不太贏第十級：human-model 對預設性格等級 10，勝率最多 35%。 */
+export function checkHumanLosesToLevel10(
+  entry: RegistryEntry,
+  seeds: readonly number[] = AI_SEEDS,
+): void {
+  const limit = aiThresholds(entry.meta).a4;
+  const rate = measureA4(entry, seeds);
+  if (!(rate <= limit)) {
+    violation(
+      'A4',
+      `${seeds.length} 場，human-model 的勝率 ${pct(rate)}，最多只能 ${pct(limit)}（對等級 10）`,
+    );
+  }
+}
+
+/** A5 決策夠快：預設性格等級 10 的 decide()，平均少於 1 毫秒、最慢少於 8 毫秒。 */
+export function checkDecisionSpeed(
+  entry: RegistryEntry,
+  seeds: readonly number[] = SPEED_SEEDS,
+): void {
+  const { samples, meanMs, maxMs } = measureA5(entry, seeds);
+  if (!(meanMs < 1)) {
+    violation('A5', `${samples} 次 decide()，平均 ${meanMs.toFixed(3)} 毫秒，要少於 1 毫秒`);
+  }
+  if (!(maxMs < 8)) {
+    violation('A5', `${samples} 次 decide()，最慢 ${maxMs.toFixed(3)} 毫秒，要少於 8 毫秒`);
   }
 }
 
@@ -785,8 +962,47 @@ const GAME_CHECKS: readonly {
   { code: 'K8', title: '動作合法', fn: (g, s, c) => checkActionsLegal(g, s, c) },
   { code: 'K9', title: '評估可用', fn: (g, s, c) => checkEvaluateUsable(g, s, c) },
   { code: 'K10', title: '重播', fn: (g, s, c) => checkReplay(g, s, c) },
-  { code: 'K11', title: '夠快', fn: (g, s, c) => checkSpeed(g, s, c) },
+  { code: 'K11', title: '夠快', fn: (_g, s, c, e) => checkSpeed(e, s, c) },
 ];
+
+/** A1–A5：種子數是檢查的一部分（200 個，TEST_PLAN 5.1），不理會呼叫者給的清單。 */
+function aiDefs(): CheckDef[] {
+  const defs: readonly {
+    code: CheckCode;
+    title: string;
+    fn: (entry: RegistryEntry) => void;
+  }[] = [
+    { code: 'A1', title: 'AI 比亂按強', fn: (e) => checkAiBeatsRandom(e) },
+    { code: 'A2', title: '等級有意義', fn: (e) => checkLevelMatters(e) },
+    { code: 'A3', title: '人打得贏第一級', fn: (e) => checkHumanBeatsLevel1(e) },
+    { code: 'A4', title: '人打不太贏第十級', fn: (e) => checkHumanLosesToLevel10(e) },
+    { code: 'A5', title: '決策夠快', fn: (e) => checkDecisionSpeed(e) },
+  ];
+  return defs.map(({ code, title, fn }) => ({
+    code,
+    title,
+    applies: runsAiChecks,
+    run(entry: RegistryEntry, seeds: readonly number[]): void {
+      void seeds;
+      try {
+        fn(entry);
+      } catch (error) {
+        if (error instanceof ContractViolation) {
+          throw error;
+        }
+        throw new ContractViolation(code, `遊戲丟出錯誤：${errorText(error)}`);
+      }
+    },
+  }));
+}
+
+/**
+ * A1–A5。與 `CHECKS`（K1–K12、R1–R3、META）分開放：`bad-games.test.ts` 要求 `CHECKS` 裡每一條
+ * 都有一個專門抓它的故意違約假遊戲，而 A1–A5 是統計門檻，不是契約違規；
+ * 它們的「抓得到壞的」證明在 `tests/ai/contract-ai.test.ts`。
+ * `all-games.test.ts` 對 `[...CHECKS, ...AI_CHECKS]` 跑同一個迴圈。
+ */
+export const AI_CHECKS: readonly CheckDef[] = aiDefs();
 
 export const CHECKS: readonly CheckDef[] = [
   ...GAME_CHECKS.map(({ code, title, fn }): CheckDef => ({
@@ -803,7 +1019,7 @@ export const CHECKS: readonly CheckDef[] = [
       // K12 的種子數是檢查的一部分（200 個），不理會呼叫者給的清單長度。
       void seeds;
       try {
-        checkSymmetry(entry.game, SYMMETRY_SEEDS, CONTRACT_CONFIG);
+        checkSymmetry(entry, SYMMETRY_SEEDS, CONTRACT_CONFIG);
       } catch (error) {
         if (error instanceof ContractViolation) {
           throw error;
