@@ -1,0 +1,13 @@
+{
+  "pureGlobs": ["src/core/**/*.ts", "src/ai/**/*.ts", "src/games/**/logic.ts"],
+  "excludeGlobs": ["**/*.test.ts"],
+  "forbidden": [
+    "Math.random",
+    "Date.now",
+    "performance.now",
+    "window",
+    "document",
+    "setTimeout",
+    "setInterval"
+  ]
+}
