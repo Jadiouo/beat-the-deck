@@ -9,6 +9,7 @@ export const strings = {
   titleScreen: {
     start: '開始',
     scanlines: '掃描線',
+    sound: '音效',
     on: '開',
     off: '關',
     hint: '上下：選擇\u3000Z／Enter：確認',

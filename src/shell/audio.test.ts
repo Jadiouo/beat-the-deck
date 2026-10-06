@@ -316,7 +316,8 @@ describe('shell/audio：節點會清理，不洩漏', () => {
       node.onended?.();
     }
     expect(audio.activeVoices()).toBe(0);
-    for (const node of [...ctx.oscillators, ...ctx.sources, ...ctx.gains]) {
+    // 第一個 GainNode 是總音量，一直留著；其餘每個音符的包絡都要拆掉。
+    for (const node of [...ctx.oscillators, ...ctx.sources, ...ctx.gains.slice(1)]) {
       expect(node.connected).toBe(false);
     }
   });

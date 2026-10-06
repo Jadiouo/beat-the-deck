@@ -23,11 +23,11 @@ function drawMarker(ctx: CanvasRenderingContext2D, x: number, y: number): void {
   }
 }
 
-export const TITLE_MENU_Y = [158, 180] as const;
+export const TITLE_MENU_Y = [152, 172, 192] as const;
 
 export function drawTitle(
   ctx: CanvasRenderingContext2D,
-  state: { cursor: number; scanlines: boolean },
+  state: { cursor: number; scanlines: boolean; sound: boolean },
 ): void {
   clear(ctx);
   drawText(ctx, strings.title, CENTER, 46, { size: 30, bold: true, align: 'center' });
@@ -41,9 +41,10 @@ export function drawTitle(
   const labels = [
     strings.titleScreen.start,
     `${strings.titleScreen.scanlines}：${state.scanlines ? strings.titleScreen.on : strings.titleScreen.off}`,
+    `${strings.titleScreen.sound}：${state.sound ? strings.titleScreen.on : strings.titleScreen.off}`,
   ];
   labels.forEach((label, index) => {
-    const y = TITLE_MENU_Y[index] ?? 158;
+    const y = TITLE_MENU_Y[index] ?? 152;
     const active = index === state.cursor;
     drawText(ctx, label, CENTER, y, {
       size: 14,

@@ -5,6 +5,8 @@ import { hashState } from '../core/hash';
 import type { Controller, Inputs } from '../core/types';
 import { CARD_IDS, findEntry } from '../games/registry';
 import type { RegistryEntry } from '../games/types';
+import { createBrowserAudio } from './audio';
+import type { SoundName } from './audio';
 import { LOGICAL_HEIGHT, LOGICAL_WIDTH } from './canvas';
 import type { ScreenCanvas } from './canvas';
 import { cellAt, cellState, moveCursor } from './deck-view';
@@ -84,6 +86,21 @@ function personalityOf(entry: RegistryEntry): TauntPersonality {
   return entry.meta.defaultPolicy ?? 'pathfinder';
 }
 
+/** 一場對局的結果（從人這一邊看）。鬼牌沒有勝負，玩完就算贏（SPEC 第 11 節：玩過一次就算翻開）。 */
+function outcomeOf(entry: RegistryEntry, state: unknown): Outcome {
+  if (entry.id.startsWith('JK')) {
+    return 'win';
+  }
+  const winner = entry.game.winner(state);
+  return winner === 0 ? 'win' : winner === 1 ? 'loss' : 'draw';
+}
+
+const END_SOUND: Readonly<Record<Outcome, SoundName>> = {
+  win: 'win',
+  loss: 'lose',
+  draw: 'draw',
+};
+
 function newSeed(): number {
   return Math.floor(Math.random() * 2 ** 31);
 }
@@ -113,6 +130,14 @@ export function startApp(options: AppOptions): void {
     progress = next;
     saveProgress(storage, progress);
   };
+
+  // 音效：預設靜音；玩家第一次按鍵、點擊或觸控時才啟動 AudioContext（瀏覽器的規定，SPEC 8.4）。
+  const audio = createBrowserAudio();
+  audio.setEnabled(progress.settings.sound);
+  const unlockAudio = (): void => audio.unlock();
+  for (const type of ['keydown', 'pointerdown', 'touchstart'] as const) {
+    window.addEventListener(type, unlockAudio, { capture: true, passive: true });
+  }
 
   const input = attachBrowserInput(window);
   const touch = createTouchControls(options.touchParent, (buttons) => input.setTouch(buttons));
@@ -166,29 +191,54 @@ export function startApp(options: AppOptions): void {
         `${strings.titleScreen.scanlines}：${progress.settings.scanlines ? strings.titleScreen.on : strings.titleScreen.off}`,
         'menu-scanlines',
       );
-      setMirror({ screen: 'title', cursor: String(cursor) }, [heading, tagline, start, scan]);
+      const sound = element(
+        'button',
+        `${strings.titleScreen.sound}：${progress.settings.sound ? strings.titleScreen.on : strings.titleScreen.off}`,
+        'menu-sound',
+      );
+      setMirror({ screen: 'title', cursor: String(cursor) }, [
+        heading,
+        tagline,
+        start,
+        scan,
+        sound,
+      ]);
     };
     const activate = (): void => {
       if (cursor === 0) {
+        audio.play('menuConfirm');
         setScene(tableScene(0));
-      } else {
+      } else if (cursor === 1) {
+        audio.play('menuConfirm');
         updateProgress(withSettings(progress, { scanlines: !progress.settings.scanlines }));
+        sync();
+      } else {
+        // 先改開關再播：打開的那一下會聽到確認音，關掉就安靜。
+        updateProgress(withSettings(progress, { sound: !progress.settings.sound }));
+        audio.setEnabled(progress.settings.sound);
+        audio.play('menuConfirm');
         sync();
       }
     };
     sync();
     return {
-      draw: (c) => drawTitle(c, { cursor, scanlines: progress.settings.scanlines }),
+      draw: (c) =>
+        drawTitle(c, {
+          cursor,
+          scanlines: progress.settings.scanlines,
+          sound: progress.settings.sound,
+        }),
       press(p) {
         if (p.buttons.up || p.buttons.down) {
-          cursor = cursor === 0 ? 1 : 0;
+          cursor = (cursor + (p.buttons.up ? TITLE_MENU_Y.length - 1 : 1)) % TITLE_MENU_Y.length;
+          audio.play('menuMove');
           sync();
         } else if (p.confirm) {
           activate();
         }
       },
       click(_x, y) {
-        const hit = TITLE_MENU_Y.findIndex((top) => y >= top - 4 && y < top + 20);
+        const hit = TITLE_MENU_Y.findIndex((top) => y >= top - 4 && y < top + 16);
         if (hit >= 0) {
           cursor = hit;
           activate();
@@ -274,6 +324,7 @@ export function startApp(options: AppOptions): void {
       }
       const state = cellState(progress, id, true);
       if (state === 'playable' || state === 'revealed') {
+        audio.play('menuConfirm');
         setScene(infoScene(entry));
       }
     };
@@ -293,6 +344,7 @@ export function startApp(options: AppOptions): void {
                 : null;
         if (direction !== null) {
           cursor = moveCursor(cursor, direction);
+          audio.play('menuMove');
           sync();
         } else if (p.confirm) {
           select();
@@ -309,6 +361,7 @@ export function startApp(options: AppOptions): void {
           select();
         } else {
           cursor = hit;
+          audio.play('menuMove');
           sync();
         }
       },
@@ -331,7 +384,10 @@ export function startApp(options: AppOptions): void {
     ];
     setMirror({ screen: 'info', card: entry.id }, children);
 
-    const start = (): void => startMatch(entry, newSeed(), false);
+    const start = (): void => {
+      audio.play('menuConfirm');
+      startMatch(entry, newSeed(), false);
+    };
     return {
       draw: (c) =>
         drawInfo(c, {
@@ -390,6 +446,13 @@ export function startApp(options: AppOptions): void {
       : screenController(() => snapshot.buttons);
     const session = createMatchSession(entry.game, seed, MATCH_CONFIG, human, ai);
 
+    // 自動遊玩是加速跑的（測試用），不出聲。
+    const sfx = (name: SoundName): void => {
+      if (!autoplay) {
+        audio.play(name);
+      }
+    };
+    let lastScores = entry.game.score(session.state());
     let readyTicks = autoplay ? 0 : READY_TICKS;
     let overTicks = 0;
     let paused = false;
@@ -412,14 +475,7 @@ export function startApp(options: AppOptions): void {
       const state = session.state();
       const scores = entry.game.score(state);
       const winner = entry.game.winner(state);
-      const isJoker = entry.id.startsWith('JK');
-      const outcome: Outcome = isJoker
-        ? 'win'
-        : winner === 0
-          ? 'win'
-          : winner === 1
-            ? 'loss'
-            : 'draw';
+      const outcome = outcomeOf(entry, state);
       const before = progress;
       const previous = before.cards[entry.id];
       const levelBefore = currentGlobalLevel(before);
@@ -475,6 +531,7 @@ export function startApp(options: AppOptions): void {
         if (readyTicks > 0) {
           readyTicks -= 1;
           if (readyTicks === 0) {
+            sfx('matchStart');
             syncMirror();
           }
           return;
@@ -487,7 +544,16 @@ export function startApp(options: AppOptions): void {
           return;
         }
         session.advance();
+        // 得分、被扣分：看人這一邊的分數變化（AI 得分不出聲，免得吵）。
+        const scores = entry.game.score(session.state());
+        if (scores[0] > lastScores[0]) {
+          sfx('score');
+        } else if (scores[0] < lastScores[0]) {
+          sfx('hit');
+        }
+        lastScores = scores;
         if (session.isOver()) {
+          sfx(END_SOUND[outcomeOf(entry, session.state())]);
           syncMirror();
         }
       },
@@ -564,6 +630,7 @@ export function startApp(options: AppOptions): void {
     );
 
     const activate = (): void => {
+      audio.play('menuConfirm');
       if (cursor === 0) {
         setScene(replayScene(result, resultScene(result)));
       } else if (cursor === 1) {
@@ -588,8 +655,10 @@ export function startApp(options: AppOptions): void {
       press(p) {
         if (p.buttons.up) {
           cursor = (cursor + 2) % 3;
+          audio.play('menuMove');
         } else if (p.buttons.down) {
           cursor = (cursor + 1) % 3;
+          audio.play('menuMove');
         } else if (p.confirm) {
           activate();
         } else if (p.buttons.b) {
@@ -685,6 +754,7 @@ export function startApp(options: AppOptions): void {
       plan.seed,
     );
     let ticks = 0;
+    audio.play('evolve');
     const canContinue = (): boolean => run.done() && ticks >= EVOLUTION_MIN_TICKS;
     const sync = (): void => {
       setMirror({ screen: 'evolution', done: String(run.done()), played: String(run.played()) }, [
@@ -715,6 +785,7 @@ export function startApp(options: AppOptions): void {
       },
       press(p) {
         if (p.confirm && canContinue()) {
+          audio.play('menuConfirm');
           destination();
         }
       },
@@ -749,6 +820,9 @@ export function startApp(options: AppOptions): void {
     const current = input.read();
     const presses = newPresses(snapshot, current);
     snapshot = current;
+    if (presses.confirm || presses.pause || Object.values(presses.buttons).some(Boolean)) {
+      audio.unlock(); // 手把按鍵不一定算「使用者互動」事件，這裡再補一次。
+    }
     scene.press?.(presses);
     loop.frame(now);
     window.requestAnimationFrame(frame);

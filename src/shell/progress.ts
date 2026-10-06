@@ -24,6 +24,8 @@ export interface CardRecord {
 export interface Settings {
   /** 掃描線效果。 */
   readonly scanlines: boolean;
+  /** 音效（SPEC 8.4）：預設關（靜音）。舊存檔沒有這個欄位，讀到時當成關。 */
+  readonly sound: boolean;
 }
 
 export interface Progress {
@@ -50,7 +52,7 @@ export function defaultProgress(): Progress {
     cards: {},
     globalLevel: 1,
     lossStreak: 0,
-    settings: { scanlines: false },
+    settings: { scanlines: false, sound: false },
   };
 }
 
@@ -90,6 +92,7 @@ export function parseProgress(text: string | null): Progress {
 
   const rawSettings = raw['settings'];
   const scanlines = isRecord(rawSettings) && rawSettings['scanlines'] === true;
+  const sound = isRecord(rawSettings) && rawSettings['sound'] === true;
   const rawStreak = raw['lossStreak'];
   const lossStreak =
     typeof rawStreak === 'number' && Number.isInteger(rawStreak) && rawStreak > 0 ? rawStreak : 0;
@@ -99,7 +102,7 @@ export function parseProgress(text: string | null): Progress {
     cards,
     globalLevel: 1,
     lossStreak,
-    settings: { scanlines },
+    settings: { scanlines, sound },
   };
   // 全域等級永遠由翻開張數重算，不信存檔裡的數字。
   return { ...progress, globalLevel: currentGlobalLevel(progress) };
@@ -189,6 +192,7 @@ export function recordResult(
   return { ...next, globalLevel: currentGlobalLevel(next) };
 }
 
-export function withSettings(progress: Progress, settings: Settings): Progress {
-  return { ...progress, settings };
+/** 改設定：只給要改的欄位，其餘保留。 */
+export function withSettings(progress: Progress, settings: Partial<Settings>): Progress {
+  return { ...progress, settings: { ...progress.settings, ...settings } };
 }
