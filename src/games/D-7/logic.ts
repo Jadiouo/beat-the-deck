@@ -10,8 +10,6 @@ import {
   WIDTH,
   WIN_BONUS,
   cell,
-  cellX,
-  cellY,
   clamp01,
   generateWalls,
   makeBase,
@@ -20,6 +18,13 @@ import {
   winnerByScore,
 } from '../_diamonds/logic';
 import type { BaseOverrides, DiamondsBase, Dir, Walker } from '../_diamonds/logic';
+
+// 被測試的環境（vite-node）把匯入的名字改成每次存取都查一次模組物件，熱迴圈裡很慢，所以先抄一份到本地。
+const CELL_COUNT = CELLS;
+const ROW_LENGTH = WIDTH;
+const MOVE_PERIOD = MOVE_EVERY;
+const colOf = (index: number): number => index % ROW_LENGTH;
+const rowOf = (index: number): number => Math.floor(index / ROW_LENGTH);
 
 /**
  * D-7 挖礦（SPEC 第 9 節一行方向；小規格 `docs/cards/D-7.md`）。
@@ -83,8 +88,8 @@ export const DANGER_TRIP_SCALE = 40;
 
 /** 深度：到最近的基地的曼哈頓距離（不看牆，靜態、可以預先畫在畫面上）。 */
 export function depthOf(index: number): number {
-  const x = cellX(index);
-  const y = cellY(index);
+  const x = colOf(index);
+  const y = rowOf(index);
   return Math.min(x + (HEIGHT - 1 - y), WIDTH - 1 - x + y);
 }
 
@@ -130,18 +135,18 @@ export interface StateOverrides extends BaseOverrides {
 /** 測試輔助：沒有牆、全岩石（hp 1）、沒有礦、兩個基地周圍的洞穴，用 overrides 覆蓋。 */
 export function makeState(overrides: StateOverrides = {}): D7State {
   const base = makeBase(overrides);
-  const rock = new Array<number>(CELLS).fill(0);
-  for (let c = 0; c < CELLS; c += 1) {
+  const rock = new Array<number>(CELL_COUNT).fill(0);
+  for (let c = 0; c < CELL_COUNT; c += 1) {
     rock[c] = base.walls[c] === 1 || isCave(c) ? 0 : 1;
   }
   for (const [c, hp] of overrides.rock ?? []) {
     rock[c] = hp;
   }
-  const ore = new Array<number>(CELLS).fill(0);
+  const ore = new Array<number>(CELL_COUNT).fill(0);
   for (const [c, value] of overrides.ore ?? []) {
     ore[c] = value;
   }
-  const opened = new Array<number>(CELLS).fill(-1);
+  const opened = new Array<number>(CELL_COUNT).fill(-1);
   for (const [c, who] of overrides.opened ?? []) {
     opened[c] = who;
   }
@@ -172,10 +177,10 @@ export interface Field {
 
 /** 四個鄰格：每格 4 個（上、右、下、左），出界是 −1。 */
 const NEIGHBORS = ((): Int16Array => {
-  const table = new Int16Array(CELLS * 4).fill(-1);
-  for (let c = 0; c < CELLS; c += 1) {
-    const x = cellX(c);
-    const y = cellY(c);
+  const table = new Int16Array(CELL_COUNT * 4).fill(-1);
+  for (let c = 0; c < CELL_COUNT; c += 1) {
+    const x = colOf(c);
+    const y = rowOf(c);
     if (y > 0) {
       table[c * 4] = cell(x, y - 1);
     }
@@ -198,7 +203,7 @@ const FIELD_BOUND = 90;
 /** 桶佇列（Dial 的最短路徑演算法）：一步最多 `1 + 6 = 7` 週期，所以 8 個桶輪著用就夠了。 */
 const BUCKETS = 8;
 /** 桶裡的節點串列：每格最多被放進去 4 次（每個鄰格各一次）。 */
-const ENTRY_CAPACITY = CELLS * 4 + 4;
+const ENTRY_CAPACITY = CELL_COUNT * 4 + 4;
 const BUCKET_HEAD = new Int32Array(BUCKETS);
 const ENTRY_CELL = new Int32Array(ENTRY_CAPACITY);
 const ENTRY_NEXT = new Int32Array(ENTRY_CAPACITY);
@@ -208,8 +213,8 @@ const ENTRY_NEXT = new Int32Array(ENTRY_CAPACITY);
  * 處理某個桶的時候，它的步數已經是定案的（所有成本更低的前驅都處理過了）。
  */
 function computeField(walls: readonly number[], rock: readonly number[], from: number): Field {
-  const cost = new Int32Array(CELLS).fill(FAR);
-  const steps = new Int32Array(CELLS).fill(FAR);
+  const cost = new Int32Array(CELL_COUNT).fill(FAR);
+  const steps = new Int32Array(CELL_COUNT).fill(FAR);
   BUCKET_HEAD.fill(-1);
   cost[from] = 0;
   steps[from] = 0;
@@ -253,7 +258,7 @@ function computeField(walls: readonly number[], rock: readonly number[], from: n
     }
   }
   // 超過上限的是還沒定案的暫定值，一律當作到不了。
-  for (let c = 0; c < CELLS; c += 1) {
+  for (let c = 0; c < CELL_COUNT; c += 1) {
     if ((cost[c] as number) > FIELD_BOUND) {
       cost[c] = FAR;
       steps[c] = FAR;
@@ -364,20 +369,20 @@ export const d7Game: Game<D7State> = {
 
   init(seed: number, config: GameConfig): D7State {
     const walls = generateWalls(seed).walls;
-    const rock = new Array<number>(CELLS).fill(0);
-    for (let c = 0; c < CELLS; c += 1) {
+    const rock = new Array<number>(CELL_COUNT).fill(0);
+    for (let c = 0; c < CELL_COUNT; c += 1) {
       if (walls[c] === 0 && !isCave(c)) {
         rock[c] = HARD[bandOf(c)] as number;
       }
     }
     // 礦：每一對 180 度旋轉對應的格子擲一次骰，兩邊的格子都放同價值的礦（深度、hp 本來就對稱），所以兩個人的礦脈一樣多。
-    const ore = new Array<number>(CELLS).fill(0);
+    const ore = new Array<number>(CELL_COUNT).fill(0);
     let rng: RngState = rngStateFor(seed, 'ore');
-    for (let c = 0; c < CELLS / 2; c += 1) {
+    for (let c = 0; c < CELL_COUNT / 2; c += 1) {
       let roll: number;
       [roll, rng] = intFrom(rng, 100);
       if (roll < ORE_RATE) {
-        const twin = CELLS - 1 - c;
+        const twin = CELL_COUNT - 1 - c;
         for (const target of [c, twin]) {
           if ((rock[target] as number) > 0) {
             ore[target] = VALUE[bandOf(target)] as number;
@@ -401,7 +406,7 @@ export const d7Game: Game<D7State> = {
       bag: [[], []],
       dug: [0, 0],
       rode: [0, 0],
-      opened: new Array<number>(CELLS).fill(-1),
+      opened: new Array<number>(CELL_COUNT).fill(-1),
     };
   },
 
@@ -416,7 +421,7 @@ export const d7Game: Game<D7State> = {
     ];
     let { rock, ore, opened, bag, dug, rode } = state;
 
-    if (tick % MOVE_EVERY === 0) {
+    if (tick % MOVE_PERIOD === 0) {
       const intents = [
         intentOf(state.walls, state.rock, players[0]),
         intentOf(state.walls, state.rock, players[1]),
@@ -539,12 +544,16 @@ export const d7Game: Game<D7State> = {
       taken: [-1, -1],
     });
     const dirs = side === 0 ? DIRS_FIRST : DIRS_SECOND;
+    // 從鄰格走到目標的成本 = 從目標走到鄰格的成本 + 目標那一格的進入成本（路徑反過來，中間每一格的成本一樣，兩端各差一格），
+    // 所以只要算一張從目標出發的成本圖，不用算四張從鄰格出發的。
+    const fromTarget = pick.target >= 0 ? fieldFrom(state.walls, state.rock, pick.target) : null;
     const scored = dirs.map((dir, order) => {
       const next = stepTarget(state.walls, me.cell, dir);
       let via = Number.POSITIVE_INFINITY;
-      if (pick.target >= 0 && next !== me.cell) {
-        const rest = fieldFrom(state.walls, state.rock, next).cost[pick.target] as number;
-        via = rest >= FAR ? Number.POSITIVE_INFINITY : 1 + (state.rock[next] as number) + rest;
+      if (fromTarget !== null && next !== me.cell) {
+        const back = fromTarget.cost[next] as number;
+        via =
+          back >= FAR ? Number.POSITIVE_INFINITY : back + 1 + (state.rock[pick.target] as number);
       } else if (pick.target >= 0 && me.cell === pick.target) {
         via = 0.5;
       }
@@ -642,7 +651,7 @@ export const d7Game: Game<D7State> = {
         (state.rock[theirs.to] as number) <= (mine.kind === 2 && mine.to === theirs.to ? 2 : 1)
       ) {
         const near =
-          Math.abs(cellX(myPos) - cellX(theirs.to)) + Math.abs(cellY(myPos) - cellY(theirs.to));
+          Math.abs(colOf(myPos) - colOf(theirs.to)) + Math.abs(rowOf(myPos) - rowOf(theirs.to));
         if (near === 1) {
           wait = RIDE_WAIT_PER_VALUE * value;
         }
@@ -669,7 +678,7 @@ export const d7Game: Game<D7State> = {
       const homeCost = Math.min(pick.homeCost, 1000);
       const remaining = state.maxTicks - state.tick;
       danger = clamp01(
-        Math.max(0, homeCost * MOVE_EVERY - remaining * 0.8) / 300 +
+        Math.max(0, homeCost * MOVE_PERIOD - remaining * 0.8) / 300 +
           (myValue / DANGER_BAG_SCALE) * (homeCost / DANGER_TRIP_SCALE),
       );
     }
@@ -763,14 +772,14 @@ function chooseTarget(input: PlanInput): Pick {
   const remaining = state.maxTicks - state.tick;
   const goHome =
     input.bagLength >= BAG ||
-    (input.bagLength > 0 && remaining < LATE_TICKS + MOVE_EVERY * Math.min(homeCost, 1000));
+    (input.bagLength > 0 && remaining < LATE_TICKS + MOVE_PERIOD * Math.min(homeCost, 1000));
   if (goHome && homeCost < FAR) {
     return { target: myBase, home: true, nav: -homeCost, rate: 0, homeCost };
   }
   let bestScore = Number.NEGATIVE_INFINITY;
   let bestTarget = -1;
   let bestRate = 0;
-  for (let c = 0; c < CELLS; c += 1) {
+  for (let c = 0; c < CELL_COUNT; c += 1) {
     const value = state.ore[c] as number;
     if (value === 0 || c === taken[0] || c === taken[1]) {
       continue;
@@ -803,7 +812,7 @@ function chooseTarget(input: PlanInput): Pick {
     const trip = Math.max(
       1,
       cost +
-        TRIP_WEIGHT * (Math.abs(cellX(c) - cellX(myBase)) + Math.abs(cellY(c) - cellY(myBase))),
+        TRIP_WEIGHT * (Math.abs(colOf(c) - colOf(myBase)) + Math.abs(rowOf(c) - rowOf(myBase))),
     );
     const rate = worth / trip;
     const score = RATE_WEIGHT * rate - cost + race - contest;
