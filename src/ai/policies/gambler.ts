@@ -1,6 +1,6 @@
 import type { Buttons, Game, Side } from '../../core/types';
 import type { Policy, PolicyParams } from '../types';
-import { argMax, lookOneStep, myActions, spreadOf } from './shared';
+import { lookAhead, spreadOf } from './shared';
 
 /** 風險偏好的基準值：領先或打平時，danger = 1 的動作效用加成 100%。 */
 export const GAMBLER_R_BASE = 1;
@@ -17,19 +17,21 @@ export const GAMBLER_R_EXTRA = 3;
  * 2. 「落後多少」要與這個遊戲的 gain 單位無關：behind = max(0, −目前的 gain)，
  *    r = R_BASE + R_EXTRA · behind / (behind + 範圍)。落後 0 時 r = 1；落後是候選動作差距的 9 倍時 r ≈ 3.7；趨近 4。
  *
- * 只看一步（與貪心型同樣的視野），平手取索引最小的。
+ * 往前看 depth 步（束搜尋，見 `lookAhead`），在終點上用同樣的效用選第一步；depth 1 就是只看一步。
+ * 「落後多少」永遠用現在這個 state 的 gain，不是終點的。平手取索引最小的。
+ * depth 只改看多遠，不改「落後越多越敢賭」這個偏好。
  */
 export const gambler: Policy = {
   name: 'gambler',
-  decide<S>(game: Game<S>, state: S, side: Side, _tick: number, _params: PolicyParams): Buttons {
-    const scored = lookOneStep(game, state, side);
-    const gains = scored.map((s) => s.gain);
-    const spread = spreadOf(gains);
-    const scale = spread > 0 ? spread : 1;
-    const floor = Math.min(...gains);
+  decide<S>(game: Game<S>, state: S, side: Side, _tick: number, params: PolicyParams): Buttons {
     const behind = Math.max(0, -game.evaluate(state, side).gain);
-    const r = GAMBLER_R_BASE + (GAMBLER_R_EXTRA * behind) / (behind + scale);
-    const utility = scored.map((s) => (s.gain - floor + scale) * (1 + r * s.danger));
-    return myActions(game, state, side)[argMax(utility)] as Buttons;
+    return lookAhead(game, state, side, params.depth, (leaves) => {
+      const gains = leaves.map((leaf) => leaf.gain);
+      const spread = spreadOf(gains);
+      const scale = spread > 0 ? spread : 1;
+      const floor = Math.min(...gains);
+      const r = GAMBLER_R_BASE + (GAMBLER_R_EXTRA * behind) / (behind + scale);
+      return leaves.map((leaf) => (leaf.gain - floor + scale) * (1 + r * leaf.danger));
+    });
   },
 };
