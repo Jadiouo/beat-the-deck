@@ -401,7 +401,7 @@ describe('H-4 比大小｜規則', () => {
   });
 
   it('15. 超時：choose 閒置到第 DECISION_TIMEOUT 個 tick 自動選保守的；第一猜選未公開張數多的那一邊，有連對就收手；那個 tick 按了鍵算按了', () => {
-    // 低的牌都公開丟掉了，剩下大的多 → 猜大
+    // 看不到桌上牌的第一猜：桌上牌與翻出的牌來自同一堆牌，牌表再偏也是五五波，所以自動選的是 ↑（一樣時猜大）
     const lowGone = choosing({
       table: 7,
       idle: DECISION_TIMEOUT - 1,
@@ -413,7 +413,15 @@ describe('H-4 比大小｜規則', () => {
       idle: DECISION_TIMEOUT - 1,
       counts: without([10, 10, 11, 11, 12, 12, 13, 13]),
     });
-    expect(h4Game.step(highGone, idle()).guess).toBe(1);
+    expect(h4Game.step(highGone, idle()).guess).toBe(0);
+    // 看過桌上牌（連對中，但這裡用 c = 0 的換手後模擬不到）→ 改用 chain 的收手；看得到桌上牌的猜法見下面的 known
+    const known = choosing({
+      table: 7,
+      tableSeen: [true, false],
+      idle: DECISION_TIMEOUT - 1,
+      counts: without([10, 10, 11, 11, 12, 12, 13, 13]),
+    });
+    expect(h4Game.step(known, idle()).guess).toBe(1);
     const chain = choosing({
       c: 2,
       table: 9,
@@ -594,14 +602,14 @@ describe('H-4 比大小｜這一邊看得到什麼（unseenCounts、後驗、猜
     expect(up).toBeCloseTo(down, 6);
   });
 
-  it('winChance：低牌都公開丟掉了 → 看不到桌上牌時猜大比較可能中', () => {
-    const s = choosing({
-      turn: 1,
-      tableSeen: [true, false],
-      counts: without([1, 1, 2, 2, 3, 3, 4, 4]),
-      table: 9,
-    });
-    expect(winChance(s, 1, 0)).toBeGreaterThan(winChance(s, 1, 1));
+  it('winChance：看不到桌上牌時，牌表再偏也是五五波（桌上牌與翻出的牌來自同一堆牌）；看過桌上牌時，低牌都丟掉了猜大比較可能中', () => {
+    const counts = without([1, 1, 2, 2, 3, 3, 4, 4]);
+    const blind = choosing({ turn: 1, tableSeen: [true, false], counts, table: 9 });
+    expect(winChance(blind, 1, 0)).toBeCloseTo(winChance(blind, 1, 1), 9);
+    const known = choosing({ turn: 1, tableSeen: [false, true], counts, table: 9, c: 1 });
+    expect(winChance(known, 1, 0)).toBeGreaterThan(winChance(known, 1, 1) - 0.3);
+    const mid = choosing({ turn: 1, tableSeen: [false, true], counts, table: 6, c: 1 });
+    expect(winChance(mid, 1, 0)).toBeGreaterThan(winChance(mid, 1, 1));
   });
 
   it('後驗：沒有線索時等於未公開牌的比例；機率加起來是 1；只在還沒看過的桌上牌上有意義（看過的是 delta）', () => {
@@ -876,6 +884,38 @@ function peekCases(): PeekCase[] {
         ],
       });
     }
+    // F. 開局：桌上牌誰都沒看過（兩邊都不可以讀）；各階段、各種背景
+    for (const phase of ['prep', 'choose', 'locked', 'flip'] as const) {
+      const first = makeState({
+        ...bg,
+        phase,
+        wait:
+          phase === 'prep'
+            ? AI_WAIT_TICKS
+            : phase === 'choose'
+              ? 0
+              : phase === 'locked'
+                ? LOCK_TICKS
+                : RESULT_TICKS,
+        guess: phase === 'locked' || phase === 'flip' ? 0 : null,
+        turn: 0,
+        c: 0,
+        tableSeen: [false, false],
+        table: 6,
+        flip: phase === 'flip' ? 9 : 0,
+      });
+      for (const side of [0, 1] as const) {
+        cases.push({
+          name: `開局（兩邊都沒看過桌上牌）${phase} 背景 ${bi} 側 ${side}：桌上牌與翻出的牌`,
+          side,
+          base: first,
+          variants: [
+            ...RANKS.map((table) => ({ ...first, table })),
+            ...(phase === 'flip' ? RANKS.map((flip) => ({ ...first, flip })) : []),
+          ],
+        });
+      }
+    }
     // E. 對方剛收手（輪到對方、對方沒看過我留的牌）：我留的牌的資訊在 evaluate 裡是我自己看過的（可以讀），
     //    但對方這邊（人）看 AI 留的牌不可以讀
     const handed = makeState({
@@ -901,6 +941,21 @@ describe('H-4 比大小｜不偷看（evaluate 與 actions 只讀這一邊看得
   it('每一個隱藏資訊的情境：只有隱藏資訊不同的兩個 state，evaluate 與 actions 完全相同', () => {
     for (const c of peekCases()) {
       expect(peeks(h4Game, c.base, c.variants, c.side), c.name).toBe(false);
+    }
+  });
+
+  it('這一邊讀的牌表與後驗（unseenCounts、tablePosterior、winChance）也只由看得到的東西決定', () => {
+    for (const c of peekCases()) {
+      const look = (st: H4State): unknown => [
+        unseenCounts(st, c.side),
+        tablePosterior(st, c.side),
+        winChance(st, c.side, 0),
+        winChance(st, c.side, 1),
+      ];
+      const expected = look(c.base);
+      for (const v of c.variants) {
+        expect(look(v), c.name).toEqual(expected);
+      }
     }
   });
 
@@ -947,6 +1002,16 @@ describe('H-4 比大小｜不偷看（evaluate 與 actions 只讀這一邊看得
         tableSeen: [true, false],
         table: 6,
       });
+      // AI（1）先手：桌上牌誰都沒看過
+      const opening = makeState({
+        ...bg,
+        phase: 'choose',
+        wait: 0,
+        turn: 1,
+        c: 0,
+        tableSeen: [false, false],
+        table: 6,
+      });
       // AI（1）連對中：桌上牌自己看過；下一張牌（rng）不可以影響
       const chain = makeState({
         ...bg,
@@ -969,6 +1034,13 @@ describe('H-4 比大小｜不偷看（evaluate 與 actions 只讀這一邊看得
           }
           for (const rng of [blind.rng + 1, blind.rng + 12345, 1, 987654321]) {
             expect(nameOf(decideWith(policy, depth, { ...blind, rng }, 1))).toBe(expected);
+          }
+          const expectedOpening = nameOf(decideWith(policy, depth, opening, 1));
+          for (const table of RANKS) {
+            expect(
+              nameOf(decideWith(policy, depth, { ...opening, table }, 1)),
+              `${policy.name} 深度 ${depth} 開局 桌上牌 ${table}`,
+            ).toBe(expectedOpening);
           }
           const expectedChain = nameOf(decideWith(policy, depth, chain, 1));
           for (const rng of [chain.rng + 1, chain.rng + 12345, 1, 987654321]) {
@@ -1157,27 +1229,59 @@ describe('H-4 比大小｜stopBias 影響 AI 的決定（玩家可以騙它）',
   const HONEST = [7, 6, 8, 5].map((card) => entry(0, 2, true, 1, card));
   const BLUFF = [13, 1, 12, 2].map((card) => entry(0, 2, true, 1, card));
 
-  it('存在 AI 的猜法因為 stopBias 而改變的局面（深度 3 與 6）：同樣的猜法與收手，收手紀錄誠實 → 猜一邊；收手紀錄在騙 → 猜另一邊', () => {
+  it('存在 AI 的決定因為 stopBias 而改變的局面（深度 3 與 6）：AI 自己的收手紀錄誠實 → 對方信任它的收手；紀錄在騙 → 對方不信，AI 的最佳動作跟著變', () => {
     const found: string[] = [];
-    for (const dirs of [[0], [1], [0, 0], [1, 1], [0, 1], [1, 0], [0, 0, 0], [1, 1, 1]] as (
-      0 | 1
-    )[][]) {
+    const honestPast = [7, 6, 8, 5].map((card) => entry(1, 2, true, 1, card));
+    const bluffPast = [13, 1, 12, 2].map((card) => entry(1, 2, true, 1, card));
+    for (const dirs of [[0], [1], [0, 0], [1, 1], [0, 1], [1, 0]] as (0 | 1)[][]) {
       for (const start of [2, 4, 6, 8, 10, 12]) {
-        for (const skew of [[], [1, 1, 2, 2, 3], [11, 12, 12, 13, 13]]) {
-          const counts = without(skew);
-          const honest = bluffScene(dirs, HONEST, start, counts);
-          const bluff = bluffScene(dirs, BLUFF, start, counts);
-          for (const depth of [3, 6]) {
-            const a = nameOf(decideWith(pathfinder, depth, honest, 1));
-            const b = nameOf(decideWith(pathfinder, depth, bluff, 1));
-            if (a !== b) {
-              found.push(`${dirs.join('')}/${start}/${skew.length}/${depth}: ${a}→${b}`);
+        for (const table of [1, 3, 5, 7, 9, 11, 13]) {
+          for (const skew of [[], [1, 1, 2, 2, 3]]) {
+            const mk = (past: readonly H4Entry[]): H4State =>
+              choosing({
+                turn: 1,
+                c: dirs.length,
+                tableSeen: [false, true],
+                table,
+                turnCards: dirs.map(() => 4),
+                counts: without(skew),
+                history: [
+                  ...past,
+                  entry(0, 2, true, 1, start),
+                  ...dirs.map((d, i) => entry(1, d, true, i + 1)),
+                ],
+              });
+            for (const depth of [3, 6]) {
+              const a = nameOf(decideWith(pathfinder, depth, mk(honestPast), 1));
+              const b = nameOf(decideWith(pathfinder, depth, mk(bluffPast), 1));
+              if (a !== b) {
+                found.push(`${dirs.join('')}/${start}/${table}/${depth}: ${a}→${b}`);
+              }
             }
           }
         }
       }
     }
     expect(found.length).toBeGreaterThan(0);
+  });
+
+  it('玩家的收手紀錄在騙人（極端牌收手）：AI 對蓋牌的後驗被攤平（中間牌的機率變小），猜法的把握因此改變', () => {
+    const chain = [entry(0, 0, true, 1), entry(0, 2, true, 1)];
+    const honest = [7, 6, 8, 5].map((card) => entry(0, 2, true, 1, card));
+    const bluff = [13, 1, 12, 2].map((card) => entry(0, 2, true, 1, card));
+    const mk = (past: readonly H4Entry[]): H4State =>
+      choosing({
+        turn: 1,
+        tableSeen: [true, false],
+        counts: FULL,
+        table: 6,
+        history: [...past, entry(1, 2, true, 1, 3), ...chain],
+      });
+    const margin = (st: H4State): number => winChance(st, 1, 1) - winChance(st, 1, 0);
+    expect(margin(mk(bluff))).not.toBeCloseTo(margin(mk(honest)), 3);
+    expect(h4Game.evaluate(toFlip(mk(honest), 1, DOWN), 1).gain).not.toBe(
+      h4Game.evaluate(toFlip(mk(bluff), 1, DOWN), 1).gain,
+    );
   });
 
   it('同一個局面，深度 1 與 2 完全讀不到 stopBias（反射）：收手紀錄誠實或騙人，決定一樣', () => {
@@ -1194,24 +1298,38 @@ describe('H-4 比大小｜stopBias 影響 AI 的決定（玩家可以騙它）',
     }
   });
 
-  it('AI 收手也看自己的名聲：AI 自己一直在極端牌收手 → 對方不再相信它的收手，把蓋牌留在極端牌的好處變少（收手的 gain 變低）', () => {
-    // AI（1）連對 2 次（猜大），桌上 13（自己看過），要不要收手。人看到的是「猜大連對 2 次然後收手」。
-    const mk = (past: readonly H4Entry[]): H4State =>
-      choosing({
-        turn: 1,
-        c: 2,
-        tableSeen: [false, true],
-        table: 13,
-        turnCards: [4, 9],
-        counts: FULL,
-        history: [...past, entry(0, 2, true, 1, 5), entry(1, 0, true, 1), entry(1, 0, true, 2)],
-      });
-    const stopGain = (past: readonly H4Entry[]): number =>
-      h4Game.evaluate(h4Game.step(mk(past), press(1, STOP)), 1).gain;
+  it('AI 收手也看自己的名聲：AI 自己的收手紀錄在騙人（極端牌收手）→ 人對這次收手的讀法不同，收手的 gain 跟著變（至少有一個局面變）', () => {
     const honestPast = [7, 6, 8, 5].map((card) => entry(1, 2, true, 1, card));
     const bluffPast = [13, 1, 12, 2].map((card) => entry(1, 2, true, 1, card));
-    // 兩邊的得分一樣（stop 的 CHAIN_PTS 一樣），差別只在人怎麼讀這次收手
-    expect(stopGain(honestPast)).not.toBe(stopGain(bluffPast));
+    let changed = 0;
+    for (const dirs of [[0], [1], [0, 0], [1, 1], [0, 1], [1, 0]] as (0 | 1)[][]) {
+      for (const start of [3, 5, 7, 9, 11]) {
+        for (const table of [2, 4, 6, 7, 8, 10, 12]) {
+          for (const skew of [[], [1, 1, 2, 2, 3], [11, 12, 12, 13, 13]]) {
+            const mk = (past: readonly H4Entry[]): H4State =>
+              choosing({
+                turn: 1,
+                c: dirs.length,
+                tableSeen: [false, true],
+                table,
+                turnCards: dirs.map(() => 4),
+                counts: without(skew),
+                history: [
+                  ...past,
+                  entry(0, 2, true, 1, start),
+                  ...dirs.map((d, i) => entry(1, d, true, i + 1)),
+                ],
+              });
+            const stopGain = (past: readonly H4Entry[]): number =>
+              h4Game.evaluate(h4Game.step(mk(past), press(1, STOP)), 1).gain;
+            if (Math.abs(stopGain(honestPast) - stopGain(bluffPast)) > 1e-9) {
+              changed += 1;
+            }
+          }
+        }
+      }
+    }
+    expect(changed).toBeGreaterThan(0);
   });
 });
 
@@ -1239,14 +1357,20 @@ describe('H-4 比大小｜四種性格', () => {
   it('精準型：猜錯機率超過三成就收手；極端牌（猜錯機率低）才繼續', () => {
     const s7 = middle([0, 0]);
     expect(nameOf(decideWith(precise, 1, s7, 1))).toBe('stop');
-    const s13 = { ...s7, table: 13 };
+    // 極端牌（猜錯機率低），而且對方一看連對的方向就知道該猜哪邊（留下去是壞局）→ 繼續
+    const s13 = { ...s7, table: 13, history: [entry(1, 0, true, 1)] };
     expect(nameOf(decideWith(precise, 1, s13, 1))).not.toBe('stop');
   });
 
-  it('貪心型：一步看，不看危險——中間牌也會連（跟精準型不同）', () => {
-    const s7 = middle([0, 0]);
-    expect(nameOf(decideWith(greedy, 1, s7, 1))).not.toBe('stop');
-    expect(nameOf(decideWith(precise, 1, s7, 1))).toBe('stop');
+  it('貪心型：只看 gain、不看危險與比分——領先與落後的選擇一樣（跟賭徒型不同）', () => {
+    for (const table of [4, 7, 10, 13]) {
+      const lead = decideWith(greedy, 1, { ...middle([0, 12]), table }, 1);
+      const trail = decideWith(greedy, 1, { ...middle([12, 0]), table }, 1);
+      expect(nameOf(lead)).toBe(nameOf(trail));
+    }
+    expect(nameOf(decideWith(gambler, 1, middle([12, 0]), 1))).not.toBe(
+      nameOf(decideWith(gambler, 1, middle([0, 12]), 1)),
+    );
   });
 });
 
