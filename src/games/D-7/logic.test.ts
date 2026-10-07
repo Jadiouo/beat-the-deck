@@ -776,7 +776,8 @@ describe('D-7 挖礦｜actions 與 evaluate', () => {
         }),
         0,
       ).danger;
-    expect(late(3500)).toBeGreaterThan(late(500));
+    // 離基地 16 格（走回去要 80 tick）；剩 40 tick 才真的趕不及（小規格的公式：(走回去的 tick − 剩餘 × 0.8) / 300）。
+    expect(late(3560)).toBeGreaterThan(late(500));
   });
 
   it('gain 與 danger 對兩邊對稱：把整個局面轉 180 度、兩邊對調，同一組數字（不是橡皮筋、也不偏袒任何一邊）', () => {
@@ -925,9 +926,11 @@ describe('D-7 挖礦｜性格（黑箱）', () => {
     expect(choose(gambler, carrying([10, 10, 10]))).toBe('right');
   });
 
-  it('搜尋型：看得到「這一步以後 6 個 tick 會怎樣」，背著 30 分的礦離家 16 格它也回家（用 danger 扣分）', () => {
-    expect(choose(pathfinder, carrying([10, 10, 10]), 0, 6)).toBe('left');
+  it('搜尋型：看得到「這一步以後 6 個 tick 會怎樣」，背包滿了（40 分、離家 16 格）它回家，空包時去撿礦；時間還很多、背著 30 分時，它拿前面那顆價值 3 的礦（填滿背包再回家）', () => {
+    expect(choose(pathfinder, carrying([10, 10, 10, 10]), 0, 6)).toBe('left');
     expect(choose(pathfinder, carrying([]), 0, 6)).toBe('right');
+    // 剩 3500 tick、走回去只要 80 tick：多走 2 格撿 3 分是划算的，這一步的 danger 差（約 0.2）也不夠把它拉回頭。
+    expect(choose(pathfinder, carrying([10, 10, 10]), 0, 6)).toBe('right');
   });
 
   it('同一個局面，貪心型與精準型的 decide 不同（性格看得出來）；四個性格在另一個局面（鑿深礦還是淺礦）至少分成兩種決定', () => {

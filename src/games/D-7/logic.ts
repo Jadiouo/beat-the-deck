@@ -56,7 +56,17 @@ export const FREE_RIDE_BONUS = 0.5;
 /** 剩下的 tick 少於「走回基地要的 tick」加上這麼多，背著礦就該回家了。 */
 export const LATE_TICKS = 300;
 /** 躺在對手也到得了的地方的礦（它會在我鑿穿的那一刻站在旁邊、跟著踩進去各撿一份），我算它值多少折：0.5 就是少一半。 */
-export const COPY_DISCOUNT = 0.5;
+/** 對手與我到同一顆礦的時間差（週期）：超過 ±這麼多，要嘛全歸我、要嘛幾乎全歸它。 */
+export const COPY_SLACK = 3;
+/** 對手比我晚這麼多個週期到，還是算「差不多同時」（鑿穿的聲響與它的位置：它會在隔壁等著）。 */
+export const COPY_LAG = 2;
+/** 對手早到很多時，這顆礦對我的價值最少還剩幾成（它的背包也許滿了、也許它不去撿）。 */
+export const COPY_FLOOR = 0.1;
+/** 我鑿的那一格，對手在 `GIVE_RANGE` 個週期以內走得到：最多扣這麼多（替對手鋪路）。 */
+export const GIVE_WEIGHT = 6;
+export const GIVE_RANGE = 12;
+/** 被對手搶先的礦，導航分數再扣這麼多（相當於多走這麼多個週期的路），所以對手在哪一側會改變我挑哪一顆。 */
+export const CONTEST_COST = 80;
 /** 對手這一鑿就要鑿穿一格有礦的岩石，而我站在那一格旁邊（下一次走格一起踩進去各撿一份）：每 1 分價值給這麼多。 */
 export const RIDE_WAIT_PER_VALUE = 20;
 /** 背包裡的礦在 `gain` 裡一分算幾（存起來的是 100，所以比較少）。 */
@@ -152,8 +162,6 @@ export function makeState(overrides: StateOverrides = {}): D7State {
 
 /** 到不了。 */
 const FAR = 1 << 30;
-/** 路徑長度與時間成本合成一個整數：成本 × 1024 + 步數，所以成本相同時步數少的優先。 */
-const PACK = 1024;
 
 export interface Field {
   /** 從出發格走到每一格的時間成本（週期）：空格一步 1，岩石一步 `1 + hp`（鑿完再走進去），牆走不過；到不了是 `FAR`。 */
@@ -184,70 +192,72 @@ const NEIGHBORS = ((): Int16Array => {
   return table;
 })();
 
-/** Dijkstra 用的二元堆（同步用完就丟，每次搜尋前都從頭寫，所以共用一份）。元素是「合成距離 × 1024 + 格子」。 */
-const HEAP = new Float64Array(CELLS * 4 + 16);
+/** 成本圖只算到這麼多個週期（約 7 秒的路）；更遠的格子視為到不了。 */
+const FIELD_BOUND = 90;
 
+/** 桶佇列（Dial 的最短路徑演算法）：一步最多 `1 + 6 = 7` 週期，所以 8 個桶輪著用就夠了。 */
+const BUCKETS = 8;
+/** 桶裡的節點串列：每格最多被放進去 4 次（每個鄰格各一次）。 */
+const ENTRY_CAPACITY = CELLS * 4 + 4;
+const BUCKET_HEAD = new Int32Array(BUCKETS);
+const ENTRY_CELL = new Int32Array(ENTRY_CAPACITY);
+const ENTRY_NEXT = new Int32Array(ENTRY_CAPACITY);
+
+/**
+ * 時間成本圖：成本相同時取步數少的。成本一步至少 1，所以同一個桶裡的格子之間沒有邊，
+ * 處理某個桶的時候，它的步數已經是定案的（所有成本更低的前驅都處理過了）。
+ */
 function computeField(walls: readonly number[], rock: readonly number[], from: number): Field {
-  const dist = new Int32Array(CELLS).fill(FAR);
-  dist[from] = 0;
-  let size = 1;
-  HEAP[0] = from;
-  while (size > 0) {
-    const top = HEAP[0] as number;
-    size -= 1;
-    if (size > 0) {
-      const last = HEAP[size] as number;
-      let i = 0;
-      for (;;) {
-        let child = i * 2 + 1;
-        if (child >= size) {
-          break;
-        }
-        if (child + 1 < size && (HEAP[child + 1] as number) < (HEAP[child] as number)) {
-          child += 1;
-        }
-        if ((HEAP[child] as number) >= last) {
-          break;
-        }
-        HEAP[i] = HEAP[child] as number;
-        i = child;
+  const cost = new Int32Array(CELLS).fill(FAR);
+  const steps = new Int32Array(CELLS).fill(FAR);
+  BUCKET_HEAD.fill(-1);
+  cost[from] = 0;
+  steps[from] = 0;
+  ENTRY_CELL[0] = from;
+  ENTRY_NEXT[0] = -1;
+  BUCKET_HEAD[0] = 0;
+  let used = 1;
+  let pending = 1;
+  for (let level = 0; pending > 0 && level <= FIELD_BOUND; level += 1) {
+    const bucket = level % BUCKETS;
+    let entry = BUCKET_HEAD[bucket] as number;
+    BUCKET_HEAD[bucket] = -1;
+    while (entry >= 0) {
+      pending -= 1;
+      const current = ENTRY_CELL[entry] as number;
+      entry = ENTRY_NEXT[entry] as number;
+      if (cost[current] !== level) {
+        continue; // 後來找到更便宜的路，這是舊的紀錄
       }
-      HEAP[i] = last;
-    }
-    const current = top % PACK;
-    const d = (top - current) / PACK;
-    if (d > (dist[current] as number)) {
-      continue;
-    }
-    for (let k = 0; k < 4; k += 1) {
-      const next = NEIGHBORS[current * 4 + k] as number;
-      if (next < 0 || walls[next] === 1) {
-        continue;
-      }
-      const nd = d + (1 + (rock[next] as number)) * PACK + 1;
-      if (nd < (dist[next] as number)) {
-        dist[next] = nd;
-        let i = size;
-        size += 1;
-        const value = nd * PACK + next;
-        while (i > 0) {
-          const up = (i - 1) >> 1;
-          if ((HEAP[up] as number) <= value) {
-            break;
-          }
-          HEAP[i] = HEAP[up] as number;
-          i = up;
+      const nextSteps = (steps[current] as number) + 1;
+      for (let k = 0; k < 4; k += 1) {
+        const next = NEIGHBORS[current * 4 + k] as number;
+        if (next < 0 || walls[next] === 1) {
+          continue;
         }
-        HEAP[i] = value;
+        const nd = level + 1 + (rock[next] as number);
+        const known = cost[next] as number;
+        if (nd < known) {
+          cost[next] = nd;
+          steps[next] = nextSteps;
+          const slot = nd % BUCKETS;
+          ENTRY_CELL[used] = next;
+          ENTRY_NEXT[used] = BUCKET_HEAD[slot] as number;
+          BUCKET_HEAD[slot] = used;
+          used += 1;
+          pending += 1;
+        } else if (nd === known && nextSteps < (steps[next] as number)) {
+          steps[next] = nextSteps;
+        }
       }
     }
   }
-  const cost = new Int32Array(CELLS);
-  const steps = new Int32Array(CELLS);
+  // 超過上限的是還沒定案的暫定值，一律當作到不了。
   for (let c = 0; c < CELLS; c += 1) {
-    const d = dist[c] as number;
-    cost[c] = d >= FAR ? FAR : Math.floor(d / PACK);
-    steps[c] = d >= FAR ? FAR : d % PACK;
+    if ((cost[c] as number) > FIELD_BOUND) {
+      cost[c] = FAR;
+      steps[c] = FAR;
+    }
   }
   return { cost, steps };
 }
@@ -261,6 +271,14 @@ const FIELD_CACHE = new WeakMap<
   readonly number[],
   WeakMap<readonly number[], Map<number, Field>>
 >();
+
+/** 這一版岩石是從哪一版、改了哪幾格得來的（`step` 鑿岩石時登記；只是快取的線索，不影響結果）。 */
+const LINEAGE = new WeakMap<
+  readonly number[],
+  { readonly prev: readonly number[]; readonly cells: readonly number[] }
+>();
+/** 往前找幾版。 */
+const LINEAGE_HOPS = 8;
 
 export function fieldFrom(walls: readonly number[], rock: readonly number[], from: number): Field {
   let byWalls = FIELD_CACHE.get(rock);
@@ -277,9 +295,33 @@ export function fieldFrom(walls: readonly number[], rock: readonly number[], fro
   if (cached !== undefined) {
     return cached;
   }
-  const field = computeField(walls, rock, from);
+  const field = reusedField(walls, rock, from) ?? computeField(walls, rock, from);
   byCell.set(from, field);
   return field;
+}
+
+/**
+ * 從 `from` 出發的最短路徑不會經過 `from` 自己，所以只有 `from` 這一格的岩石變了（有人在鑿它），
+ * 從它出發的成本圖不變：沿著 `LINEAGE` 往前找，找到同一張牆、同一個出發格、而且之後只動過 `from` 的那一版岩石，直接借它的結果。
+ */
+function reusedField(
+  walls: readonly number[],
+  rock: readonly number[],
+  from: number,
+): Field | undefined {
+  let version = rock;
+  for (let hops = 0; hops < LINEAGE_HOPS; hops += 1) {
+    const link = LINEAGE.get(version);
+    if (link === undefined || !link.cells.every((c) => c === from)) {
+      return undefined;
+    }
+    version = link.prev;
+    const found = FIELD_CACHE.get(version)?.get(walls)?.get(from);
+    if (found !== undefined) {
+      return found;
+    }
+  }
+  return undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -395,6 +437,7 @@ export const d7Game: Game<D7State> = {
             hits.set(intents[side].to, list);
           }
         }
+        LINEAGE.set(dugRock, { prev: rock, cells: [...hits.keys()] });
         for (const [target, sides] of hits) {
           const left = Math.max(0, (rock[target] as number) - sides.length);
           dugRock[target] = left;
@@ -490,7 +533,6 @@ export const d7Game: Game<D7State> = {
       side,
       field: fieldFrom(state.walls, state.rock, me.cell),
       oppField: fieldFrom(state.walls, state.rock, state.players[other].cell),
-      homeField: fieldFrom(state.walls, state.rock, START_CELLS[side]),
       bagLength: state.bag[side].length,
       oppBagLength: state.bag[other].length,
       dug: null,
@@ -577,7 +619,6 @@ export const d7Game: Game<D7State> = {
       side,
       field,
       oppField: fieldFrom(state.walls, state.rock, oppPos),
-      homeField: fieldFrom(state.walls, state.rock, myBase),
       bagLength: myBag.length,
       oppBagLength: oppBag.length,
       dug,
@@ -607,13 +648,21 @@ export const d7Game: Game<D7State> = {
         }
       }
     }
+    // 鑿出來的路是公共財：我鑿的那一格離對手越近（它走得到的週期越少），它越是白白搭我的便車。
+    let give = 0;
+    if (dug !== null) {
+      const theirReach = (input.oppField.cost[dug.cell] as number) ?? FAR;
+      give =
+        (GIVE_WEIGHT * Math.max(0, GIVE_RANGE - Math.min(theirReach, GIVE_RANGE))) / GIVE_RANGE;
+    }
     const myValue = sum(myBag);
     const gain =
       GAIN_PER_POINT * (myScore - oppScore) +
       BAG_WEIGHT * (myValue - sum(oppBag)) +
       pick.nav +
       ride +
-      wait;
+      wait -
+      give;
     // danger：背著礦卻回不去（背包越值錢、離基地越遠、時間越少越高）；背包是空的沒有東西可以丟。
     let danger = 0;
     if (myBag.length > 0) {
@@ -668,8 +717,6 @@ interface PlanInput {
   readonly field: Field;
   /** 從對手（下一步之後）的位置出發。 */
   readonly oppField: Field;
-  /** 從我的基地出發（用來估回程的步數）。 */
-  readonly homeField: Field;
   readonly bagLength: number;
   readonly oppBagLength: number;
   /** 我這一步在鑿的那一格（沒有是 null）：鑿完以後經過它的路變便宜。 */
@@ -700,7 +747,7 @@ interface Pick {
  * 我這一步在鑿的那一格 `dug`：經過它的路，成本改用「鑿完之後」的（`enter` ＋ 從那一格出發的成本），取較小的。
  */
 function chooseTarget(input: PlanInput): Pick {
-  const { state, side, field, oppField, homeField, dug, taken } = input;
+  const { state, side, field, oppField, dug, taken } = input;
   const other: Side = side === 0 ? 1 : 0;
   const myBase = START_CELLS[side];
   const through = dug === null ? null : fieldFrom(state.walls, state.rock, dug.cell);
@@ -736,6 +783,7 @@ function chooseTarget(input: PlanInput): Pick {
     const theyCan = input.oppBagLength < BAG;
     let worth = value;
     let race = 0;
+    let contest = 0;
     if (state.rock[c] === 0) {
       if (theyCan && theirCost < cost) {
         continue;
@@ -743,16 +791,22 @@ function chooseTarget(input: PlanInput): Pick {
       if (state.opened[c] === other && (!theyCan || theirCost > cost)) {
         race = RACE_PER_VALUE * value;
       }
-    } else if (
-      theyCan &&
-      theirCost < FAR &&
-      theirCost - (1 + (state.rock[c] as number)) <= cost - 1
-    ) {
-      worth = value * (1 - COPY_DISCOUNT);
+    } else if (theyCan && theirCost < FAR) {
+      // 還在岩石裡的礦：對手比我早到（`margin` < 0），它自己鑿穿、撿走，我到的時候已經沒了；
+      // 差不多同時到（`margin` ≈ 0），我鑿穿的那一刻它也踩進去，各撿一份；我早到就是我的。
+      // 時間差 `margin` 在 ±`COPY_SLACK` 個週期之內線性過渡，所以對手在我旁邊的哪一側，會改變我該往哪個方向鑿。
+      const margin = theirCost - cost - COPY_LAG;
+      const mine = Math.min(1, Math.max(0, 0.5 + margin / (2 * COPY_SLACK)));
+      worth = value * (COPY_FLOOR + (1 - COPY_FLOOR) * mine);
+      contest = CONTEST_COST * (1 - mine);
     }
-    const trip = Math.max(1, cost + TRIP_WEIGHT * (homeField.steps[c] as number));
+    const trip = Math.max(
+      1,
+      cost +
+        TRIP_WEIGHT * (Math.abs(cellX(c) - cellX(myBase)) + Math.abs(cellY(c) - cellY(myBase))),
+    );
     const rate = worth / trip;
-    const score = RATE_WEIGHT * rate - cost + race;
+    const score = RATE_WEIGHT * rate - cost + race - contest;
     if (score > bestScore || (score === bestScore && rate > bestRate)) {
       bestScore = score;
       bestTarget = c;
