@@ -22,6 +22,8 @@ import {
   ROOM_CAP,
   ROUND_TICKS,
   START_MARGIN,
+  territoryOutcome,
+  TURN_PENALTY,
 } from './logic';
 import type { C8State } from './logic';
 import { c8Render } from './render';
@@ -112,8 +114,8 @@ describe('C-8 光軌｜初始與時間', () => {
     expect(state.snakes[1].body.at(-1)).toBe(cell(23, 11));
   });
 
-  it('4. 一局最多 900 個 tick；maxTicks 小到 200 也能開始，小於 200 丟 RangeError；整場是 maxTicks', () => {
-    expect(ROUND_TICKS).toBe(900);
+  it('4. 一局最多 720 個 tick；maxTicks 小到 200 也能開始，小於 200 丟 RangeError；整場是 maxTicks', () => {
+    expect(ROUND_TICKS).toBe(720);
     const state = c8Game.init(0, { maxTicks: 200, params: {} });
     expect(state.maxTicks).toBe(200);
     expect(state.roundTicks).toBe(ROUND_TICKS);
@@ -244,11 +246,48 @@ describe('C-8 光軌｜出局與一局的勝負', () => {
     expect(state.snakes[0].alive).toBe(true);
   });
 
-  it('14. 時間到沒人出局：這一局平手，沒有人得分', () => {
+  it('14. 邊界：時間到沒人出局，兩邊地盤一樣大（起始位置 180 度對稱）：這一局平手，沒有人得分', () => {
     const state = c8Game.step(makeState({ roundTick: ROUND_TICKS - 1 }), IDLE);
     expect(state.outcome).toBe('draw');
     expect(state.snakes[0].alive && state.snakes[1].alive).toBe(true);
     expect(c8Game.score(state)).toEqual([0, 0]);
+  });
+
+  it('14b. 時間到沒人出局：地盤（誰先到的格子比較多）大的贏這一局；被軌跡圍住的格子不算', () => {
+    // 人在中間 (8,12)，AI 縮在右下角 (30,22) 往右：人的地盤大得多。
+    const humanBigger = c8Game.step(
+      makeState({
+        roundTick: ROUND_TICKS - 1,
+        snakes: [{}, { body: body([30, 22]), dir: RIGHT }],
+      }),
+      IDLE,
+    );
+    expect(humanBigger.outcome).toBe('side0');
+    expect(c8Game.score(humanBigger)).toEqual([1, 0]);
+    // 反過來：AI 在中間、人縮在左上角
+    const aiBigger = c8Game.step(
+      makeState({
+        roundTick: ROUND_TICKS - 1,
+        snakes: [
+          { body: body([1, 1]), dir: DOWN },
+          { body: body([23, 11]), dir: LEFT },
+        ],
+      }),
+      IDLE,
+    );
+    expect(aiBigger.outcome).toBe('side1');
+    // 人把自己圍在一圈軌跡裡（蛇頭 (4,5)，圈裡只有 (5,5) 一格）：地盤只剩 1 格，輸給開闊的 AI
+    const boxed = territoryOutcome([
+      {
+        body: body([4, 5], [4, 6], [5, 6], [6, 6], [6, 5], [6, 4], [5, 4], [4, 4]),
+        dir: UP,
+        turn: UP,
+        alive: true,
+        score: 0,
+      },
+      { body: body([20, 12]), dir: LEFT, turn: LEFT, alive: true, score: 0 },
+    ]);
+    expect(boxed).toBe('side1');
   });
 });
 
@@ -511,6 +550,25 @@ describe('C-8 光軌｜actions 與 evaluate', () => {
     expect(near(12)).toBeGreaterThan(near(13));
     expect(near(13)).toBeGreaterThan(near(15));
     expect(near(15)).toBe(0);
+  });
+
+  it('28d. 打平時優先直走：兩個局面的下一步一樣，只有「最後一步是不是轉了彎」不同，轉彎的 gain 低（扣 TURN_PENALTY 左右）', () => {
+    const straight = makeState({
+      snakes: [
+        { body: body([10, 10], [9, 10], [8, 10]), dir: RIGHT },
+        { body: body([25, 5]), dir: LEFT },
+      ],
+    });
+    const turned = makeState({
+      snakes: [
+        { body: body([10, 10], [10, 11], [9, 11]), dir: RIGHT },
+        { body: body([25, 5]), dir: LEFT },
+      ],
+    });
+    const gap = c8Game.evaluate(straight, 0).gain - c8Game.evaluate(turned, 0).gain;
+    expect(TURN_PENALTY).toBeGreaterThan(0);
+    expect(gap).toBeGreaterThan(TURN_PENALTY / 2);
+    expect(gap).toBeLessThan(TURN_PENALTY * 2);
   });
 
   it('28c. 性格的習慣：下一步就是牆時，搜尋型、精準型、貪心型都轉向；賭徒型（落後就偏好高 danger）會直接撞上去', () => {
