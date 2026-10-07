@@ -26,7 +26,9 @@ const FIRE: Inputs = [press({ a: true }), NONE];
 describe('S-J 射手與靶｜規則', () => {
   it('1. 初始：第一局、0 號邊射、彈藥 5、沒有子彈、一局 1500 tick、分數 0 比 0', () => {
     const s = sJGame.init(3, CONFIG);
-    expect([s.round, s.shooter, s.ammo, s.bullets.length, s.roundTicks]).toEqual([0, 0, 5, 0, 1500]);
+    expect([s.round, s.shooter, s.ammo, s.bullets.length, s.roundTicks]).toEqual([
+      0, 0, 5, 0, 1500,
+    ]);
     expect(sJGame.score(s)).toEqual([0, 0]);
     expect(sJGame.isOver(s)).toBe(false);
   });
@@ -70,7 +72,9 @@ describe('S-J 射手與靶｜規則', () => {
     const moved = sJGame.step(s, [NONE, press({ right: true, up: true })]);
     expect(Math.hypot(moved.px - 75, moved.py - 100)).toBeCloseTo(1.5, 10);
     expect(sJGame.step(s, [NONE, press({ right: true, a: true })]).px).toBeCloseTo(75.6, 10);
-    expect(run(makeState({ px: 147, py: 217 }), 9, [NONE, press({ right: true, down: true })]).px).toBe(147);
+    expect(
+      run(makeState({ px: 147, py: 217 }), 9, [NONE, press({ right: true, down: true })]).px,
+    ).toBe(147);
     expect(sJGame.step(s, [press({ right: true, down: true }), NONE]).px).toBe(75);
   });
 
@@ -178,8 +182,12 @@ describe('S-J 射手與靶｜規則', () => {
   });
 });
 
-const decide = (name: 'precise' | 'greedy' | 'gambler' | 'pathfinder', s: SJState, side: Side, depth = 1): Buttons =>
-  policyByName(name).decide(sJGame, s, side, 0, { depth, seed: 1 });
+const decide = (
+  name: 'precise' | 'greedy' | 'gambler' | 'pathfinder',
+  s: SJState,
+  side: Side,
+  depth = 1,
+): Buttons => policyByName(name).decide(sJGame, s, side, 0, { depth, seed: 1 });
 
 describe('S-J 射手與靶｜AI 的選擇', () => {
   it('A. 躲的人看彈藥：射手沒彈藥時精準型衝進上半場（往上），有彈藥又在游標那一欄時不進去', () => {
@@ -211,5 +219,17 @@ describe('S-J 射手與靶｜AI 的選擇', () => {
     const lead = makeState({ cursor: 30, px: 120, py: 120, hits: [3, 0] });
     const trail = makeState({ cursor: 30, px: 120, py: 120, hits: [0, 3] });
     expect(decide('precise', lead, 0)).toEqual(decide('precise', trail, 0));
+  });
+
+  it('F. 留一發：同一個「有點準但不夠準」的局面（躲的人站在旁邊 16 像素），只剩 1 發的射手不開火，還有 3 發的射手開火', () => {
+    const base = { cursor: 59, px: 75, py: 100 };
+    expect(decide('precise', makeState({ ...base, ammo: 1 }), 0).a).toBe(false);
+    expect(decide('precise', makeState({ ...base, ammo: 3 }), 0).a).toBe(true);
+  });
+
+  it('G. 彈藥是躲的人的窗口：射手還有 3 發，精準型不進游標那一欄的上半場；只剩 1 發就敢進去', () => {
+    const base = { px: 75, py: 85, cursor: 75 };
+    expect(decide('precise', makeState({ ...base, ammo: 3 }), 1).up).toBe(false);
+    expect(decide('precise', makeState({ ...base, ammo: 1 }), 1).up).toBe(true);
   });
 });
