@@ -594,12 +594,17 @@ function opponentValue(state: H9State, me: Side, diff: number): { gain: number; 
   };
 }
 
+/** 輪到我（對方剛加價）的價值打幾折：見 `myTurnValue`。 */
+const MY_TURN_DISCOUNT = 0.9;
+
 function myTurnValue(state: H9State, me: Side, diff: number): { gain: number; danger: number } {
   if (state.S <= S0 || state.bidder === me) {
     return { gain: diff, danger: 0 };
   }
   const callGain = 1 - 2 * trueChance(state, me, state.S);
-  return { gain: diff + Math.max(0, callGain), danger: 0 };
+  // 打折：搜尋型在模擬裡會讓對方「維持 actions 的第一個」（加 1），走到這裡的路是假設對方一定繼續加；
+  // 現在就抓（亮骰）是已經到手的，所以同樣的把握下，現在抓要嚴格勝過「等對方再加一次」。
+  return { gain: diff + MY_TURN_DISCOUNT * Math.max(0, callGain), danger: 0 };
 }
 
 function evaluateH9(state: H9State, me: Side): { gain: number; danger: number } {
