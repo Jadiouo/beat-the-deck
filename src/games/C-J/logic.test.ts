@@ -22,6 +22,7 @@ import {
   PAUSE_TICKS,
   pathMoves,
   PREVIEW_TICKS,
+  RESPAWN_TICKS,
   RIPEN_TICKS,
   SAFE_RADIUS,
   SLACK_MOVES,
@@ -286,7 +287,7 @@ describe('C-J 關卡設計師｜牆', () => {
     expect(headOf(through)).toEqual([24, 12]);
   });
 
-  it('11. 變硬的牆：蛇撞上就死，這一局結束（crashed），還沒結算的食物（含這一個）全部算設計師的', () => {
+  it('11. 變硬的牆：蛇撞上就死；這個食物算設計師的，蛇停在原地等重生，下一個食物預覽 RESPAWN_TICKS 個 tick，牆全部消失', () => {
     const state = makeState({
       roundTick: BEFORE_MOVE,
       foodIndex: 2,
@@ -300,10 +301,17 @@ describe('C-J 關卡設計師｜牆', () => {
     });
     const next = cJGame.step(state, IDLE);
     expect(next.snakes[0].alive).toBe(false);
-    expect(next.outcome).toBe('crashed');
-    expect(next.snakes[1].score).toBe(1 + (FOODS_PER_ROUND - 2));
+    expect(next.snakes[0].body).toEqual(state.snakes[0].body);
+    expect(next.outcome).toBeNull();
+    expect(next.snakes[1].score).toBe(2);
     expect(next.snakes[0].score).toBe(1);
-    expect(next.lost).toBe(1 + (FOODS_PER_ROUND - 2));
+    expect(next.lost).toBe(2);
+    expect(next.crashes).toBe(1);
+    expect(next.foodIndex).toBe(3);
+    expect(next.phase).toBe('preview');
+    expect(next.phaseLeft).toBe(RESPAWN_TICKS);
+    expect(next.walls).toEqual([]);
+    expect(next.foods).toEqual([]);
   });
 
   it('12. 變硬的那一刻蛇身壓著的格子不算牆（留洞）：蛇不會被夾死', () => {
@@ -400,15 +408,16 @@ describe('C-J 關卡設計師｜牆', () => {
 });
 
 describe('C-J 關卡設計師｜蛇的死亡、計時、兩局交換', () => {
-  it('18. 蛇走出地圖或撞自己：這一局結束，剩下的食物算設計師的', () => {
+  it('18. 蛇走出地圖或撞自己：和撞硬牆一樣——這個食物算設計師的，蛇停在原地等重生', () => {
     const wall = makeState({
       roundTick: BEFORE_MOVE,
       snake: { body: body([31, 5], [30, 5], [29, 5]), dir: RIGHT },
       phaseLeft: 100,
     });
     const hit = cJGame.step(wall, IDLE);
-    expect(hit.outcome).toBe('crashed');
-    expect(hit.snakes[1].score).toBe(FOODS_PER_ROUND);
+    expect(hit.snakes[0].alive).toBe(false);
+    expect(hit.snakes[1].score).toBe(1);
+    expect(hit.crashes).toBe(1);
     const self = makeState({
       roundTick: BEFORE_MOVE,
       snake: { body: body([10, 10], [10, 11], [11, 11], [11, 10], [11, 9]), dir: UP, turn: RIGHT },
@@ -416,7 +425,84 @@ describe('C-J 關卡設計師｜蛇的死亡、計時、兩局交換', () => {
     });
     const bit = cJGame.step(self, IDLE);
     expect(bit.snakes[0].alive).toBe(false);
-    expect(bit.outcome).toBe('crashed');
+    expect(bit.crashes).toBe(1);
+    // 邊界：走進自己的尾巴（這一格會移走）不算撞
+    const tail = makeState({
+      roundTick: BEFORE_MOVE,
+      snake: { body: body([10, 10], [10, 11], [11, 11], [11, 10]), dir: UP, turn: RIGHT },
+      phaseLeft: 100,
+    });
+    expect(cJGame.step(tail, IDLE).snakes[0].alive).toBe(true);
+  });
+
+  it('18b. 重生：等 RESPAWN_TICKS 個 tick 之後蛇在這一局的起始位置重生（長度 3、分數保留），下一個食物現身、時限用重生位置算', () => {
+    const first = cJGame.init(5, CONFIG);
+    const crashing: CJState = {
+      ...first,
+      roundTick: BEFORE_MOVE,
+      phase: 'live',
+      phaseLeft: 200,
+      snakes: [
+        {
+          body: body([31, 5], [30, 5], [29, 5], [28, 5]),
+          dir: RIGHT,
+          turn: RIGHT,
+          alive: true,
+          score: 3,
+        },
+        first.snakes[1],
+      ],
+    };
+    let state = cJGame.step(crashing, IDLE);
+    expect(state.snakes[0].alive).toBe(false);
+    state = run(state, RESPAWN_TICKS - 1);
+    expect(state.snakes[0].alive).toBe(false);
+    expect(state.phase).toBe('preview');
+    state = cJGame.step(state, IDLE);
+    expect(state.snakes[0].alive).toBe(true);
+    expect(state.snakes[0].body).toHaveLength(3);
+    expect(state.snakes[0].body[0]).toBe(first.layout.head);
+    expect(state.snakes[0].dir).toBe(first.layout.dir);
+    expect(state.snakes[0].score).toBe(3);
+    expect(state.phase).toBe('live');
+    const food = state.foodSeq[state.foodIndex] as number;
+    const head = first.layout.head;
+    const distance = Math.abs(cellX(head) - cellX(food)) + Math.abs(cellY(head) - cellY(food));
+    expect(state.phaseLeft).toBe(MOVE_EVERY * (distance + SLACK_MOVES));
+    expect(state.foods).toEqual([food]);
+  });
+
+  it('18c. 邊界：最後一個食物的時候撞死：這個食物算設計師的，這一局結束（finished），不再重生；等重生的時候牆不能蓋在重生位置附近', () => {
+    const last = makeState({
+      roundTick: BEFORE_MOVE,
+      foodIndex: FOODS_PER_ROUND - 1,
+      eaten: 6,
+      lost: 3,
+      scores: [6, 3],
+      snake: { body: body([31, 5], [30, 5], [29, 5]), dir: RIGHT },
+      phaseLeft: 100,
+    });
+    const ended = cJGame.step(last, IDLE);
+    expect(ended.outcome).toBe('finished');
+    expect(ended.eaten + ended.lost).toBe(FOODS_PER_ROUND);
+    expect(cJGame.score(ended)).toEqual([6, 4]);
+    // 重生位置是 (8,12)：食物 (22,12) 的左側牆 (20,11..13) 離它 12 格，可以蓋；食物 (10,12) 的左側牆 (8,11..13) 壓在重生位置上，不行
+    const waiting = makeState({
+      roundTick: 20,
+      phase: 'preview',
+      phaseLeft: 30,
+      snake: { body: body([31, 5], [30, 5], [29, 5]), dir: RIGHT, alive: false },
+    });
+    expect(cJGame.step(waiting, designer(PRESS_LEFT)).walls).toHaveLength(1);
+    const onSpawn = makeState({
+      roundTick: 20,
+      phase: 'preview',
+      phaseLeft: 30,
+      foodSeq: [cell(10, 12), ...makeState().foodSeq.slice(1)],
+      snake: { body: body([31, 5], [30, 5], [29, 5]), dir: RIGHT, alive: false },
+    });
+    expect(cJGame.step(onSpawn, designer(PRESS_LEFT)).walls).toEqual([]);
+    expect(cJGame.actions(onSpawn, 1).some((a) => a.left)).toBe(false);
   });
 
   it('19. 邊界：開局不動的 tick 內蛇不走（即使正對著牆也不會死）；之後每 MOVE_EVERY 個 tick 走一格', () => {
@@ -459,7 +545,10 @@ describe('C-J 關卡設計師｜蛇的死亡、計時、兩局交換', () => {
       pause: 1,
       eaten: 6,
       lost: 4,
-      snakes: [{ ...first.snakes[0], score: 6 }, { ...first.snakes[1], score: 4 }],
+      snakes: [
+        { ...first.snakes[0], score: 6 },
+        { ...first.snakes[1], score: 4 },
+      ],
     };
     const next = cJGame.step(ended, IDLE);
     expect(next.round).toBe(1);
@@ -473,7 +562,10 @@ describe('C-J 關卡設計師｜蛇的死亡、計時、兩局交換', () => {
     expect(next.snakes[0].body).toEqual([]);
     const startHead = first.snakes[0].body[0] as number;
     const rotated = next.snakes[1].body[0] as number;
-    expect([cellX(rotated), cellY(rotated)]).toEqual([31 - cellX(startHead), 23 - cellY(startHead)]);
+    expect([cellX(rotated), cellY(rotated)]).toEqual([
+      31 - cellX(startHead),
+      23 - cellY(startHead),
+    ]);
     expect(next.snakes[1].dir).toBe(((first.snakes[0].dir + 2) % 4) as 0 | 1 | 2 | 3);
     expect(next.foodSeq).toEqual(first.foodSeq.map((food) => 32 * 24 - 1 - food));
     expect(next.phase).toBe('preview');
@@ -568,13 +660,25 @@ describe('C-J 關卡設計師｜actions 與 evaluate', () => {
     const open = makeState({ roundTick: 2, snake });
     expect(pathMoves(open)).toBe(8);
     // 左牆 ripe 100：走到那一格要 6 步 = 36 個 tick < 100，來不及變硬，不算障礙
-    const late = makeState({ roundTick: 2, snake, walls: [{ side: LEFT, cells: LEFT_WALL, ripe: 100 }] });
+    const late = makeState({
+      roundTick: 2,
+      snake,
+      walls: [{ side: LEFT, cells: LEFT_WALL, ripe: 100 }],
+    });
     expect(pathMoves(late)).toBe(8);
     // 左牆 ripe 30：走到那一格要 6 步 = 36 個 tick ≥ 30，已經硬了，要繞
-    const ripe = makeState({ roundTick: 2, snake, walls: [{ side: LEFT, cells: LEFT_WALL, ripe: 30 }] });
+    const ripe = makeState({
+      roundTick: 2,
+      snake,
+      walls: [{ side: LEFT, cells: LEFT_WALL, ripe: 30 }],
+    });
     expect(pathMoves(ripe)).toBeGreaterThan(8);
     // 硬牆一定算
-    const hard = makeState({ roundTick: 2, snake, walls: [{ side: LEFT, cells: LEFT_WALL, ripe: 0 }] });
+    const hard = makeState({
+      roundTick: 2,
+      snake,
+      walls: [{ side: LEFT, cells: LEFT_WALL, ripe: 0 }],
+    });
     expect(pathMoves(hard)).toBe(pathMoves(ripe));
   });
 
@@ -611,7 +715,10 @@ describe('C-J 關卡設計師｜actions 與 evaluate', () => {
     const hit = cJGame.evaluate(wall, 0);
     expect(hit.danger).toBe(1);
     expect(Number.isFinite(hit.gain)).toBe(true);
-    const out = makeState({ roundTick: 2, snake: { body: body([31, 5], [30, 5], [29, 5]), dir: RIGHT } });
+    const out = makeState({
+      roundTick: 2,
+      snake: { body: body([31, 5], [30, 5], [29, 5]), dir: RIGHT },
+    });
     expect(cJGame.evaluate(out, 0).danger).toBe(1);
     const far = cJGame.evaluate(makeState({ roundTick: 2 }), 0);
     const near = cJGame.evaluate(
@@ -659,7 +766,13 @@ describe('C-J 關卡設計師｜actions 與 evaluate', () => {
       roundTick: 2,
       snake: { body: body([17, 12], [16, 12], [15, 12]), dir: RIGHT },
       foodSeq: [cell(15, 3), ...makeState().foodSeq.slice(1)],
-      walls: [{ side: LEFT, cells: body([20, 8], [20, 9], [20, 10], [20, 11], [20, 12], [20, 13]), ripe: 0 }],
+      walls: [
+        {
+          side: LEFT,
+          cells: body([20, 8], [20, 9], [20, 10], [20, 11], [20, 12], [20, 13]),
+          ripe: 0,
+        },
+      ],
     });
     const snakeCtl = levelController(cJGame, policyByName('pathfinder'), 10, 1);
     const pressed = snakeCtl.decide(wall, 0, 0);
@@ -696,9 +809,12 @@ describe('C-J 關卡設計師｜actions 與 evaluate', () => {
 });
 
 describe('C-J 關卡設計師｜純度與畫面', () => {
-  it('35. step 不改動傳進來的 state（凍結之後照樣能 step，蛇死、停頓、結束的 tick 也是）', () => {
+  it('35. step 不改動傳進來的 state（凍結之後照樣能 step，撞死、停頓、結束的 tick 也是）', () => {
     const crashed = cJGame.step(
-      makeState({ roundTick: BEFORE_MOVE, snake: { body: body([31, 5], [30, 5], [29, 5]), dir: RIGHT } }),
+      makeState({
+        roundTick: BEFORE_MOVE,
+        snake: { body: body([31, 5], [30, 5], [29, 5]), dir: RIGHT },
+      }),
       IDLE,
     );
     const placed = cJGame.step(makeState({ roundTick: 2 }), designer(PRESS_LEFT));
