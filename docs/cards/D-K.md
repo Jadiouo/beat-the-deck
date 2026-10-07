@@ -31,6 +31,15 @@ SPEC 第 9 節只有一行方向：「多階段的經濟賽」。這份小規格
 4. 原牌的 `evaluate` 也要用投影後的 state（D-8 的 `evaluate` 讀 `players[i].score` 當顏色格數）。D-K 提供三個投影函式 `asD8`、`asD3`、`asDJ`，只用在 `step` 與 `evaluate` 的內部。
 5. **風險：** 原牌如果改了介面（欄位名稱、`step` 的簽名），D-K 的測試會紅；這是接合的代價。要改原牌時，D-K 的測試是它的回歸測試之一。
 
+## 分數處理（實作時一定會踩到的坑：D-8 會把分數重算成顏色格數）
+
+**D-8 的 `step` 每次走格結算都把 `players[i].score` 覆寫成「目前的顏色格子數」**（讀 `src/games/D-8/logic.ts` 的 `countPaint` 確認，不是累計）。D-K 的 `score` 是整場累計，所以：
+1. **第 1 段：** 委派 `d8Game.step` 之後，**立刻把 `players[i].score` 覆寫成 `⌊顏色格數 ÷ TURF_POINTS⌋`**（顏色格數從 `paint` 數，不讀 D-8 回傳的 `score`）。第 1 段結束那一刻這個值定案，存進 `turfCells`（格數）。
+2. **進入第 2、3 段：** 這兩段的委派不再碰 `paint`（D-3、D-J 的 `step` 不改它），`players[i].score` 從第 1 段的定案值接著累加；**第 2、3 段絕對不可以再呼叫 `d8Game.step`**，否則分數會被重算回格數。
+3. **`evaluate` 也一樣：** 呼叫 `d8Game.evaluate` 之前，用 `asD8(state)` 把 `players[i].score` 換成顏色格數（D-8 的 `evaluate` 把它當格數讀）；呼叫 D-3、D-J 的 `evaluate` 時不用換。
+4. **測試要擋：** 第 1 段結束後一步（`tick = 1080`）`score` 仍等於 `⌊格數 ÷ 10⌋`、第 2 段撿一顆寶石後 `score` 是「第 1 段分數 + 寶石價值（+ 紅利）」，**不是**「寶石價值」或「格數 + 寶石價值」。這條測試先寫、先看它紅。
+5. `maxTicks` 委派時傳 3600（D-3、D-J 的 `step` 在 `tick ≥ maxTicks` 原樣回傳）。
+
 ## 類型（`docs/DESIGN-AI-FUN.md` 第 2 節）
 
 **互相牽制型**（主，繼承三段原牌）＋ **預告型**（段落的名稱、倒數與賭注在畫面上，是 state 的一部分）＋ **性格可辨識型**（第 1 段的圈地方式就是性格的指紋）。
