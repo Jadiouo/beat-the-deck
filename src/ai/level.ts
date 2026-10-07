@@ -17,16 +17,35 @@ import type { LevelParams, Policy, PolicyKey } from './types';
 export const MIN_LEVEL = 1;
 export const MAX_LEVEL = 10;
 
-/** 等級 1 與等級 10 的參數（SPEC 7.2 的表）。中間等級在這兩端之間線性內插。 */
-const AT_LEVEL_1: LevelParams = { reactionTicks: 18, decideEvery: 12, depth: 1, epsilon: 0.25 };
-const AT_LEVEL_10: LevelParams = { reactionTicks: 3, decideEvery: 1, depth: 6, epsilon: 0 };
+/**
+ * 所有等級共用的反應延遲：12 個 tick（0.2 秒），與人類模型（SPEC 7.3）相同。
+ *
+ * 為什麼不再隨等級下降：量測顯示等級的差別幾乎全部來自「看得比較快」（快而淺對慢而深在黑桃是
+ * 99% 到 100%；人類模型對乒乓等級 5 是 52%、等級 7 是 1%），而不是「想得比較好」。
+ * 延遲固定之後，等級的差別只能來自決定頻率、失誤率與搜尋深度。
+ */
+const REACTION_TICKS = 12;
+
+/** 等級 1 與等級 10 的參數。中間等級在這兩端之間線性內插。 */
+const AT_LEVEL_1: LevelParams = {
+  reactionTicks: REACTION_TICKS,
+  decideEvery: 12,
+  depth: 1,
+  epsilon: 0.25,
+};
+const AT_LEVEL_10: LevelParams = {
+  reactionTicks: REACTION_TICKS,
+  decideEvery: 1,
+  depth: 6,
+  epsilon: 0,
+};
 
 function lerpRound(from: number, to: number, level: number): number {
   return Math.round(from + ((to - from) * (level - MIN_LEVEL)) / (MAX_LEVEL - MIN_LEVEL));
 }
 
 /**
- * 等級 → 四個參數。reactionTicks、decideEvery、depth 線性內插後四捨五入成整數。
+ * 等級 → 四個參數。reactionTicks 對所有等級都一樣；decideEvery、depth 線性內插後四捨五入成整數。
  * epsilon 是機率，不是整數，不取整：直接線性內插（等級 1 是 0.25、等級 10 是 0，每級少 0.25/9）。
  */
 export function levelParams(level: number): LevelParams {
