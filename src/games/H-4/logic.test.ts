@@ -1403,9 +1403,9 @@ describe('H-4 比大小｜AI 能不能玩', () => {
     }
   });
 
-  it('等級 10 的搜尋型對人類模型：40 個種子贏過半（座位輪流）', () => {
+  it('等級 10 的搜尋型對人類模型：20 個種子贏過半（座位輪流；完整的勝率門檻是契約測試的 A4，這裡只做快速的方向檢查）', () => {
     let wins = 0;
-    for (let seed = 0; seed < 40; seed += 1) {
+    for (let seed = 0; seed < 20; seed += 1) {
       const ai = levelController(h4Game, pathfinder, 10, seed);
       const human = humanModel(h4Game, seed + 1000);
       const aiSide: Side = seed % 2 === 0 ? 0 : 1;
@@ -1415,6 +1415,6 @@ describe('H-4 比大小｜AI 能不能玩', () => {
           : playMatch(h4Game, seed, CONFIG, human, ai);
       wins += r.winner === null ? 0.5 : r.winner === aiSide ? 1 : 0;
     }
-    expect(wins).toBeGreaterThan(20);
+    expect(wins).toBeGreaterThan(10);
   });
 });
