@@ -173,24 +173,20 @@ describe('D-7 挖礦｜初始與地形', () => {
     expect(rate).toBeLessThan(0.3);
   });
 
-  it('種子有效：礦的分布與 hp 對種子 0 到 9 不全相同（牆不同，所以 hp 的分布也不同）；礦的分布 180 度對稱（幾乎每顆礦的旋轉對應格也有同價值的礦）', () => {
+  it('種子有效：礦的分布與 hp 對種子 0 到 9 不全相同（牆不同，所以 hp 的分布也不同）；礦的分布 180 度對稱（兩邊旋轉對應的格子都是岩石時，礦的有無與價值一定相同）', () => {
     const layouts = new Set<string>();
     const rockLayouts = new Set<string>();
     for (let seed = 0; seed < 10; seed += 1) {
       const state = d7Game.init(seed, CONFIG);
       layouts.add(state.ore.join(','));
       rockLayouts.add(state.rock.join(','));
-      let ores = 0;
-      let mirrored = 0;
+      // 旋轉對應的格子也是岩石的話（不是牆、不是洞穴），礦的有無與價值一定相同。
       for (let c = 0; c < CELLS; c += 1) {
-        if ((state.ore[c] as number) > 0) {
-          ores += 1;
-          if (state.ore[CELLS - 1 - c] === state.ore[c]) {
-            mirrored += 1;
-          }
+        const twin = CELLS - 1 - c;
+        if ((state.rock[c] as number) > 0 && (state.rock[twin] as number) > 0) {
+          expect(state.ore[twin]).toBe(state.ore[c]);
         }
       }
-      expect(mirrored / ores).toBeGreaterThan(0.9);
     }
     expect(layouts.size).toBeGreaterThan(5);
     expect(rockLayouts.size).toBeGreaterThan(5);
@@ -238,7 +234,12 @@ describe('D-7 挖礦｜鑿', () => {
   });
 
   it('1. 邊界：hp 剛好是 2 → 鑿一次還剩 1，再鑿一次才穿；穿了以後下一次走格才走進去，而且路永久是路', () => {
-    let state = atMove({ rock: [[EAST, 2]] });
+    let state = atMove({
+      rock: [
+        [HERE, 0],
+        [EAST, 2],
+      ],
+    });
     state = stepIdle(state);
     expect(state.rock[EAST]).toBe(1);
     expect(state.dug).toEqual([0, 0]);
@@ -269,11 +270,13 @@ describe('D-7 挖礦｜鑿', () => {
   });
 
   it('2. 邊界：同鑿一格 hp 剛好 2 → 同時鑿穿（兩人都算鑿穿，opened 記 2）；hp 是 1 也只扣到 0 不會變負', () => {
-    const players: readonly [{ cell: number; pending: number }, { cell: number; pending: number }] =
-      [
-        { cell: HERE, pending: RIGHT },
-        { cell: cell(12, 10), pending: LEFT },
-      ];
+    const players: readonly [
+      { cell: number; pending: 0 | 1 | 2 | 3 },
+      { cell: number; pending: 0 | 1 | 2 | 3 },
+    ] = [
+      { cell: HERE, pending: RIGHT },
+      { cell: cell(12, 10), pending: LEFT },
+    ];
     const two = stepIdle(atMove({ rock: [[EAST, 2]], players }));
     expect(two.rock[EAST]).toBe(0);
     expect(two.opened[EAST]).toBe(2);
@@ -325,9 +328,7 @@ describe('D-7 挖礦｜鑿', () => {
 });
 
 describe('D-7 挖礦｜礦與背包', () => {
-  const OPEN_ORE = [
-    [EAST, 0],
-  ] as const;
+  const OPEN_ORE = [[EAST, 0]] as const;
 
   it('5. 走進有礦的空格、背包有空位：礦放進背包，那一格的礦歸 0', () => {
     const next = stepIdle(atMove({ rock: OPEN_ORE, ore: [[EAST, 6]] }));
@@ -337,23 +338,17 @@ describe('D-7 挖礦｜礦與背包', () => {
   });
 
   it('5. 邊界：背包剛好 3 塊 → 撿了變 4 塊（滿）；剛好 4 塊 → 礦留在原地，人還是走進去', () => {
-    const three = stepIdle(
-      atMove({ rock: OPEN_ORE, ore: [[EAST, 6]], bag: [[1, 1, 1], []] }),
-    );
+    const three = stepIdle(atMove({ rock: OPEN_ORE, ore: [[EAST, 6]], bag: [[1, 1, 1], []] }));
     expect(three.bag[0]).toEqual([1, 1, 1, 6]);
     expect(three.ore[EAST]).toBe(0);
-    const four = stepIdle(
-      atMove({ rock: OPEN_ORE, ore: [[EAST, 6]], bag: [[1, 1, 1, 1], []] }),
-    );
+    const four = stepIdle(atMove({ rock: OPEN_ORE, ore: [[EAST, 6]], bag: [[1, 1, 1, 1], []] }));
     expect(four.players[0].cell).toBe(EAST);
     expect(four.bag[0]).toEqual([1, 1, 1, 1]);
     expect(four.ore[EAST]).toBe(6);
   });
 
   it('5. 背包滿了礦留在原地（沒有消失），之後有空位的人（包含對手）踩進去就撿走', () => {
-    const left = stepIdle(
-      atMove({ rock: OPEN_ORE, ore: [[EAST, 6]], bag: [[1, 1, 1, 1], []] }),
-    );
+    const left = stepIdle(atMove({ rock: OPEN_ORE, ore: [[EAST, 6]], bag: [[1, 1, 1, 1], []] }));
     expect(left.ore[EAST]).toBe(6);
     // 對手（有空位）從另一邊走進去。
     const taken = d7Game.step(
@@ -592,7 +587,9 @@ describe('D-7 挖礦｜純度與契約', () => {
       const before = JSON.stringify(state);
       const frozen = deepFreeze(JSON.parse(before) as D7State);
       expect(() => d7Game.step(frozen, [PRESS_RIGHT, PRESS_LEFT])).not.toThrow();
-      expect(() => d7Game.step({ ...frozen, tick: BEFORE_MOVE }, [PRESS_RIGHT, PRESS_LEFT])).not.toThrow();
+      expect(() =>
+        d7Game.step({ ...frozen, tick: BEFORE_MOVE }, [PRESS_RIGHT, PRESS_LEFT]),
+      ).not.toThrow();
       expect(JSON.stringify(frozen)).toBe(before);
     }
   });
@@ -829,8 +826,18 @@ describe('D-7 挖礦｜actions 與 evaluate', () => {
     const ore1 = cell(14, 10);
     const base = {
       tick: 1,
-      rock: [[ore6, 0], [ore1, 0], ...corridor(10, 11, 13), ...corridor(7, 10, 10), ...corridor(8, 10, 10), ...corridor(9, 10, 10)] as [number, number][],
-      ore: [[ore6, 6], [ore1, 1]] as [number, number][],
+      rock: [
+        [ore6, 0],
+        [ore1, 0],
+        ...corridor(10, 11, 13),
+        ...corridor(7, 10, 10),
+        ...corridor(8, 10, 10),
+        ...corridor(9, 10, 10),
+      ] as [number, number][],
+      ore: [
+        [ore6, 6],
+        [ore1, 1],
+      ] as [number, number][],
     };
     const closeRival = makeState({ ...base, players: [{ cell: HERE }, { cell: cell(10, 5) }] });
     const farRival = makeState({ ...base, players: [{ cell: HERE }, { cell: FAR_AI }] });
@@ -866,7 +873,7 @@ describe('D-7 挖礦｜actions 與 evaluate', () => {
 
 /** 測試用：整個局面轉 180 度、兩邊對調（格子 c ↔ 767 − c，鎖定方向轉 180 度）。 */
 function rotated(state: D7State): D7State {
-  const flip = <T,>(values: readonly T[]): T[] => [...values].reverse();
+  const flip = <T>(values: readonly T[]): T[] => [...values].reverse();
   const turn = (pending: number): -1 | 0 | 1 | 2 | 3 =>
     (pending < 0 ? -1 : (pending + 2) % 4) as -1 | 0 | 1 | 2 | 3;
   const who = (v: number): number => (v === 0 ? 1 : v === 1 ? 0 : v);
@@ -924,7 +931,9 @@ describe('D-7 挖礦｜性格（黑箱）', () => {
   });
 
   it('同一個局面，貪心型與精準型的 decide 不同（性格看得出來）；四個性格在另一個局面（鑿深礦還是淺礦）至少分成兩種決定', () => {
-    expect(choose(greedy, carrying([10, 10, 10]))).not.toBe(choose(precise, carrying([10, 10, 10])));
+    expect(choose(greedy, carrying([10, 10, 10]))).not.toBe(
+      choose(precise, carrying([10, 10, 10])),
+    );
     const picks = new Set<string>();
     for (const policy of [greedy, precise, gambler, pathfinder]) {
       picks.add(choose(policy, carrying([10, 10, 10])));

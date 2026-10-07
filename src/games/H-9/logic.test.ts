@@ -471,7 +471,7 @@ describe('H-9 吹牛骰｜規則', () => {
     for (const [S, bidderWins] of [
       [14, true],
       [15, false],
-      [4, true],
+      [5, true],
     ] as const) {
       const s = choosing({
         turn: 1,
@@ -701,13 +701,13 @@ describe('H-9 吹牛骰｜actions 與 evaluate', () => {
     expect(h9Game.evaluate(tied, 0).gain).toBe(0);
   });
 
-  it('evaluate：勝場領先越多 gain 越大（單調）', () => {
+  it('evaluate：勝場領先越多 gain 越大（單調；這裡看的是 AI（1）那一邊）', () => {
     const at = (wins: [number, number]): number =>
       h9Game.evaluate(h9Game.step(aiToAct({ wins }), press(1, PLUS1)), 1).gain;
-    expect(at([0, 2])).toBeLessThan(at([0, 1]));
-    expect(at([0, 1])).toBeLessThan(at([0, 0]));
-    expect(at([0, 0])).toBeLessThan(at([1, 0]));
-    expect(at([1, 0])).toBeLessThan(at([2, 0]));
+    expect(at([2, 0])).toBeLessThan(at([1, 0]));
+    expect(at([1, 0])).toBeLessThan(at([0, 0]));
+    expect(at([0, 0])).toBeLessThan(at([0, 1]));
+    expect(at([0, 1])).toBeLessThan(at([0, 2]));
   });
 });
 
@@ -1131,7 +1131,8 @@ describe('H-9 吹牛骰｜不偷看（evaluate 與 actions 只讀這一邊看得
         const total = s.dice[0][0] + s.dice[0][1] + s.dice[1][0] + s.dice[1][1];
         const bidderWon = total >= s.S;
         const iAmBidder = s.bidder === side;
-        return { gain: e.gain + (iAmBidder === bidderWon ? 5 : -5), danger: e.danger };
+        // 洩漏：知道結果，所以沒有風險
+        return { gain: e.gain + (iAmBidder === bidderWon ? 5 : -5), danger: 0 };
       },
     };
     const decide = (state: H9State, depth: number): string =>
