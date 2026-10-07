@@ -12,6 +12,27 @@
 
 type Path = string;
 
+/**
+ * 路徑的一段：數字是陣列索引、字串是物件的鍵。
+ *
+ * 路徑只有在丟錯的時候才會被讀到，所以不在每一層組字串，而是把走過的路徑堆在
+ * `steps` 裡，等真的要丟錯了才組起來（`pathOf`）。
+ * 原本的寫法在每一個陣列元素上都做一次 `${path}[${i}]` 的字串串接 ——
+ * 一個 768 格的陣列就是 768 次字串配置，而 D-7 有四個這種陣列、每個 tick 都要雜湊一次，
+ * 於是契約檢查 K4 有九成多的時間花在組永遠不會被人看到的錯誤訊息上（76 秒，上限 60 秒）。
+ * 這個改法不動行為也不動介面：錯誤訊息與路徑格式完全一樣（`src/core/hash.test.ts` 在釘它）。
+ */
+type Step = string | number;
+
+/** 把堆起來的路徑組成 `state.bullets[3].x` 這種字串。只在丟錯時呼叫。 */
+function pathOf(root: string, steps: readonly Step[]): Path {
+  let out = root;
+  for (const step of steps) {
+    out += typeof step === 'number' ? `[${step}]` : `.${step}`;
+  }
+  return out;
+}
+
 function fail(path: Path, what: string): never {
   throw new Error(`無法計算雜湊：${path} ${what}`);
 }
@@ -21,12 +42,18 @@ function isPlainObject(value: object): boolean {
   return proto === Object.prototype || proto === null;
 }
 
-/** 轉成正規字串。`ancestors` 用來偵測循環參照。 */
-function canonical(value: unknown, path: Path, ancestors: object[], out: string[]): void {
+/** 轉成正規字串。`ancestors` 用來偵測循環參照，`steps` 是目前的路徑（只在丟錯時才組成字串）。 */
+function canonical(
+  value: unknown,
+  root: string,
+  steps: Step[],
+  ancestors: object[],
+  out: string[],
+): void {
   switch (typeof value) {
     case 'number':
       if (!Number.isFinite(value)) {
-        fail(path, `是 ${String(value)}（state 不可以有 NaN 或 Infinity）`);
+        fail(pathOf(root, steps), `是 ${String(value)}（state 不可以有 NaN 或 Infinity）`);
       }
       // String(-0) 是 "0"，與 JSON 來回之後的結果一致。
       out.push('n', String(value), ';');
@@ -38,13 +65,13 @@ function canonical(value: unknown, path: Path, ancestors: object[], out: string[
       out.push(value ? 'T;' : 'F;');
       return;
     case 'undefined':
-      return fail(path, '是 undefined（state 必須是可 JSON 序列化的純資料）');
+      return fail(pathOf(root, steps), '是 undefined（state 必須是可 JSON 序列化的純資料）');
     case 'function':
-      return fail(path, '是函式（state 不可以有函式）');
+      return fail(pathOf(root, steps), '是函式（state 不可以有函式）');
     case 'symbol':
-      return fail(path, '是 symbol');
+      return fail(pathOf(root, steps), '是 symbol');
     case 'bigint':
-      return fail(path, '是 bigint');
+      return fail(pathOf(root, steps), '是 bigint');
     case 'object':
       break;
   }
@@ -56,14 +83,16 @@ function canonical(value: unknown, path: Path, ancestors: object[], out: string[
 
   const obj = value as object;
   if (ancestors.includes(obj)) {
-    fail(path, '有循環參照');
+    fail(pathOf(root, steps), '有循環參照');
   }
   ancestors.push(obj);
 
   if (Array.isArray(obj)) {
     out.push('[', String(obj.length), ':');
     for (let i = 0; i < obj.length; i += 1) {
-      canonical(obj[i], `${path}[${i}]`, ancestors, out);
+      steps.push(i);
+      canonical(obj[i], root, steps, ancestors, out);
+      steps.pop();
     }
     out.push(']');
   } else if (isPlainObject(obj)) {
@@ -72,12 +101,14 @@ function canonical(value: unknown, path: Path, ancestors: object[], out: string[
     out.push('{', String(keys.length), ':');
     for (const key of keys) {
       out.push(JSON.stringify(key), '=');
-      canonical(record[key], `${path}.${key}`, ancestors, out);
+      steps.push(key);
+      canonical(record[key], root, steps, ancestors, out);
+      steps.pop();
     }
     out.push('}');
   } else {
     const name = (obj as { constructor?: { name?: string } }).constructor?.name ?? '未知';
-    fail(path, `是類別實例（${name}），state 只能是純物件、陣列與基本型別`);
+    fail(pathOf(root, steps), `是類別實例（${name}），state 只能是純物件、陣列與基本型別`);
   }
 
   ancestors.pop();
@@ -110,6 +141,6 @@ function digest(text: string): string {
  */
 export function hashState(value: unknown, rootName = 'state'): string {
   const out: string[] = [];
-  canonical(value, rootName, [], out);
+  canonical(value, rootName, [], [], out);
   return digest(out.join(''));
 }
