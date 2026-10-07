@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { Buttons, Game } from '../core/types';
 import { counterGame } from '../../tests/fixtures/counter-game';
 import type { CounterState } from '../../tests/fixtures/counter-game';
+import { HUMAN_PARAMS } from './human-model';
 import { effectiveLevel, globalLevel, levelController, levelParams, wrapPolicy } from './level';
 import type { Policy } from './types';
 
@@ -38,13 +39,19 @@ function recordingPolicy(): { policy: Policy; seen: number[]; calls: () => numbe
   return { policy, seen, calls: () => seen.length };
 }
 
-describe('levelParams：SPEC 7.2 的表', () => {
+describe('levelParams：等級表（反應延遲固定在人類水準，差別來自決定頻率、失誤率與搜尋深度）', () => {
   it('等級 1 的四個參數', () => {
-    expect(levelParams(1)).toEqual({ reactionTicks: 18, decideEvery: 12, depth: 1, epsilon: 0.25 });
+    expect(levelParams(1)).toEqual({ reactionTicks: 12, decideEvery: 12, depth: 1, epsilon: 0.25 });
   });
 
   it('等級 10 的四個參數', () => {
-    expect(levelParams(10)).toEqual({ reactionTicks: 3, decideEvery: 1, depth: 6, epsilon: 0 });
+    expect(levelParams(10)).toEqual({ reactionTicks: 12, decideEvery: 1, depth: 6, epsilon: 0 });
+  });
+
+  it('所有等級的反應延遲都等於人類模型的（等級的差別不可以來自「看得比較快」）', () => {
+    for (let level = 1; level <= 10; level += 1) {
+      expect(levelParams(level).reactionTicks).toBe(HUMAN_PARAMS.reactionTicks);
+    }
   });
 
   it('等級 1 到 10：reactionTicks、decideEvery、epsilon 單調不增，depth 單調不減', () => {
@@ -59,9 +66,9 @@ describe('levelParams：SPEC 7.2 的表', () => {
   });
 
   it('中間等級是線性內插後取整（epsilon 不取整）', () => {
-    // 等級 5：18 − 15·4/9 = 11.33 → 11；12 − 11·4/9 = 7.11 → 7；1 + 5·4/9 = 3.22 → 3
+    // 等級 5：反應延遲固定 12；12 − 11·4/9 = 7.11 → 7；1 + 5·4/9 = 3.22 → 3
     const five = levelParams(5);
-    expect(five.reactionTicks).toBe(11);
+    expect(five.reactionTicks).toBe(12);
     expect(five.decideEvery).toBe(7);
     expect(five.depth).toBe(3);
     expect(five.epsilon).toBeCloseTo((0.25 * 5) / 9, 10);
@@ -129,12 +136,12 @@ describe('包上等級的控制器', () => {
     }
   });
 
-  it('等級 1（reactionTicks 18、decideEvery 12）：只有第 0、12、24… 個 tick 決定，看到的是 18 個 tick 以前的 state', () => {
+  it('等級 1（reactionTicks 12、decideEvery 12）：只有第 0、12、24… 個 tick 決定，看到的是 12 個 tick 以前的 state', () => {
     const { policy, seen } = recordingPolicy();
     const controller = levelController(counterGame, policy, 1, 3);
     // 等級 1 的 epsilon 是 0.25，這裡只看性格「被問了什麼」，所以不管它有沒有被亂選蓋掉。
     states(48).forEach((state, t) => controller.decide(state, 0, t));
-    expect(seen).toEqual([0, 0, 6, 18]);
+    expect(seen).toEqual([0, 0, 12, 24]);
   });
 
   it('epsilon = 0：完全等於底層性格的決定', () => {
