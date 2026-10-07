@@ -229,7 +229,7 @@ describe('C-4 霧｜C-A 的規則照舊，加上死亡停格', () => {
 });
 
 describe('C-4 霧｜actions 與 evaluate 不偷看', () => {
-  it('12. actions：還沒鎖定轉向時三個（順時針轉向、逆時針轉向、全放開）；已鎖定、自己死了、停格、結束時只有「全放開」', () => {
+  it('12. actions：還沒鎖定轉向時三個（順時針轉向、逆時針轉向、全放開）；已鎖定、自己死了、結束時只有「全放開」（停格期間還活著的蛇照樣有三個）', () => {
     const state = makeState({ tick: 1 });
     const actions = c4Game.actions(state, 0);
     expect(actions).toHaveLength(3);
@@ -239,7 +239,11 @@ describe('C-4 霧｜actions 與 evaluate 不偷看', () => {
     const locked = c4Game.step(state, [PRESS_UP, NONE]);
     expect(c4Game.actions(locked, 0)).toEqual([NONE]);
     expect(c4Game.actions(makeState({ over: true }), 0)).toEqual([NONE]);
-    expect(c4Game.actions(makeState({ endAt: 100 }), 0)).toEqual([NONE]);
+    // 停格期間還活著的蛇照樣可以鎖定轉向（見規格決定 4：不然模擬裡「對手撞牆」會讓我的動作變少，洩漏對手的位置）
+    expect(c4Game.actions(makeState({ endAt: 100 }), 0)).toHaveLength(3);
+    expect(c4Game.actions(makeState({ endAt: 100, snakes: [{ alive: false }, {}] }), 0)).toEqual([
+      NONE,
+    ]);
     // 順時針那一邊會直接走出地圖：逆時針排第一
     const edge = makeState({
       tick: 1,
@@ -266,6 +270,8 @@ describe('C-4 霧｜actions 與 evaluate 不偷看', () => {
       makeState({ tick: 1, memory: [{}, { foods: body([30, 20]), rivalHead: -1 }] }),
       makeState({ tick: 1, snakes: [{}, { score: 7 }] }),
       makeState({ tick: 1, snakes: [{}, { alive: false }] }),
+      // 對手的蛇頭離人 5 格（剛好在霧外）：貼近的扣分要看得到才會算
+      makeState({ tick: 1, snakes: [{}, { body: body([10, 12], [11, 12], [12, 12]), dir: LEFT }] }),
     ];
     for (const variant of variants) {
       expect(c4Game.evaluate(variant, 0)).toEqual(c4Game.evaluate(base, 0));
@@ -307,6 +313,27 @@ describe('C-4 霧｜actions 與 evaluate 不偷看', () => {
         b: makeState({
           tick,
           snakes: [{}, { body: body([31, 11], [30, 11], [29, 11]), dir: RIGHT }],
+        }),
+        sides: [0],
+      });
+      // 人看不到的對手：蛇頭離人 5 格（剛好在霧外、模擬一個走格之後會貼近）
+      scenarios.push({
+        a: makeState({ tick }),
+        b: makeState({
+          tick,
+          snakes: [{}, { body: body([10, 12], [11, 12], [12, 12]), dir: LEFT }],
+        }),
+        sides: [0],
+      });
+      // 人看不到的對手：它的第一個動作（順時針轉向）會撞上自己的身體（模擬裡遊戲會結束）
+      scenarios.push({
+        a: makeState({
+          tick,
+          snakes: [{}, { body: body([20, 5], [20, 6], [21, 6], [21, 5], [22, 5]), dir: UP }],
+        }),
+        b: makeState({
+          tick,
+          snakes: [{}, { body: body([20, 5], [20, 6], [20, 7], [20, 8], [20, 9]), dir: UP }],
         }),
         sides: [0],
       });
