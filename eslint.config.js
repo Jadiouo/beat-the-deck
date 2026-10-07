@@ -32,7 +32,8 @@ const restrictedProperties = purity.forbidden
 
 export default tseslint.config(
   {
-    ignores: ['dist/**', 'coverage/**', 'playwright-report/**', 'test-results/**'],
+    // tests/scratch/ 見 tsconfig.json 的 comment:exclude：量測用的暫存檔，不決定 npm run check 的綠。
+    ignores: ['dist/**', 'coverage/**', 'playwright-report/**', 'test-results/**', 'tests/scratch/**'],
   },
   js.configs.recommended,
   tseslint.configs.recommended,

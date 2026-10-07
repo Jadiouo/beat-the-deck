@@ -597,7 +597,9 @@ describe('D-Q 唯一的礦｜四個性格互打（整場，種子 0 到 11）', 
     const precisePrint = fingerprint(precise);
     expect(greedyPrint.lostPerMatch).toBeGreaterThanOrEqual(1.5 * precisePrint.lostPerMatch);
     expect(precisePrint.carriedScore).toBeGreaterThan(0);
-  });
+    // 時間預算 30 秒：理由同 D-J 的指紋測試 — 這一條跑 12 個種子的整場對局，
+    // 預設的 5000ms 不是為它挑的。1.5 倍這個門檻沒有動。
+  }, 30_000);
 });
 
 describe('D-Q 唯一的礦｜互動強度（DESIGN-AI-FUN 2.5）', () => {

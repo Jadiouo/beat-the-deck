@@ -21,6 +21,8 @@
     "skipLibCheck": true,
     "allowImportingTsExtensions": true
   },
+  "comment:exclude": "tests/scratch/ 是量測用的暫存檔（agent 跑統計時產生的一次性腳本與變體），不是專案的一部分。它不進型別檢查與 lint，因為 npm run check 的綠不可以被一個暫存檔決定；它也在 .gitignore 裡，不會被 commit。暫存檔本來應該寫在 session 的 scratchpad 目錄，寫進 repo 的就由這裡擋住。",
+  "exclude": ["tests/scratch/**"],
   "include": [
     "src/**/*.ts",
     "tests/**/*.ts",

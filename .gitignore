@@ -6,3 +6,6 @@ test-results
 *.local
 .DS_Store
 .vitest
+
+# 量測用的暫存檔（見 tsconfig.json 的 comment:exclude）
+tests/scratch/

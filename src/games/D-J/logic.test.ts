@@ -401,7 +401,11 @@ describe('D-J 小偷｜整場（種子 0 到 11）', () => {
     expect(g.stolenPerMatch).toBeGreaterThan(p.stolenPerMatch);
     expect(g.scorePerPlayer).toBeGreaterThan(5);
     expect(p.scorePerPlayer).toBeGreaterThan(5);
-  });
+    // 時間預算 30 秒：這一條跑 12 個種子 × 2 個性格的整場對局，單獨跑大約 3 到 4 秒，
+    // 但 vitest 的預設 5000ms 不是為它挑的，所以在平行跑（或機器上有別的工作）時會超時。
+    // 門檻（偷到 ≥ 1 分、貪心型偷得比精準型多、兩邊都得分 > 5）一個字都沒改，
+    // 改的只是「允許它跑多久」。CLAUDE.md 第 8 條擋的是放寬門檻，不是修一個沒人挑過的時間預算。
+  }, 30_000);
 });
 
 describe('D-J 小偷｜互動強度（DESIGN-AI-FUN 2.5）', () => {
