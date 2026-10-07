@@ -1,6 +1,7 @@
 import type { Buttons, Game, Side } from '../../core/types';
 import type { Policy, PolicyParams } from '../types';
-import { advance, myActions, spreadOf } from './shared';
+import { SEARCH_BEAM, lookAhead, spreadOf } from './shared';
+import type { Leaf } from './shared';
 
 /**
  * 危險的權重 w：一個 danger = 1 的終點，要扣掉「候選終點 gain 範圍」的 2 倍。
@@ -14,18 +15,10 @@ import { advance, myActions, spreadOf } from './shared';
 export const PATHFINDER_W = 2;
 
 /** 每一層最多保留幾個節點（束搜尋）。第一層一定保留所有第一步，其他層至少保留這麼多。 */
-export const PATHFINDER_BEAM = 4;
-
-interface Node<S> {
-  readonly state: S;
-  /** 這條路徑的第一步是 `actions()` 的第幾個。 */
-  readonly first: number;
-  readonly gain: number;
-  readonly danger: number;
-}
+export const PATHFINDER_BEAM = SEARCH_BEAM;
 
 /** 一層節點的分數：gain − w·scale·danger，scale 是這一層 gain 的範圍。 */
-function scoreLayer<S>(nodes: readonly Node<S>[]): number[] {
+function scoreLayer<S>(nodes: readonly Leaf<S>[]): number[] {
   const spread = spreadOf(nodes.map((n) => n.gain));
   const scale = spread > 0 ? spread : 1;
   return nodes.map((n) => n.gain - PATHFINDER_W * scale * n.danger);
@@ -44,58 +37,6 @@ function scoreLayer<S>(nodes: readonly Node<S>[]): number[] {
 export const pathfinder: Policy = {
   name: 'pathfinder',
   decide<S>(game: Game<S>, state: S, side: Side, _tick: number, params: PolicyParams): Buttons {
-    const actions = myActions(game, state, side);
-    const depth = Math.max(1, Math.floor(params.depth));
-    const width = Math.max(actions.length, PATHFINDER_BEAM);
-
-    const make = (next: S, first: number): Node<S> => {
-      const { gain, danger } = game.evaluate(next, side);
-      return { state: next, first, gain, danger };
-    };
-
-    let layer: Node<S>[] = actions.map((action, first) =>
-      make(advance(game, state, side, action), first),
-    );
-
-    for (let step = 1; step < depth; step += 1) {
-      const expanded: Node<S>[] = [];
-      let growing = false;
-      for (const node of layer) {
-        if (game.isOver(node.state)) {
-          expanded.push(node); // 終局：留著，當作終點
-          continue;
-        }
-        growing = true;
-        for (const action of myActions(game, node.state, side)) {
-          expanded.push(make(advance(game, node.state, side, action), node.first));
-        }
-      }
-      if (!growing) {
-        layer = expanded;
-        break;
-      }
-      if (expanded.length > width) {
-        const scores = scoreLayer(expanded);
-        const order = expanded.map((_node, i) => i);
-        // 穩定排序：分數相同時保留生成順序（第一步索引小的在前）。
-        order.sort((a, b) => (scores[b] as number) - (scores[a] as number) || a - b);
-        layer = order.slice(0, width).map((i) => expanded[i] as Node<S>);
-      } else {
-        layer = expanded;
-      }
-    }
-
-    const scores = scoreLayer(layer);
-    let best = 0;
-    for (let i = 1; i < layer.length; i += 1) {
-      const candidate = layer[i] as Node<S>;
-      const current = layer[best] as Node<S>;
-      const better = (scores[i] as number) > (scores[best] as number);
-      const tie = scores[i] === scores[best] && candidate.first < current.first;
-      if (better || tie) {
-        best = i;
-      }
-    }
-    return actions[(layer[best] as Node<S>).first] as Buttons;
+    return lookAhead(game, state, side, params.depth, scoreLayer, PATHFINDER_BEAM);
   },
 };
