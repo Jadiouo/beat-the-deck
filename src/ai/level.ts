@@ -125,37 +125,31 @@ function sameButtons(a: Buttons, b: Buttons): boolean {
   );
 }
 
-/** 世界連續這麼多個 tick 完全沒有變化（不算 tick 計數器），就算僵局：60 個 tick ＝ 1 秒。 */
+/**
+ * 僵局：世界（不算 tick 計數器）連續這麼多個 tick 都是「最近 STALL_WINDOW 個 tick 內出現過的樣子」，
+ * 就算僵局。60 個 tick ＝ 1 秒。不是只比前一個 tick：頂著牆按方向鍵時，遊戲內部的計時會每幾個 tick
+ * 來回跳一次（D-7 是移動週期的 pending），世界其實沒有前進，只是在原地繞一個很短的圈。
+ */
 export const STALL_TICKS = 60;
+/** 往回看多少個 tick 找「出現過的樣子」。要比遊戲內部的週期長（120 能被 1 到 6、8、10、12 等整除）。 */
+export const STALL_WINDOW = 120;
 /** 偵測到僵局之後，接下來這麼多個 tick 都放下 danger 門檻，讓動作有時間走出幾格而不是走一步又退回去。 */
 export const BOLD_TICKS = 90;
 
-/** 兩個 state 的內容完全相同（純資料的深度比較），只有最上層的 `tick` 計數器不算。 */
-function sameWorld(a: unknown, b: unknown, top = true): boolean {
-  if (a === b) {
-    return true;
+/** 世界的指紋：整個 state 的 JSON（`tick` 設成 0）再壓成兩條 32 位元雜湊加長度。state 是純資料，所以可以 JSON 化。 */
+function worldFingerprint(state: unknown): string {
+  const text = JSON.stringify(
+    typeof state === 'object' && state !== null ? { ...state, tick: 0 } : state,
+  );
+  let h1 = 0x811c9dc5;
+  let h2 = 0xdeadbeef;
+  for (let i = 0; i < text.length; i += 1) {
+    const c = text.charCodeAt(i);
+    h1 = Math.imul(h1 ^ c, 0x01000193);
+    h2 = Math.imul(h2 ^ c, 0x5bd1e995);
+    h2 ^= h2 >>> 15;
   }
-  if (typeof a !== 'object' || typeof b !== 'object' || a === null || b === null) {
-    return false;
-  }
-  if (Array.isArray(a) !== Array.isArray(b)) {
-    return false;
-  }
-  const left = a as Record<string, unknown>;
-  const right = b as Record<string, unknown>;
-  const keys = Object.keys(left);
-  if (keys.length !== Object.keys(right).length) {
-    return false;
-  }
-  for (const key of keys) {
-    if (top && key === 'tick') {
-      continue;
-    }
-    if (!(key in right) || !sameWorld(left[key], right[key], false)) {
-      return false;
-    }
-  }
-  return true;
+  return `${(h1 >>> 0).toString(36)}.${(h2 >>> 0).toString(36)}.${text.length}`;
 }
 
 function checkParams(params: LevelParams): void {
@@ -184,7 +178,7 @@ function checkParams(params: LevelParams): void {
  *   試過「性格看現在、決定延後生效」：回饋迴圈仍然會過衝震盪，同樣的斷崖，所以不用。
  *   不需要知道 state 的結構，也不動 core 的契約。
  *   t 還小於 reactionTicks 時，世界是起始 state，自己重播到現在。
- * - **僵局**：世界（不算 tick 計數器）連續 `STALL_TICKS` 個 tick 完全沒變，就在接下來 `BOLD_TICKS` 個 tick
+ * - **僵局**：世界（不算 tick 計數器）連續 `STALL_TICKS` 個 tick 都只是重複最近 `STALL_WINDOW` 個 tick 內出現過的樣子，就在接下來 `BOLD_TICKS` 個 tick
  *   通知性格 `stalled`。這是從 state 的歷史算出來的，所以決定性與重播一致性都不變。
  * - **決定頻率**：第一個 tick 與之後每隔 decideEvery 個 tick 才重新決定，中間沿用上一個生效的按鍵。
  * - **亂選**：每次決定先擲一次骰，小於 epsilon 就從（現在這個 state 的）`actions()` 裡亂挑一個。
@@ -212,7 +206,7 @@ export function wrapPolicy<S>(
   let lastDecision = 0;
   let lastTick = -1;
   let dice: RngState = 0;
-  let previous: S | null = null;
+  let recent: string[] = [];
   let frozenFor = 0;
   let boldUntil = -1;
 
@@ -258,7 +252,7 @@ export function wrapPolicy<S>(
         // 新的一場（或同一個 tick 被重複問）：重設。
         history = [];
         held = null;
-        previous = null;
+        recent = [];
         frozenFor = 0;
         boldUntil = -1;
         dice = rngStateFor(seed, `level-${side}`);
@@ -268,8 +262,12 @@ export function wrapPolicy<S>(
       lastTick = tick;
 
       // 僵局偵測：世界連續 STALL_TICKS 個 tick 沒變，接下來 BOLD_TICKS 個 tick 通知性格。
-      frozenFor = previous !== null && sameWorld(previous, state) ? frozenFor + 1 : 0;
-      previous = state;
+      const fingerprint = worldFingerprint(state);
+      frozenFor = recent.includes(fingerprint) ? frozenFor + 1 : 0;
+      recent.push(fingerprint);
+      if (recent.length > STALL_WINDOW) {
+        recent.shift();
+      }
       if (frozenFor >= STALL_TICKS) {
         boldUntil = tick + BOLD_TICKS;
       }
