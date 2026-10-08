@@ -54,6 +54,15 @@ export interface CardMeta {
    */
   readonly equilibriumCapped?: boolean;
   /**
+   * 簡單策略可行：最簡單的合理策略（一行規則、不做搜尋）對等級 10 的勝率 ≥40% 時，
+   * 要把人類模型壓到 ≤35%（A4）只能把牌改壞，所以 A4 不是「人贏得了」的證據
+   * （DESIGN-AI-FUN 10.14 的判準）。契約測試對它跳過 A4（輸出印出「不適用」與帶實測數字的理由，
+   * 絕不回報通過）；A1、A2、A3、A5 照跑，門檻不動。小規格要附簡單策略的勝率表。
+   * 這和 `reflexOnly`（沒有策略深度）、`equilibriumCapped`（均衡不可剝削）是不同的理由，不共用旗標。
+   * 只有老闆核准的牌可以掛（H-6）；簡單策略明顯不夠好的牌（梅花、D-4 之類）不准用它蓋掉 A4。
+   */
+  readonly simpleStrategyViable?: boolean;
+  /**
    * 這張牌在遊戲裡一局跑幾個 tick；沒寫就是共同設定的 3600（SPEC 第 9 節，60 秒）。
    * 只有外殼讀它（`matchConfigFor`）；契約測試仍用 3600 跑每一張牌，所以牌自己的 `logic.ts`
    * 要用 `min(config.maxTicks, defaultMaxTicks)`（JK-R 的做法），兩邊都成立。

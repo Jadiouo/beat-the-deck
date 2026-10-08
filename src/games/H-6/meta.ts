@@ -14,4 +14,5 @@ export const h6Meta: CardMeta = {
   baseLevel: 2,
   symmetric: true,
   luckHeavy: true,
+  simpleStrategyViable: true,
 };

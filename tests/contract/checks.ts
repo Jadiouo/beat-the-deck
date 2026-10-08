@@ -646,10 +646,16 @@ export function runsAiChecks(entry: RegistryEntry): boolean {
   return entry.meta.defaultPolicy !== null && entry.meta.suit !== 'JK';
 }
 
-/** A4 的前提：跑 A1–A5，而且不是 `meta.reflexOnly`（純反射牌）或 `meta.equilibriumCapped`（零和均衡牌）；見 CardMeta。 */
+/**
+ * A4 的前提：跑 A1–A5，而且不是 `meta.reflexOnly`（純反射牌）、`meta.equilibriumCapped`（零和均衡牌）
+ * 或 `meta.simpleStrategyViable`（簡單策略就能打到 40% 上下）；見 CardMeta。
+ */
 export function runsA4(entry: RegistryEntry): boolean {
   return (
-    runsAiChecks(entry) && entry.meta.reflexOnly !== true && entry.meta.equilibriumCapped !== true
+    runsAiChecks(entry) &&
+    entry.meta.reflexOnly !== true &&
+    entry.meta.equilibriumCapped !== true &&
+    entry.meta.simpleStrategyViable !== true
   );
 }
 
@@ -665,6 +671,20 @@ const EQUILIBRIUM_REASON =
 const A4_REFLEX_REASON =
   '這張牌標了 reflexOnly（純反射牌）：沒有策略深度，A4 只能靠超人類反應達成，不是「人贏得了」的證據；' +
   '改看小規格裡的劇本玩家量測（強玩家贏得了、弱玩家輸）';
+
+/** simpleStrategyViable 的實測數字（對等級 10，1000 場；來源是各張牌的小規格）。理由集中在這裡，不散到各張牌。 */
+const SIMPLE_STRATEGY_EVIDENCE: Readonly<Record<string, string>> = {
+  'H-6':
+    '走到 4 分就存 42.4%、只看一步 46.3%、走到 5 分就存 38.9%、走到 3 分就存 40.1%，撐在 39% 到 46%（docs/cards/H-6.md）',
+};
+
+function simpleStrategyReason(entry: RegistryEntry): string {
+  const evidence = SIMPLE_STRATEGY_EVIDENCE[entry.id] ?? '數字見小規格的簡單策略勝率表';
+  return (
+    '這張牌標了 simpleStrategyViable（簡單策略可行；DESIGN-AI-FUN 10.14）：最簡單的合理策略對等級 10 的勝率 ≥40%，' +
+    `A4 不是「人贏得了」的證據，要壓到 ≤35% 只能把牌改壞。簡單策略對等級 10 的勝率：${evidence}`
+  );
+}
 
 /** 這一條 A 檢查對這張牌不適用的理由；適用就回 null。測試名稱與回報都用它，不適用絕不是通過。 */
 export function notApplicableReason(def: CheckDef, entry: RegistryEntry): string | null {
@@ -1181,6 +1201,9 @@ function aiDefs(): CheckDef[] {
     whyNotApplicable(entry: RegistryEntry): string {
       if (!runsAiChecks(entry)) {
         return '沒有預設性格或是鬼牌，不跑 A1–A5';
+      }
+      if (entry.meta.simpleStrategyViable === true) {
+        return simpleStrategyReason(entry);
       }
       return entry.meta.equilibriumCapped === true ? EQUILIBRIUM_REASON : A4_REFLEX_REASON;
     },
