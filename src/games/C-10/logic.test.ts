@@ -492,32 +492,38 @@ describe('C-10 追與逃｜搜尋型的破綻：追的蛇只相信「你會一�
     expect(manhattan(start.aim, jinkEnd.snakes[0].body[0] as number)).toBe(6);
   });
 
-  it('23. 追的蛇撲空：同樣的局面，知道逃的蛇會轉彎的追法，24 個 tick 後離逃的蛇近得多', () => {
+  it('23. 追的蛇撲空：一批追方位置（不是挑好的幾個）上，知道逃的蛇會轉彎的追法比較近，而且被騙從來不會比較好', () => {
+    // 這條要證明的是「急轉騙得到搜尋型」這個機制，不是某一個局面的某一個差距。
+    // 所以掃一整片追方位置（x 9..16、y 13..21 每隔 2 格，各 3 個朝向，共 120 個局面），
+    // 每個局面各走 24 個 tick（瞄準之後到下一次瞄準之前），比兩種追法最後離逃的蛇幾格。
+    // gap = 被騙的追法的距離 − 知道會轉彎的追法的距離（正的 = 被騙的比較遠）。
+    // 實測（等級 10 搜尋型）：三個朝向的 gap > 0 各占 30%、30%、37.5%，gap < 0 是 0 個；
+    // gap > 0 的局面平均差 2.9 到 3.2 格；全部 120 個的平均 0.9 到 1.1 格。
+    // 破綻只在追方靠近、又得轉向去追瞄準點時才傷人，離得遠的位置兩種追法走一樣的路（gap 0），所以平均數不拿來當主要門檻。
+    // 門檻（都留了餘裕）：
+    //   被騙從來不會比較好：gap < 0 的局面不超過 5%（實測 0%）。
+    //   破綻確實在發生：gap > 0 的局面至少 20%（實測至少 30%）。
+    //   發生的時候是實在的差距：gap > 0 的局面平均至少 2 格（實測 2.9 以上；逃的蛇一步一格，等於白白落後 2 步）。
     const gaps: number[] = [];
-    for (const [cx, cy, dir] of [
-      [10, 14, RIGHT],
-      [10, 16, RIGHT],
-      [12, 14, RIGHT],
-      [8, 16, RIGHT],
-    ] as [number, number, Dir][]) {
-      const start = chaseScenario([cx, cy], dir);
-      const awareStart = { ...start, aim: scriptModel(jink)(start, AIM_LEAD) };
-      const naiveEnd = playWindow(c10Game, start, jink);
-      const awareEnd = playWindow(aware, awareStart, jink);
-      const naive = manhattan(
-        naiveEnd.snakes[0].body[0] as number,
-        naiveEnd.snakes[1].body[0] as number,
-      );
-      const known = manhattan(
-        awareEnd.snakes[0].body[0] as number,
-        awareEnd.snakes[1].body[0] as number,
-      );
-      gaps.push(naive - known);
-      // 每一個局面都是：預測偏了的追法比較遠
-      expect(naive).toBeGreaterThan(known);
+    for (const dir of [RIGHT, UP, DOWN] as Dir[]) {
+      for (let cx = 9; cx <= 16; cx += 1) {
+        for (let cy = 13; cy <= 21; cy += 2) {
+          const start = chaseScenario([cx, cy], dir);
+          const awareStart = { ...start, aim: scriptModel(jink)(start, AIM_LEAD) };
+          const naiveEnd = playWindow(c10Game, start, jink);
+          const awareEnd = playWindow(aware, awareStart, jink);
+          const gapOf = (end: C10State): number =>
+            manhattan(end.snakes[0].body[0] as number, end.snakes[1].body[0] as number);
+          gaps.push(gapOf(naiveEnd) - gapOf(awareEnd));
+        }
+      }
     }
-    // 平均多出至少 3 格（逃的蛇一步一格，等於追的蛇白白多落後 3 步）
-    expect(gaps.reduce((a, b) => a + b, 0) / gaps.length).toBeGreaterThanOrEqual(3);
+    const fooled = gaps.filter((g) => g > 0);
+    const backfired = gaps.filter((g) => g < 0);
+    expect(gaps).toHaveLength(120);
+    expect(backfired.length / gaps.length).toBeLessThanOrEqual(0.05);
+    expect(fooled.length / gaps.length).toBeGreaterThanOrEqual(0.2);
+    expect(fooled.reduce((a, b) => a + b, 0) / fooled.length).toBeGreaterThanOrEqual(2);
   });
 
   it('24. 對照組：逃的蛇一直直走時，兩種追法完全一樣（差別只在「預測會不會被騙」）', () => {
