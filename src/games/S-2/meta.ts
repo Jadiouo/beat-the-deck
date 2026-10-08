@@ -11,4 +11,5 @@ export const s2Meta: CardMeta = {
   defaultPolicy: 'precise',
   baseLevel: 1,
   symmetric: true,
+  reflexOnly: true,
 };

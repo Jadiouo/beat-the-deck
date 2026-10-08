@@ -11,4 +11,5 @@ export const sAMeta: CardMeta = {
   defaultPolicy: 'precise',
   baseLevel: 1,
   symmetric: true,
+  reflexOnly: true,
 };
