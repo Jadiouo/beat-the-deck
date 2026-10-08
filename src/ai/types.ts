@@ -23,6 +23,8 @@ export interface PolicyParams {
  */
 export interface Policy {
   readonly name: string;
+  /** true：這個性格會看 `params.stalled`。只有這樣 `wrapPolicy` 才會花力氣偵測僵局（每個 tick 算一次世界指紋）。 */
+  readonly usesStall?: boolean;
   decide<S>(game: Game<S>, state: S, side: Side, tick: number, params: PolicyParams): Buttons;
 }
 

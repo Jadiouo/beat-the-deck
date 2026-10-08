@@ -262,14 +262,16 @@ export function wrapPolicy<S>(
       lastTick = tick;
 
       // 僵局偵測：世界連續 STALL_TICKS 個 tick 沒變，接下來 BOLD_TICKS 個 tick 通知性格。
-      const fingerprint = worldFingerprint(state);
-      frozenFor = recent.includes(fingerprint) ? frozenFor + 1 : 0;
-      recent.push(fingerprint);
-      if (recent.length > STALL_WINDOW) {
-        recent.shift();
-      }
-      if (frozenFor >= STALL_TICKS) {
-        boldUntil = tick + BOLD_TICKS;
+      if (policy.usesStall === true) {
+        const fingerprint = worldFingerprint(state);
+        frozenFor = recent.includes(fingerprint) ? frozenFor + 1 : 0;
+        recent.push(fingerprint);
+        if (recent.length > STALL_WINDOW) {
+          recent.shift();
+        }
+        if (frozenFor >= STALL_TICKS) {
+          boldUntil = tick + BOLD_TICKS;
+        }
       }
 
       const entry: Remembered<S> = { tick, state, output: NEUTRAL };

@@ -107,6 +107,7 @@ describe('wrapPolicy 的僵局偵測', () => {
   const recorded: boolean[] = [];
   const spy: Policy = {
     name: 'spy',
+    usesStall: true,
     decide(_game, _state, _side, _tick, params): Buttons {
       recorded.push(params.stalled === true);
       return NONE;

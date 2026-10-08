@@ -19,6 +19,7 @@ export const PRECISE_DANGER_LIMIT = 0.3;
  */
 export const precise: Policy = {
   name: 'precise',
+  usesStall: true,
   decide<S>(game: Game<S>, state: S, side: Side, _tick: number, params: PolicyParams): Buttons {
     const scored = lookOneStep(game, state, side);
     const actions = myActions(game, state, side);
