@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { nextFrom } from '../../core/rng';
 import type { Buttons, Inputs } from '../../core/types';
+import { describeDelayedView } from '../_spades/delayed-view-suite.test-helpers';
 import { describeSharedSpadesRules } from '../_spades/shared-rules.test-helpers';
 import { s2Game, makeState } from './logic';
 import type { SpadesState } from './logic';
@@ -73,6 +74,7 @@ describeSharedSpadesRules({
   makeState,
   busy: { min: 8, max: 50 },
 });
+describeDelayedView({ label: 'S-2 瞄準彈', game: s2Game, makeState });
 
 describe('S-2 瞄準彈｜TEST_PLAN 第 6 節（1 到 6 條）', () => {
   it('1. 一般子彈每 15 tick 一顆：第 15、30、45……個 tick，全場 240 顆；到最後間隔也不縮短', () => {

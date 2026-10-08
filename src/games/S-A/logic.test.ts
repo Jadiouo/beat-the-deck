@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { Buttons, Inputs } from '../../core/types';
+import { describeDelayedView } from '../_spades/delayed-view-suite.test-helpers';
 import { describeSharedSpadesRules } from '../_spades/shared-rules.test-helpers';
 import { sAGame, makeState } from './logic';
 import type { SpadesState } from './logic';
@@ -47,6 +48,7 @@ function spawnLog(seed: number, ticks: number): { tick: number; x: number }[] {
 const INVULNERABLE = 1_000_000;
 
 describeSharedSpadesRules({ label: 'S-A 落雨', game: sAGame, makeState });
+describeDelayedView({ label: 'S-A 落雨', game: sAGame, makeState });
 
 describe('S-A 落雨｜TEST_PLAN 第 6 節（1、8、10 條與初始）', () => {
   it('1. 兩個場地在任何 tick 的子彈位置完全相同（玩家各走各的、都不會被打中時）', () => {
