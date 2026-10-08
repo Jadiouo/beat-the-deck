@@ -10,6 +10,11 @@ import type { PolicyName } from '../games/types';
 export interface PolicyParams {
   readonly depth: number;
   readonly seed: number;
+  /**
+   * 世界已經連續好一陣子完全沒有變化（兩邊都不動）。由 `wrapPolicy` 從 state 的歷史算出來，
+   * 所以性格本身仍然是純的。只有精準型看它：僵局時不再用 danger 門檻否決動作。省略就是 false。
+   */
+  readonly stalled?: boolean;
 }
 
 /**

@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
 import { copyButtons } from '../../src/core/match';
-import type { Game } from '../../src/core/types';
+import type { Buttons, Game } from '../../src/core/types';
 import { MATCH_CONFIG } from '../../src/ai/evolution';
-import { levelController } from '../../src/ai/level';
+import { BOLD_TICKS, STALL_TICKS, levelController, wrapPolicy } from '../../src/ai/level';
+import type { WrappedController } from '../../src/ai/level';
+import type { Policy } from '../../src/ai/types';
 import { precise } from '../../src/ai/policies/precise';
 import { d4Game } from '../../src/games/D-4/logic';
 import { d7Game } from '../../src/games/D-7/logic';
@@ -67,4 +69,59 @@ describe('兩個等級 10 的精準型對打不會永久卡死', () => {
     },
     120_000,
   );
+});
+
+describe('wrapPolicy 的僵局偵測', () => {
+  interface Frozen {
+    readonly tick: number;
+    readonly x: number;
+  }
+  const NONE: Buttons = { up: false, down: false, left: false, right: false, a: false, b: false };
+  /** 世界永遠不變（只有 tick 在走）的假遊戲。 */
+  const frozenGame: Game<Frozen> = {
+    id: 'frozen',
+    init: () => ({ tick: 0, x: 0 }),
+    step: (state) => ({ tick: state.tick + 1, x: state.x }),
+    isOver: () => false,
+    score: () => [0, 0],
+    winner: () => null,
+    actions: () => [NONE],
+    evaluate: () => ({ gain: 0, danger: 0 }),
+  };
+
+  function run(ticks: number, controller: WrappedController<Frozen>): void {
+    let state = frozenGame.init(0, MATCH_CONFIG);
+    for (let tick = 0; tick < ticks; tick += 1) {
+      controller.decide(state, 0, tick);
+      state = frozenGame.step(state, [NONE, NONE]);
+    }
+  }
+
+  const recorded: boolean[] = [];
+  const spy: Policy = {
+    name: 'spy',
+    decide(_game, _state, _side, _tick, params): Buttons {
+      recorded.push(params.stalled === true);
+      return NONE;
+    },
+  };
+  const everyTick = { reactionTicks: 0, decideEvery: 1, depth: 1, epsilon: 0 };
+
+  it('世界連續不變 STALL_TICKS 個 tick 之後通知性格，並維持 BOLD_TICKS 個 tick', () => {
+    recorded.length = 0;
+    run(STALL_TICKS + BOLD_TICKS + 20, wrapPolicy(frozenGame, spy, everyTick, 1));
+    expect(recorded.slice(0, STALL_TICKS).every((value) => !value)).toBe(true);
+    expect(recorded[STALL_TICKS]).toBe(true);
+    expect(recorded.slice(STALL_TICKS, STALL_TICKS + BOLD_TICKS).every(Boolean)).toBe(true);
+  });
+
+  it('同一個控制器用在第二場（tick 回到 0）：偵測重設，和新建的一樣', () => {
+    const controller = wrapPolicy(frozenGame, spy, everyTick, 1);
+    recorded.length = 0;
+    run(STALL_TICKS + 10, controller);
+    const first = recorded.slice();
+    recorded.length = 0;
+    run(STALL_TICKS + 10, controller);
+    expect(recorded).toEqual(first);
+  });
 });

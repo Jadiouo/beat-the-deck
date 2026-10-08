@@ -14,12 +14,19 @@ export const PRECISE_DANGER_LIMIT = 0.3;
  * 先排除下一個 tick danger 超過門檻的動作，剩下的選 gain 最高的；
  * 如果每個動作都超過門檻，退而選 danger 最低的（平手時 gain 高的優先）。
  * 平手一律取索引最小的。
+ * 例外：`params.stalled`（世界連續一陣子沒變）時不看門檻，直接選 gain 最高的，免得兩個精準型在
+ * 「往前的那一步剛好超過門檻、其他都是不動」的局面互相僵持。
  */
 export const precise: Policy = {
   name: 'precise',
-  decide<S>(game: Game<S>, state: S, side: Side, _tick: number, _params: PolicyParams): Buttons {
+  decide<S>(game: Game<S>, state: S, side: Side, _tick: number, params: PolicyParams): Buttons {
     const scored = lookOneStep(game, state, side);
     const actions = myActions(game, state, side);
+    if (params.stalled === true) {
+      // 僵局：世界已經好一陣子完全沒變。這時候 danger 門檻只會讓「安全」的選項全是原地不動，
+      // 世界不變、決定不變，兩邊就永遠僵持。放下門檻，選 gain 最高的（平手取索引最小）。
+      return actions[argMax(scored.map((s) => s.gain))] as Buttons;
+    }
     const safe = scored.filter((s) => s.danger <= PRECISE_DANGER_LIMIT);
     if (safe.length > 0) {
       const best = safe[argMax(safe.map((s) => s.gain))];
