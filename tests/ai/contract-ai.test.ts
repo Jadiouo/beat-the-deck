@@ -215,3 +215,52 @@ describe('reflexOnly：A4 明確「不適用」，不是通過', () => {
     expect(reason).not.toContain('reflexOnly');
   });
 });
+
+describe('equilibriumCapped：A2 與 A4 明確「不適用」（零和均衡），不是通過', () => {
+  const capped = withMeta({ defaultPolicy: 'greedy', equilibriumCapped: true });
+  const byCode = (code: string) =>
+    AI_CHECKS.find((c) => c.code === code) as NonNullable<ReturnType<typeof AI_CHECKS.find>>;
+
+  it('A2、A4 對 equilibriumCapped 的牌不適用，runCheck 回 skip（絕對不是 pass）', () => {
+    for (const code of ['A2', 'A4']) {
+      expect(byCode(code).applies(capped), code).toBe(false);
+      expect(runCheck(byCode(code), capped), code).toBe('skip');
+    }
+  });
+
+  it('理由提到 equilibriumCapped、零和、均衡，而且不是 reflexOnly 的理由', () => {
+    for (const code of ['A2', 'A4']) {
+      const reason = notApplicableReason(byCode(code), capped);
+      expect(reason, code).not.toBeNull();
+      expect(reason, code).toContain('equilibriumCapped');
+      expect(reason, code).toContain('零和');
+      expect(reason, code).toContain('均衡');
+      expect(reason, code).not.toContain('reflexOnly');
+    }
+  });
+
+  it('A1、A3、A5 照樣適用', () => {
+    for (const code of ['A1', 'A3', 'A5']) {
+      expect(byCode(code).applies(capped), code).toBe(true);
+      expect(notApplicableReason(byCode(code), capped), code).toBeNull();
+    }
+  });
+
+  it('一般的牌 A2、A4 照跑；reflexOnly 的牌 A2 照跑（旗標語意不共用）', () => {
+    for (const code of ['A2', 'A4']) {
+      expect(notApplicableReason(byCode(code), greedyEntry), code).toBeNull();
+    }
+    const reflex = withMeta({ defaultPolicy: 'greedy', reflexOnly: true });
+    expect(notApplicableReason(byCode('A2'), reflex)).toBeNull();
+    expect(notApplicableReason(byCode('A4'), reflex)).toContain('reflexOnly');
+  });
+
+  it('門檻不變：equilibriumCapped 不影響 A1 到 A4 的數字門檻', () => {
+    expect(aiThresholds({ ...counterMeta, equilibriumCapped: true })).toEqual({
+      a1: 0.75,
+      a2: 0.6,
+      a3: 0.45,
+      a4: 0.35,
+    });
+  });
+});

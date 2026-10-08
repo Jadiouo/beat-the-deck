@@ -17,7 +17,6 @@ import {
   eqAction,
   eqAggressiveProb,
   expectedHand,
-  reflexAction,
   HANDS,
   hJGame,
   LOCK_TICKS,
@@ -882,42 +881,20 @@ describe('H-J 三張牌撲克｜AI 怎麼打（等級曲線從結算流程長出
     expect(picks(6).size).toBeGreaterThan(1);
   });
 
-  describe('淺層反射的選項 config.params.reflex（1 = 老實牌：只用 K 下注／跟，其餘過牌／棄；預設 0 = 均衡抽籤）', () => {
-    it('預設是均衡抽籤；reflex = 1 時 state.reflex 為 true', () => {
-      expect(hJGame.init(1, CONFIG).reflex).toBe(false);
-      expect(hJGame.init(1, { maxTicks: 3600, params: { reflex: 1 } }).reflex).toBe(true);
+  describe('淺層永遠是均衡抽籤（沒有第二套規則）', () => {
+    it('config.params.reflex 不再是選項：給了也沒有作用，state 沒有 reflex 欄位', () => {
+      const plain = hJGame.init(1, CONFIG);
+      const given = hJGame.init(1, { maxTicks: 3600, params: { reflex: 1 } });
+      expect(given).toEqual(plain);
+      expect('reflex' in plain).toBe(false);
     });
 
-    it('reflexAction：K 積極，J、Q 消極，不管局面與抽籤', () => {
-      expect(reflexAction(K)).toBe(1);
-      expect(reflexAction(Q)).toBe(0);
-      expect(reflexAction(J)).toBe(0);
-    });
-
-    it('深度 1、2（冷啟動或有歷史）都照反射：K 下注／跟，J、Q 過牌／棄；抽籤不影響', () => {
-      for (const spot of SPOTS) {
-        for (const card of [J, Q, K] as const) {
-          for (const draw of [0, 4000, 9000]) {
-            for (const h of [[], oppFolds(5), oppCalls(5)]) {
-              const s = { ...stateFor(spot, card, draw, h), reflex: true };
-              for (const depth of [1, 2]) {
-                expect(aggressive(decideAtDepth(s, 1, depth))).toBe(card === K);
-              }
-            }
-          }
-        }
-      }
-    });
-
-    it('深度 3 以上照樣讀你：對手面對下注都棄 → 拿 J 先手也下注（反射說過牌）', () => {
-      const s = {
-        ...stateFor(SPOTS[0] as (typeof SPOTS)[number], J, 0, oppFolds(5)),
-        reflex: true,
-      };
-      expect(aggressive(decideAtDepth(s, 1, 1))).toBe(false);
-      for (const depth of [3, 6]) {
-        expect(aggressive(decideAtDepth(s, 1, depth)), `深度 ${depth}`).toBe(true);
-      }
+    it('深度 1、2 不看牌的大小，照抽籤查均衡表：同一張 J，抽籤不同動作不同', () => {
+      const spot = SPOTS[0] as (typeof SPOTS)[number];
+      const picks = new Set(
+        [0, 9999].map((draw) => aggressive(decideAtDepth(stateFor(spot, J, draw, []), 1, 1))),
+      );
+      expect(picks.size).toBe(2);
     });
   });
 

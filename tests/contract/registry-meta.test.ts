@@ -74,3 +74,43 @@ describe('reflexOnly（A4 不適用旗標）', () => {
     }
   });
 });
+
+describe('equilibriumCapped（A2、A4 不適用旗標：零和均衡）', () => {
+  /** 老闆核准的牌。要加第二張，先去問老闆（docs/TEST_PLAN.md 5.1 訂正）。 */
+  const APPROVED = ['H-J'];
+
+  it('只有核准的牌掛旗標', () => {
+    const flagged = registry
+      .filter((entry) => entry.meta.equilibriumCapped === true)
+      .map((entry) => entry.id)
+      .sort();
+    expect(flagged).toEqual(APPROVED.filter((id) => registry.some((e) => e.id === id)).sort());
+  });
+
+  it('旗標與 reflexOnly 不重疊（兩個理由不同，不共用）', () => {
+    for (const entry of registry) {
+      expect(
+        entry.meta.equilibriumCapped === true && entry.meta.reflexOnly === true,
+        entry.id,
+      ).toBe(false);
+    }
+  });
+
+  it('掛旗標的牌，小規格要有「A2／A4 不是證據」一節、零和均衡的理由與替代證據', () => {
+    for (const entry of registry) {
+      if (entry.meta.equilibriumCapped !== true) {
+        continue;
+      }
+      const file = resolve(__dirname, `../../docs/cards/${entry.id}.md`);
+      expect(existsSync(file), `${entry.id} 小規格存在`).toBe(true);
+      const text = readFileSync(file, 'utf8');
+      expect(text, `${entry.id} 有 equilibriumCapped 一節`).toMatch(
+        /^## .*A2.*A4.*(不是證據|不適用)/m,
+      );
+      expect(text, `${entry.id} 提到零和與均衡`).toMatch(/零和/);
+      expect(text, `${entry.id} 提到均衡`).toMatch(/均衡/);
+      expect(text, `${entry.id} 提到劇本玩家`).toContain('劇本玩家');
+      expect(text, `${entry.id} 提到反讀`).toContain('反讀');
+    }
+  });
+});
