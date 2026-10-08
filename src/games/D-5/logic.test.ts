@@ -677,9 +677,9 @@ function fork(overrides: Parameters<typeof makeState>[0] = {}): D5State {
     parcels: [
       { cell: cell(15, 8), colour: RED },
       { cell: cell(15, 16), colour: BLUE },
-      { cell: cell(28, 22), colour: GREEN },
-      { cell: cell(28, 20), colour: GREEN },
-      { cell: cell(30, 22), colour: GREEN },
+      { cell: cell(3, 9), colour: GREEN },
+      { cell: cell(4, 9), colour: GREEN },
+      { cell: cell(5, 9), colour: GREEN },
     ],
     ...overrides,
   });
@@ -917,7 +917,7 @@ describe('D-5 送貨｜evaluate', () => {
     // 同樣的局面，如果倉庫不會休息（ablation 用的 COOL = 0 版本在量測檔案裡），就沒有這個差別。
   });
 
-  it('背在身上之後 danger 是 0（已經下注了，沒有別的動作可選）', () => {
+  it('背在身上之後 danger 對五個動作都一樣（已經下注了；不會逼人倒退著走，也不會讓精準型的門檻挑動作）', () => {
     const state = fork({
       players: [{ cell: cell(15, 6) }, { cell: cell(15, 9) }],
       carry: [
@@ -926,7 +926,10 @@ describe('D-5 送貨｜evaluate', () => {
       ],
       cool: [COOL, 0, 0],
     });
-    expect(dangersOf(state, 0)).toEqual([0, 0, 0, 0, 0]);
+    for (const side of [0, 1] as const) {
+      const dangers = dangersOf(state, side);
+      expect(new Set(dangers).size).toBe(1);
+    }
   });
 });
 
