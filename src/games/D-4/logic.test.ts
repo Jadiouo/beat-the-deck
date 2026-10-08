@@ -6,7 +6,8 @@ import { greedy } from '../../ai/policies/greedy';
 import { pathfinder } from '../../ai/policies/pathfinder';
 import { precise } from '../../ai/policies/precise';
 import type { Policy } from '../../ai/types';
-import type { Buttons, Game, Inputs, Side } from '../../core/types';
+import { playMatch } from '../../core/match';
+import type { Buttons, Controller, Game, Inputs, Side } from '../../core/types';
 import { bfsDistances, CELLS, cell, cellX, START_CELLS } from '../_diamonds/logic';
 import {
   BEFORE_MOVE,
@@ -23,6 +24,7 @@ import {
 } from '../_diamonds/shared-rules.test-helpers';
 import { CAP, CHARGE, d4Game, makeState, STATION_COUNT, STATION_GAP, TRICKLE_EVERY } from './logic';
 import type { D4State } from './logic';
+import { calculator, chaser, uniform } from './players.test-helpers';
 
 /**
  * D-4 電池的規則測試。全部用 `makeState` 直接構造局面，不靠跑很多 tick 碰運氣。
@@ -934,4 +936,64 @@ describe('D-4 電池｜盲測（decide、evaluate、actions）', () => {
   it('注入「actions 的順序依 rng 轉動」：相等性抓得到', () => {
     expect(equalityLeaks(leaky('actions-order'), states).length).toBeGreaterThan(0);
   }, 60_000);
+});
+
+// ---------------------------------------------------------------------------
+// 技術有報酬、運氣沒有（GOAL 第 3 條）與四性格指紋（GOAL 第 2 條）
+// ---------------------------------------------------------------------------
+
+describe('D-4 電池｜劇本玩家（技術有報酬）', () => {
+  /** 劇本玩家對貪心型等級 10，每個種子坐一邊（偶數種子 0 號邊）；回傳勝率（平手半場）。 */
+  function scriptedVsGreedy(
+    make: (seed: number, side: Side) => Controller<D4State>,
+    seeds: number,
+  ): number {
+    let points = 0;
+    for (let seed = 0; seed < seeds; seed += 1) {
+      const side: Side = seed % 2 === 0 ? 0 : 1;
+      const me = make(seed, side);
+      const ai = levelController(d4Game, greedy, 10, seed + 1_000_003);
+      const result =
+        side === 0
+          ? playMatch(d4Game, seed, CONFIG, me, ai)
+          : playMatch(d4Game, seed, CONFIG, ai, me);
+      points += result.winner === null ? 0.5 : result.winner === side ? 1 : 0;
+    }
+    return points / seeds;
+  }
+
+  it('會算電量與站的玩家，明顯贏過「只追最近金幣」與「均勻亂按」（各 200 場，對貪心型等級 10）；量到的數字寫在 docs/cards/D-4.md', () => {
+    const smart = scriptedVsGreedy(() => calculator(), 200);
+    const greedyCoins = scriptedVsGreedy(() => chaser(), 200);
+    const random = scriptedVsGreedy((seed, side) => uniform(seed, side), 200);
+    expect(smart).toBeGreaterThan(greedyCoins + 0.15);
+    expect(smart).toBeGreaterThan(random + 0.15);
+    expect(smart).toBeGreaterThan(0.15);
+  }, 600_000);
+});
+
+describe('D-4 電池｜四性格指紋', () => {
+  it('每人每場「電量是 0」的 tick 數（stuck）：貪心／精準 ≥ 1.5、賭徒／貪心 ≥ 1.5（各性格等級 10 對貪心型等級 10，40 場）', () => {
+    const stuckOf = (policy: Policy): number => {
+      let total = 0;
+      for (let seed = 0; seed < 40; seed += 1) {
+        const side: Side = seed % 2 === 0 ? 0 : 1;
+        const me = levelController(d4Game, policy, 10, seed);
+        const ai = levelController(d4Game, greedy, 10, seed + 1_000_003);
+        let state = d4Game.init(seed, CONFIG);
+        for (let tick = 0; !d4Game.isOver(state); tick += 1) {
+          const a = me.decide(state, side, tick);
+          const b = ai.decide(state, side === 0 ? 1 : 0, tick);
+          state = d4Game.step(state, side === 0 ? [a, b] : [b, a]);
+        }
+        total += state.stuck[side] as number;
+      }
+      return total / 40;
+    };
+    const g = stuckOf(greedy);
+    const p = stuckOf(precise);
+    const b = stuckOf(gambler);
+    expect(g / Math.max(p, 1)).toBeGreaterThanOrEqual(1.5);
+    expect(b / Math.max(g, 1)).toBeGreaterThanOrEqual(1.5);
+  }, 600_000);
 });
