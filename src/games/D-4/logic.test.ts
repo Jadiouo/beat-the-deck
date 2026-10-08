@@ -7,7 +7,7 @@ import { pathfinder } from '../../ai/policies/pathfinder';
 import { precise } from '../../ai/policies/precise';
 import type { Policy } from '../../ai/types';
 import type { Buttons, Game, Inputs, Side } from '../../core/types';
-import { bfsDistances, CELLS, cell, cellX, cellY, START_CELLS } from '../_diamonds/logic';
+import { bfsDistances, CELLS, cell, cellX, START_CELLS } from '../_diamonds/logic';
 import {
   BEFORE_MOVE,
   CONFIG,
@@ -21,15 +21,7 @@ import {
   PRESS_UP,
   run,
 } from '../_diamonds/shared-rules.test-helpers';
-import {
-  CAP,
-  CHARGE,
-  d4Game,
-  makeState,
-  STATION_COUNT,
-  STATION_GAP,
-  TRICKLE_EVERY,
-} from './logic';
+import { CAP, CHARGE, d4Game, makeState, STATION_COUNT, STATION_GAP, TRICKLE_EVERY } from './logic';
 import type { D4State } from './logic';
 
 /**
@@ -52,7 +44,6 @@ const STATION_A2 = cell(23, 17);
 const STATION_B = cell(23, 6);
 const STATION_B2 = cell(8, 17);
 const FAR_AI = cell(25, 20);
-const FAR_HUMAN = cell(5, 20);
 
 /** 下一次 step 就是走格結算：兩個角色預設離所有站很遠。 */
 function atMove(overrides: Parameters<typeof makeState>[0] = {}): D4State {
@@ -73,7 +64,7 @@ describe('D-4 電池｜初始', () => {
     for (let seed = 0; seed < 10; seed += 1) {
       const state = d4Game.init(seed, CONFIG);
       expect(state.battery).toEqual([CAP, CAP]);
-      expect(CAP).toBe(30);
+      expect(CAP).toBe(40);
       expect(state.trickle).toEqual([0, 0]);
       expect(state.stuck).toEqual([0, 0]);
       expect(state.holder).toEqual([-1, -1, -1, -1]);
@@ -128,25 +119,25 @@ describe('D-4 電池｜耗電', () => {
     let state = makeState({ players: [{ cell: cell(5, 5) }, { cell: FAR_AI }] });
     for (let t = 1; t <= 4; t += 1) {
       state = d4Game.step(state, [PRESS_RIGHT, NONE]);
-      expect(state.battery, `第 ${t} 個 tick`).toEqual([30, 30]);
+      expect(state.battery, `第 ${t} 個 tick`).toEqual([CAP, CAP]);
     }
     state = d4Game.step(state, [PRESS_RIGHT, NONE]);
     expect(state.players[0].cell).toBe(cell(6, 5));
-    expect(state.battery).toEqual([29, 30]);
+    expect(state.battery).toEqual([CAP - 1, CAP]);
   });
 
   it('1. 朝牆走、出界、沒按方向，都不扣電', () => {
     const wall = atMove({ walls: [cell(6, 5)] });
-    expect(d4Game.step(wall, [PRESS_RIGHT, NONE]).battery).toEqual([30, 30]);
+    expect(d4Game.step(wall, [PRESS_RIGHT, NONE]).battery).toEqual([CAP, CAP]);
     const edge = atMove({ players: [{ cell: cell(0, 5) }, { cell: FAR_AI }] });
-    expect(d4Game.step(edge, [PRESS_LEFT, NONE]).battery).toEqual([30, 30]);
-    expect(d4Game.step(atMove(), IDLE).battery).toEqual([30, 30]);
+    expect(d4Game.step(edge, [PRESS_LEFT, NONE]).battery).toEqual([CAP, CAP]);
+    expect(d4Game.step(atMove(), IDLE).battery).toEqual([CAP, CAP]);
   });
 
   it('1. 兩邊同時走各扣各的', () => {
     const state = atMove({ players: [{ cell: cell(5, 5) }, { cell: cell(20, 20) }] });
     const next = d4Game.step(state, [PRESS_RIGHT, PRESS_LEFT]);
-    expect(next.battery).toEqual([29, 29]);
+    expect(next.battery).toEqual([CAP - 1, CAP - 1]);
   });
 
   it('2. 電量 0：走格結算不動，待走方向照常歸零，不扣電', () => {
@@ -169,7 +160,10 @@ describe('D-4 電池｜耗電', () => {
 
   it('沒電的人仍然可以撿到腳下已有的金幣（站著的人不會走，所以只在剛好走進金幣的那一次撿）', () => {
     // 電量 1 走進金幣：撿到，之後 0 電。
-    const state = atMove({ battery: [1, 30], coins: [cell(6, 5), cell(15, 10), cell(16, 10), cell(17, 10), cell(18, 10), cell(19, 10)] });
+    const state = atMove({
+      battery: [1, 30],
+      coins: [cell(6, 5), cell(15, 10), cell(16, 10), cell(17, 10), cell(18, 10), cell(19, 10)],
+    });
     const next = d4Game.step(state, [PRESS_RIGHT, NONE]);
     expect(d4Game.score(next)).toEqual([1, 0]);
     expect(next.battery[0]).toBe(0);
@@ -225,13 +219,13 @@ describe('D-4 電池｜充電站', () => {
     expect(next.battery[0]).toBe(21);
   });
 
-  it('4. holder 每次走格結算 +2，上限 30', () => {
-    let state = d4Game.step(nextToA({ battery: [27, 20] }), [PRESS_RIGHT, NONE]);
-    expect(state.battery[0]).toBe(28); // 27 − 1 + 2
+  it('4. holder 每次走格結算 +2，上限 CAP', () => {
+    let state = d4Game.step(nextToA({ battery: [CAP - 3, 20] }), [PRESS_RIGHT, NONE]);
+    expect(state.battery[0]).toBe(CAP - 2); // CAP − 3 − 1 + 2
     state = run(d4Game, state, 5);
-    expect(state.battery[0]).toBe(30); // 28 + 2
+    expect(state.battery[0]).toBe(CAP); // + 2
     state = run(d4Game, state, 5);
-    expect(state.battery[0]).toBe(30); // 上限
+    expect(state.battery[0]).toBe(CAP); // 上限
   });
 
   it('4. 不是結算的 tick 不充電', () => {
@@ -320,14 +314,14 @@ describe('D-4 電池｜充電站', () => {
     let state = makeState({
       tick: 0,
       players: [{ cell: STATION_A }, { cell: cell(9, 6) }],
-      battery: [30, 20],
+      battery: [CAP, 20],
       holder: [0, -1, -1, -1],
     });
     state = run(d4Game, state, 5, [NONE, PRESS_LEFT]);
     expect(state.players[1].cell).toBe(STATION_A);
     state = run(d4Game, state, 20);
     expect(state.holder[0]).toBe(0);
-    expect(state.battery[0]).toBe(30);
+    expect(state.battery[0]).toBe(CAP);
     expect(state.battery[1]).toBe(19); // 對手只付了移動的 1 電，沒有充到
   });
 
@@ -403,7 +397,10 @@ describe('D-4 電池｜純度與契約', () => {
     expect(d4Game.step(end, [PRESS_RIGHT, PRESS_LEFT])).toBe(end);
     const tie = d4Game.step(makeState({ tick: 3599, players: [{ score: 2 }, { score: 2 }] }), IDLE);
     expect(d4Game.winner(tie)).toBeNull();
-    const second = d4Game.step(makeState({ tick: 3599, players: [{ score: 1 }, { score: 2 }] }), IDLE);
+    const second = d4Game.step(
+      makeState({ tick: 3599, players: [{ score: 1 }, { score: 2 }] }),
+      IDLE,
+    );
     expect(d4Game.winner(second)).toBe(1);
   });
 });
@@ -468,7 +465,11 @@ function nearStation(overrides: Parameters<typeof makeState>[0] = {}): D4State {
 
 describe('D-4 電池｜actions', () => {
   it('五個不同的動作，全放開排最後', () => {
-    for (const state of [nearStation(), nearStation({ battery: [4, 30] }), d4Game.init(7, CONFIG)]) {
+    for (const state of [
+      nearStation(),
+      nearStation({ battery: [4, 30] }),
+      d4Game.init(7, CONFIG),
+    ]) {
       for (const side of [0, 1] as const) {
         const actions = d4Game.actions(state, side);
         expect(actions).toHaveLength(5);
@@ -510,7 +511,7 @@ describe('D-4 電池｜evaluate', () => {
     });
     const gains = gainsOf(state);
     expect(bestIndex(gains)).toBe(RIGHT_I);
-    expect((gains[RIGHT_I] as number) - (gains[NONE_I] as number)).toBeGreaterThan(90);
+    expect((gains[RIGHT_I] as number) - (gains[NONE_I] as number)).toBeGreaterThan(50); // 100 分減掉「下一枚金幣更遠」的距離
   });
 
   it('電量夠：往金幣走；電量只夠回站：往站走（同一個位置，只差電量）', () => {
@@ -519,9 +520,9 @@ describe('D-4 電池｜evaluate', () => {
   });
 
   it('金幣的來回算進去：走過去撿得到、但回不了站的金幣，不算「夠」', () => {
-    // 金幣離人 3 步、離最近的站 7 步：需要 3 + 7 + 餘裕 2 = 12 電。11 電不去、12 電去。
-    expect(bestIndex(gainsOf(nearStation({ battery: [11, 30] })))).toBe(LEFT_I);
-    expect(bestIndex(gainsOf(nearStation({ battery: [13, 30] })))).toBe(RIGHT_I);
+    // 金幣離人 3 步、離最近的站 7 步：需要 3 + 7 + 餘裕 4 = 14 電。13 電不去、15 電去。
+    expect(bestIndex(gainsOf(nearStation({ battery: [13, 30] })))).toBe(LEFT_I);
+    expect(bestIndex(gainsOf(nearStation({ battery: [15, 30] })))).toBe(RIGHT_I);
   });
 
   it('站上充電：電沒滿就留在站上（不動），電滿了才走向金幣', () => {
@@ -535,7 +536,7 @@ describe('D-4 電池｜evaluate', () => {
       });
     expect(bestIndex(gainsOf(onStation(10)))).toBe(NONE_I);
     expect(bestIndex(gainsOf(onStation(20)))).toBe(NONE_I);
-    expect(bestIndex(gainsOf(onStation(30)))).toBe(RIGHT_I);
+    expect(bestIndex(gainsOf(onStation(CAP)))).toBe(RIGHT_I);
   });
 
   it('被對手占著的站不算我能用的：改去別的站', () => {
@@ -599,7 +600,12 @@ describe('D-4 電池｜evaluate', () => {
   });
 
   it('gain：我的分數越高越好、對方越高越差；已結束的局，贏的一邊高很多、danger 是 0', () => {
-    const lead = nearStation({ players: [{ cell: cell(12, 6), score: 3 }, { cell: cell(31, 0), score: 1 }] });
+    const lead = nearStation({
+      players: [
+        { cell: cell(12, 6), score: 3 },
+        { cell: cell(31, 0), score: 1 },
+      ],
+    });
     expect(d4Game.evaluate(lead, 0).gain).toBeGreaterThan(d4Game.evaluate(lead, 1).gain);
     const over = makeState({ over: true, players: [{ score: 3 }, { score: 1 }] });
     expect(d4Game.evaluate(over, 0).gain).toBeGreaterThan(900_000);
@@ -611,8 +617,16 @@ describe('D-4 電池｜evaluate', () => {
     const rotate = (s: D4State): D4State => ({
       ...s,
       players: [
-        { ...s.players[1], cell: mirror(s.players[1].cell), pending: rotatePending(s.players[1].pending) },
-        { ...s.players[0], cell: mirror(s.players[0].cell), pending: rotatePending(s.players[0].pending) },
+        {
+          ...s.players[1],
+          cell: mirror(s.players[1].cell),
+          pending: rotatePending(s.players[1].pending),
+        },
+        {
+          ...s.players[0],
+          cell: mirror(s.players[0].cell),
+          pending: rotatePending(s.players[0].pending),
+        },
       ],
       battery: [s.battery[1], s.battery[0]],
       trickle: [s.trickle[1], s.trickle[0]],
@@ -626,7 +640,13 @@ describe('D-4 電池｜evaluate', () => {
     }
     const cases: D4State[] = [
       nearStation({ battery: [6, 30] }),
-      nearStation({ battery: [14, 9], players: [{ cell: cell(12, 6), pending: 1 }, { cell: cell(10, 7), pending: 2 }] }),
+      nearStation({
+        battery: [14, 9],
+        players: [
+          { cell: cell(12, 6), pending: 1 },
+          { cell: cell(10, 7), pending: 2 },
+        ],
+      }),
       nearStation({
         battery: [20, 5],
         players: [{ cell: STATION_A }, { cell: cell(13, 6) }],
@@ -634,12 +654,20 @@ describe('D-4 電池｜evaluate', () => {
       }),
       nearStation({
         battery: [3, 3],
-        players: [{ cell: cell(15, 12), score: 2 }, { cell: cell(16, 12), score: 1 }],
+        players: [
+          { cell: cell(15, 12), score: 2 },
+          { cell: cell(16, 12), score: 1 },
+        ],
       }),
     ];
     for (const state of cases) {
       const flipped = rotate(state);
-      expect(flipped.stations.map((c) => c)).toEqual([STATION_A2, STATION_A, STATION_B2, STATION_B]);
+      expect(flipped.stations.map((c) => c)).toEqual([
+        STATION_A2,
+        STATION_A,
+        STATION_B2,
+        STATION_B,
+      ]);
       for (const side of [0, 1] as const) {
         const a = d4Game.evaluate(state, side);
         const b = d4Game.evaluate(flipped, side === 0 ? 1 : 0);
@@ -733,7 +761,10 @@ describe('D-4 電池｜互動強度（DESIGN-AI-FUN 2.5）', () => {
       });
       const away = (): D4State => ({
         ...sample,
-        players: [sample.players[0], { ...sample.players[1], cell: START_CELLS[1], pending: -1 as const }],
+        players: [
+          sample.players[0],
+          { ...sample.players[1], cell: START_CELLS[1], pending: -1 as const },
+        ],
         holder: sample.holder.map(() => -1),
         battery: [sample.battery[0], 12],
       });
@@ -804,23 +835,32 @@ describe('D-4 電池｜盲測（decide、evaluate、actions）', () => {
    */
   function equalityLeaks(game: Game<D4State>, states: readonly D4State[]): string[] {
     const leaks: string[] = [];
+    // 兩種攪亂的量（rng 加的數對 4 與 7 取餘數都不同），避免剛好撞到同一個餘數而漏抓。
     for (const s of states) {
-      const t = scramble(s, 3);
-      for (const side of [0, 1] as const) {
-        if (JSON.stringify(game.actions(s, side)) !== JSON.stringify(game.actions(t, side))) {
-          leaks.push(`actions/tick ${s.tick}/side ${side}`);
-        }
-        const x = game.evaluate(s, side);
-        const y = game.evaluate(t, side);
-        if (x.gain !== y.gain || x.danger !== y.danger) {
-          leaks.push(`evaluate/tick ${s.tick}/side ${side}`);
-        }
-        for (const action of ACTIONS) {
-          const inputs: Inputs = side === 0 ? [action, NONE] : [NONE, action];
-          const p = game.evaluate(game.step(s, inputs), side);
-          const q = game.evaluate(game.step(t, inputs), side);
-          if (p.gain !== q.gain || p.danger !== q.danger) {
-            leaks.push(`evaluate-after-step/tick ${s.tick}/side ${side}`);
+      for (const n of [2, 5]) {
+        const t = scramble(s, n);
+        for (const side of [0, 1] as const) {
+          if (JSON.stringify(game.actions(s, side)) !== JSON.stringify(game.actions(t, side))) {
+            leaks.push(`actions/tick ${s.tick}/side ${side}`);
+          }
+          const x = game.evaluate(s, side);
+          const y = game.evaluate(t, side);
+          if (x.gain !== y.gain || x.danger !== y.danger) {
+            leaks.push(`evaluate/tick ${s.tick}/side ${side}`);
+          }
+          for (const action of ACTIONS) {
+            const inputs: Inputs = side === 0 ? [action, NONE] : [NONE, action];
+            const afterS = game.step(s, inputs);
+            const afterT = game.step(t, inputs);
+            // 撿了金幣的那一步，補的位置本來就由 rng 決定（規則的一部分，不是洩漏）：金幣不同的就不比。
+            if (JSON.stringify(afterS.coins) !== JSON.stringify(afterT.coins)) {
+              continue;
+            }
+            const p = game.evaluate(afterS, side);
+            const q = game.evaluate(afterT, side);
+            if (p.gain !== q.gain || p.danger !== q.danger) {
+              leaks.push(`evaluate-after-step/tick ${s.tick}/side ${side}`);
+            }
           }
         }
       }
@@ -839,7 +879,10 @@ describe('D-4 電池｜盲測（decide、evaluate、actions）', () => {
         }
         // 依 rng 轉動前四個動作的順序（全放開仍排最後）。
         const k = s.rng % 4;
-        return [...base.slice(0, 4).map((_a, i) => base[(i + k) % 4] as Buttons), base[4] as Buttons];
+        return [
+          ...base.slice(0, 4).map((_a, i) => base[(i + k) % 4] as Buttons),
+          base[4] as Buttons,
+        ];
       },
       evaluate(s: D4State, side: Side) {
         const base = d4Game.evaluate(s, side);
@@ -863,7 +906,7 @@ describe('D-4 電池｜盲測（decide、evaluate、actions）', () => {
     expect(states.length).toBeGreaterThan(40);
     expect(states.some((s) => s.holder.some((h) => h >= 0))).toBe(true);
     expect(states.some((s) => s.battery[0] <= 8 || s.battery[1] <= 8)).toBe(true);
-    expect(states.some((s) => s.battery[0] === 30 && s.battery[1] === 30)).toBe(true);
+    expect(states.some((s) => s.battery[0] === CAP && s.battery[1] === CAP)).toBe(true);
   });
 
   it('真的遊戲：只改 rng、stuck，四個性格 × depth 1／3／6 × 兩邊的 decide 完全不變', () => {
