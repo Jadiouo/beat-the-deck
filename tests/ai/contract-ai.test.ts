@@ -12,6 +12,7 @@ import {
   CONTRACT_CONFIG,
   aiThresholds,
   contractController,
+  notApplicableReason,
   measureA1,
   measureA2,
   measureA3,
@@ -164,5 +165,53 @@ describe('K11、K12 用預設性格', () => {
       const check = CHECKS.find((c) => c.code === code);
       expect(runCheck(check as NonNullable<typeof check>, symmetric)).toBe('pass');
     }
+  });
+});
+
+describe('reflexOnly：A4 明確「不適用」，不是通過', () => {
+  const reflexEntry = withMeta({ defaultPolicy: 'greedy', reflexOnly: true });
+  const a4 = AI_CHECKS.find((c) => c.code === 'A4') as NonNullable<
+    ReturnType<typeof AI_CHECKS.find>
+  >;
+
+  it('A4 對 reflexOnly 的牌不適用，runCheck 回 skip（絕對不是 pass）', () => {
+    expect(a4.applies(reflexEntry)).toBe(false);
+    expect(runCheck(a4, reflexEntry)).toBe('skip');
+  });
+
+  it('不適用要說明理由：理由提到 reflexOnly、反射與劇本玩家', () => {
+    const reason = notApplicableReason(a4, reflexEntry);
+    expect(reason).not.toBeNull();
+    expect(reason).toContain('reflexOnly');
+    expect(reason).toContain('反射');
+    expect(reason).toContain('劇本玩家');
+  });
+
+  it('一般的牌 A4 照跑，沒有理由', () => {
+    expect(a4.applies(greedyEntry)).toBe(true);
+    expect(notApplicableReason(a4, greedyEntry)).toBeNull();
+  });
+
+  it('只有 A4 被跳過：A1、A2、A3、A5 對 reflexOnly 的牌照樣適用', () => {
+    for (const code of ['A1', 'A2', 'A3', 'A5'] as const) {
+      const check = AI_CHECKS.find((c) => c.code === code) as NonNullable<typeof a4>;
+      expect(check.applies(reflexEntry), code).toBe(true);
+      expect(notApplicableReason(check, reflexEntry), code).toBeNull();
+    }
+  });
+
+  it('門檻不變：reflexOnly 不影響 A1 到 A4 的數字門檻', () => {
+    expect(aiThresholds({ ...counterMeta, reflexOnly: true })).toEqual({
+      a1: 0.75,
+      a2: 0.6,
+      a3: 0.45,
+      a4: 0.35,
+    });
+  });
+
+  it('沒有預設性格的牌，理由是「沒有預設性格」，不是 reflexOnly', () => {
+    const reason = notApplicableReason(a4, counterEntry);
+    expect(reason).not.toBeNull();
+    expect(reason).not.toContain('reflexOnly');
   });
 });

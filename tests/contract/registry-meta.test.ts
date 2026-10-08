@@ -1,3 +1,6 @@
+import { existsSync, readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+
 import { describe, expect, it } from 'vitest';
 
 import { CARD_IDS, registry } from '../../src/games/registry';
@@ -41,5 +44,33 @@ describe('色盤', () => {
       expect(color).toMatch(/^#[0-9a-f]{6}$/);
     }
     expect(new Set(PALETTE).size).toBe(16);
+  });
+});
+
+describe('reflexOnly（A4 不適用旗標）', () => {
+  /** 老闆核准的四張純反射牌。要加第五張，先去問老闆（docs/TEST_PLAN.md 5.1 訂正）。 */
+  const APPROVED = ['S-3', 'S-7', 'S-J', 'S-Q'];
+
+  it('只有核准的四張掛旗標（梅花與 D-2 有策略深度，不准用旗標蓋掉）', () => {
+    const flagged = registry
+      .filter((entry) => entry.meta.reflexOnly === true)
+      .map((entry) => entry.id)
+      .sort();
+    expect(flagged).toEqual(APPROVED.filter((id) => registry.some((e) => e.id === id)).sort());
+  });
+
+  it('掛旗標的牌，小規格要有「A4 不是證據」一節與劇本玩家的量測', () => {
+    for (const entry of registry) {
+      if (entry.meta.reflexOnly !== true) {
+        continue;
+      }
+      const file = resolve(__dirname, `../../docs/cards/${entry.id}.md`);
+      expect(existsSync(file), `${entry.id} 小規格存在`).toBe(true);
+      const text = readFileSync(file, 'utf8');
+      expect(text, `${entry.id} 有 reflexOnly 一節`).toMatch(/^## .*A4.*(不是證據|不適用)/m);
+      expect(text, `${entry.id} 提到劇本玩家`).toContain('劇本玩家');
+      expect(text, `${entry.id} 提到強玩家與弱玩家`).toMatch(/強玩家/);
+      expect(text, `${entry.id} 提到強玩家與弱玩家`).toMatch(/弱玩家/);
+    }
   });
 });
