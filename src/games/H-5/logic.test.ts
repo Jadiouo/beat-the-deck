@@ -247,7 +247,7 @@ describe('H-5 二十一點｜規則', () => {
     expect(third.up).toEqual(start.up);
     expect(third.pool).toEqual(start.pool); // 入帳前不扣
     // 兩邊都要牌，牌堆只有一張 3 與一張 9：兩人各拿一張，不會拿到同一張
-    expect([...(third.incoming as number[])].sort((a, b) => a - b)).toEqual([3, 9]);
+    expect([...(third.incoming as readonly number[])].sort((a, b) => a - b)).toEqual([3, 9]);
   });
 
   it('7. 只有要牌的人領牌；停牌的人 incoming 是 null；公開後 pending 還在（畫面要看）', () => {
@@ -726,7 +726,15 @@ describe('H-5 二十一點｜continuation 與 handValue（這手牌的期望）'
   });
 
   it('handValue 的 theta 參數：覆寫之後用那個門檻預測對手（對手本輪還沒停牌時才有差）', () => {
-    const s = makeState({ hole: [6, 7], up: [[5], [4, 4]], round: 1, log: [[HIT, HIT]] });
+    const s = makeState({
+      hole: [6, 7],
+      up: [
+        [5, 3],
+        [4, 4],
+      ],
+      round: 1,
+      log: [[HIT, HIT]],
+    });
     const v1 = handValue(s, 1, STOP, 12);
     const v2 = handValue(s, 1, STOP, 19);
     expect(v1).not.toBeCloseTo(v2, 6);
@@ -814,13 +822,13 @@ describe('H-5 二十一點｜不偷看（evaluate、actions、decide 都只讀�
 
   function variants(): { name: string; states: H5State[] }[] {
     const g: { name: string; states: H5State[] }[] = [];
-    const round0 = { ...shared, up: [[6], [5]] as readonly (readonly number[])[] };
+    const round0 = { ...shared, up: [[6], [5]] as H5State['up'] };
     const round1 = {
       ...shared,
       up: [
         [6, 3],
         [5, 4],
-      ] as readonly (readonly number[])[],
+      ] as H5State['up'],
       log: [[HIT, HIT]] as H5State['log'],
       round: 1,
     };
