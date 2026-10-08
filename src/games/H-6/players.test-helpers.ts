@@ -5,7 +5,7 @@ import { createRng } from '../../core/rng';
 import type { Buttons, Controller, Side } from '../../core/types';
 import { IDLE } from '../_hearts/logic';
 import { BANK, h6Game, legalCols, moveValue, safeProb, WAIT } from './logic';
-import type { H6State, Move } from './logic';
+import type { Act, H6State, Move } from './logic';
 
 /**
  * H-6 的劇本玩家與對局層量測（DESIGN-AI-FUN 5.2、10.4）。都是 Controller，只讀公開資訊（`known`、`claimed`、`history`、
@@ -260,4 +260,79 @@ export function playSeeds(
     signatures,
     bothWaitShare: rounds === 0 ? 0 : bothWait / rounds,
   };
+}
+
+export interface HistoryProbe {
+  /** AI 一共做了幾次決定（每回合開頭一次）。 */
+  readonly decisions: number;
+  /** 把玩家的歷史換成別的之後，AI 的最佳動作（`moveValue` 最大）真的變了幾次。 */
+  readonly flips: number;
+  /** 歷史讓「等」的價值有變動的決定點數（證明歷史有接進數字）。 */
+  readonly waitValueMoved: number;
+}
+
+/**
+ * 真實對局（玩家對等級 10）裡，AI 每回合開頭的決定點：把玩家（對手）過去的動作換成全領頭、全等、全存分、全跟隨，
+ * 看 AI 的最佳動作會不會變。AI 的決定在公開之後的局面是 `moveValue` 的最大值（`evaluateH6` 的 resolve），所以拿它當 AI 的選擇。
+ */
+export function counterfactualHistories(chooser: Chooser, seeds: readonly number[]): HistoryProbe {
+  let decisions = 0;
+  let flips = 0;
+  let waitValueMoved = 0;
+  for (const seed of seeds) {
+    const aiSide: Side = seed % 2 === 0 ? 1 : 0;
+    const me: Side = aiSide === 0 ? 1 : 0;
+    const controllers: Controller<H6State>[] = [];
+    controllers[me] = scripted(chooser, seed);
+    controllers[aiSide] = aiController(10)(seed + 1_000_003);
+    let state = h6Game.init(seed, { maxTicks: 3600, params: {} });
+    let tick = 0;
+    let probedRound = -1;
+    while (!h6Game.isOver(state)) {
+      if (
+        state.phase === 'choose' &&
+        state.round !== probedRound &&
+        state.pending[aiSide] === null
+      ) {
+        probedRound = state.round;
+        const ranked = (history: H6State['history']): [Move, number][] => {
+          const s: H6State = { ...state, history };
+          return legalMoves(s, aiSide)
+            .map((m) => [m, moveValue(s, aiSide, m)] as [Move, number])
+            .sort((a, b) => b[1] - a[1]);
+        };
+        const replaced = (act: Act): H6State['history'] =>
+          state.history.map((r) => {
+            const x: [Act, Act] = [r[0], r[1]];
+            x[me] = act;
+            return x;
+          });
+        const base = ranked(state.history);
+        const best = (base[0] as [Move, number])[1];
+        const baseWait = base.find((x) => x[0] === WAIT)?.[1] ?? 0;
+        decisions += 1;
+        let moved = false;
+        for (const act of ['lead', 'wait', 'bank', 'follow'] as const) {
+          const alt = ranked(replaced(act));
+          const altBest = (alt[0] as [Move, number])[1];
+          const baseMoveValue = alt.find((x) => x[0] === (base[0] as [Move, number])[0])?.[1] ?? 0;
+          if (altBest - baseMoveValue > 1e-9) {
+            flips += 1;
+            break;
+          }
+          if (Math.abs((alt.find((x) => x[0] === WAIT)?.[1] ?? 0) - baseWait) > 1e-9) {
+            moved = true;
+          }
+        }
+        if (moved && best >= baseWait) {
+          waitValueMoved += 1;
+        }
+      }
+      const i0 = copyButtons((controllers[0] as Controller<H6State>).decide(state, 0, tick));
+      const i1 = copyButtons((controllers[1] as Controller<H6State>).decide(state, 1, tick));
+      state = h6Game.step(state, [i0, i1]);
+      tick += 1;
+    }
+  }
+  return { decisions, flips, waitValueMoved };
 }
