@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 
 import { nextFrom } from '../../core/rng';
 import type { Buttons, Inputs } from '../../core/types';
+import { precise } from '../../ai/policies/precise';
 import { describeDelayedView } from '../_spades/delayed-view-suite.test-helpers';
+import { delayedViewWinRate } from '../_spades/delayed-view.test-helpers';
 import { describeSharedSpadesRules } from '../_spades/shared-rules.test-helpers';
 import { s2Game, makeState } from './logic';
 import type { SpadesState } from './logic';
@@ -323,4 +325,29 @@ describe('S-2 瞄準彈｜種子與亂數（擋「忘了把新的 RngState 寫�
     expect(JSON.parse(JSON.stringify(a))).toEqual(a);
     expect(JSON.stringify(a)).not.toMatch(/null|NaN|Infinity/);
   });
+});
+
+describe('S-2 瞄準彈｜真人觀察模型的勝率（對等級 10 的精準型，種子 0 到 23，平手算半場）', () => {
+  // 完整量測（200 場 × 七格）在 docs/cards/S-2.md「誠實的限制」；這裡只留回歸用的小樣本。
+  const seeds = Array.from({ length: 24 }, (_v, i) => i);
+  const rate = (delay: number, decideEvery: number, epsilon: number): number =>
+    delayedViewWinRate(s2Game, precise, { delay, decideEvery, epsilon }, seeds);
+
+  it('d = 6：強玩家 > 人類型玩家 > 弱玩家（順序看得到）', () => {
+    const strong = rate(6, 2, 0.02);
+    const human = rate(6, 6, 0.08);
+    const weak = rate(6, 1, 1);
+    expect(strong).toBeGreaterThan(human);
+    expect(human).toBeGreaterThan(weak);
+  }, 180_000);
+
+  it('人類型玩家：d = 6 在 20% 到 60%；延遲加到 12 之後明顯下降（延遲會被這個模型抓到）', () => {
+    // 判準「d = 6 到 12 都要在 20% 到 60%」目前只有 d = 6 達成（完整量測 d = 9、12 不到），
+    // 所以這裡只釘住確實成立的兩件事，不假裝整條判準成立。
+    const six = rate(6, 6, 0.08);
+    const twelve = rate(12, 6, 0.08);
+    expect(six).toBeGreaterThanOrEqual(0.2);
+    expect(six).toBeLessThanOrEqual(0.6);
+    expect(six - twelve).toBeGreaterThanOrEqual(0.1);
+  }, 180_000);
 });

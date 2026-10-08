@@ -95,8 +95,9 @@ export function describeDelayedView(suite: DelayedViewSuite): void {
     });
 
     it('延遲真的有作用：同一個玩家，延遲 0 的勝率明顯高於延遲 18（wrapPolicy 做不到這件事）', () => {
-      const seeds = Array.from({ length: 10 }, (_v, i) => i);
-      const short = { maxTicks: 600, params: {} };
+      // 整場（3600 tick）才有差：600 tick 的短場多半是 0 比 0 的平手，十場量不出差別（量測：整場 d=0 是 50%、d=18 是 0%）。
+      const seeds = Array.from({ length: 12 }, (_v, i) => i);
+      const short = config;
       const fast = delayedViewWinRate(
         game,
         precise,
@@ -112,6 +113,6 @@ export function describeDelayedView(suite: DelayedViewSuite): void {
         short,
       );
       expect(fast - slow).toBeGreaterThanOrEqual(0.1);
-    });
+    }, 120_000);
   });
 }
