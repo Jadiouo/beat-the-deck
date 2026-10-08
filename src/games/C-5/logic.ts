@@ -99,6 +99,8 @@ export interface C5Options {
   readonly bait?: boolean;
   /** 挑落點最多試幾次（測試用）。預設 `LANDING_TRIES`。 */
   readonly landingTries?: number;
+  /** 壓死的 danger 在餘裕幾步以上降到 0（測試與調參用）。預設 `CRUSH_MARGIN`。 */
+  readonly crushMargin?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -490,13 +492,14 @@ export function crushDanger(
   exitSteps: number,
   inZone: number,
   headInZone: boolean,
+  marginScale: number = CRUSH_MARGIN,
 ): number {
   if (inZone <= 0) {
     return 0;
   }
   const clearSteps = headInZone ? exitSteps + inZone - 1 : inZone;
   const margin = stepsLeft - clearSteps;
-  return Math.min(1, Math.max(0, 1 - margin / CRUSH_MARGIN));
+  return Math.min(1, Math.max(0, 1 - margin / marginScale));
 }
 
 const exitSeen = new Uint32Array(CELLS);
@@ -548,7 +551,7 @@ function exitDistance(
 }
 
 /** `side` 下一步之後被牆壓死的 danger（0 到 1）；沒有預告、或下一步之後沒有身體在落點裡是 0。 */
-function crushDangerOf(state: C5State, side: Side): number {
+function crushDangerOf(state: C5State, side: Side, marginScale: number): number {
   const landing = state.landing;
   const me = state.snakes[side];
   if (landing === null || !me.alive) {
@@ -564,16 +567,21 @@ function crushDangerOf(state: C5State, side: Side): number {
   const zone = new Set<number>(landing.bars.flat());
   const grows = state.bait !== null && state.bait.cell === next;
   const newBody = [next, ...(grows ? me.body : me.body.slice(0, -1))];
-  let inZone = 0;
-  for (const c of newBody) {
-    if (zone.has(c)) {
-      inZone += 1;
+  let firstInZone = -1;
+  for (let i = 0; i < newBody.length; i += 1) {
+    if (zone.has(newBody[i] as number)) {
+      firstInZone = i;
+      break;
     }
   }
-  if (inZone === 0) {
+  if (firstInZone < 0) {
     return 0;
   }
   const headInZone = zone.has(next);
+  // 身體是一格接一格走過同一條路：落點整個清空要等到尾巴也走過去。
+  // 頭在裡面：頭出去之後，整條身體（含吃誘餌長出來的）都還要走過這一段，所以算全長；
+  // 頭在外面：從最靠近頭的那一格在落點裡的身體算到尾巴。
+  const inZone = headInZone ? newBody.length : newBody.length - firstInZone;
   let exitSteps = 0;
   if (headInZone) {
     const blocked = new Set<number>(state.bars.flat());
@@ -587,7 +595,7 @@ function crushDangerOf(state: C5State, side: Side): number {
     exitSteps = exitDistance(next, zone, blocked);
   }
   const stepsLeft = Math.max(0, Math.ceil((landing.at - state.tick) / MOVE_EVERY) - 1);
-  return crushDanger(stepsLeft, exitSteps, inZone, headInZone);
+  return crushDanger(stepsLeft, exitSteps, inZone, headInZone, marginScale);
 }
 
 /**
@@ -623,7 +631,7 @@ function evaluateWith(
   if (!options.crush || state.over || base.danger >= 1) {
     return base;
   }
-  return { gain: base.gain, danger: Math.max(base.danger, crushDangerOf(state, side)) };
+  return { gain: base.gain, danger: Math.max(base.danger, crushDangerOf(state, side, options.crushMargin)) };
 }
 
 function actionsWith(state: C5State, side: Side): readonly Buttons[] {
@@ -641,6 +649,7 @@ export function createC5Game(options: C5Options = {}): Game<C5State> {
     crush: options.crush ?? true,
     bait: options.bait ?? true,
     landingTries: options.landingTries ?? LANDING_TRIES,
+    crushMargin: options.crushMargin ?? CRUSH_MARGIN,
   };
   return {
     id: 'C-5',
