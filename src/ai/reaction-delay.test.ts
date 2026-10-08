@@ -11,97 +11,102 @@ import type { Policy } from './types';
 /**
  * 反應延遲的語意（修正「延遲讓 AI 看到自己的舊位置」）。
  *
- * 人類的 200 毫秒反應：看到「現在」的畫面，手慢 200 毫秒才動。
- * 所以延遲的是「決定生效的時間」，不是「性格看到的世界」：
- * 性格永遠拿到現在的 state，它的決定過 reactionTicks 個 tick 才輸出。
+ * 人類的 200 毫秒反應：看到「現在」的畫面、對「世界的變化」慢 200 毫秒才反應；
+ * 但自己在哪裡、自己剛剛按了什麼，人是一直知道的。
+ * 所以性格看到的 state ＝ reactionTicks 個 tick 以前的世界，再把「自己這段時間按過的鍵」
+ * 照著重播進去（對手當作沒動）：自己是現在的，世界（對手、新出現的東西）是舊的。
  */
 
 const CONFIG = { maxTicks: 400, params: { length: 400 } };
 const NEUTRAL: Buttons = { up: false, down: false, left: false, right: false, a: false, b: false };
+const PRESS_A: Buttons = { ...NEUTRAL, a: true };
 
+/** 沿著 counter-game 走：第 t 個 state 就是 tick = t（兩邊都放開）。 */
 function states(count: number): CounterState[] {
   const out: CounterState[] = [];
   let state = counterGame.init(1, CONFIG);
   for (let t = 0; t < count; t += 1) {
     out.push(state);
-    const idle = counterGame.actions(state, 0)[0] as Buttons;
-    state = counterGame.step(state, [idle, idle]);
+    state = counterGame.step(state, [NEUTRAL, NEUTRAL]);
   }
   return out;
 }
 
-/** 記錄「收到什麼 state」；回傳的動作由「被問時的 tick」決定，方便對照何時生效。 */
-function tickPolicy(): { policy: Policy; seen: number[]; ticks: number[] } {
-  const seen: number[] = [];
-  const ticks: number[] = [];
+/** 把性格看到的東西記下來。永遠按 A（自己的分數就是自己按過幾個 A）。 */
+function spyPolicy(press: Buttons): { policy: Policy; seen: CounterState[] } {
+  const seen: CounterState[] = [];
   const policy: Policy = {
-    name: 'by-tick',
-    decide<S>(game: Game<S>, state: S, side: 0 | 1, tick: number): Buttons {
-      seen.push((state as unknown as CounterState).tick);
-      ticks.push(tick);
-      const actions = game.actions(state, side);
-      return actions[Math.floor(tick / 7) % actions.length] as Buttons;
+    name: 'spy',
+    decide<S>(_game: Game<S>, state: S): Buttons {
+      seen.push(state as unknown as CounterState);
+      return press;
     },
   };
-  return { policy, seen, ticks };
+  return { policy, seen };
 }
 
-describe('wrapPolicy 的反應延遲：延遲決定生效的時間，不延遲觀察', () => {
-  it('性格看到的 state 永遠是「現在」的（自己的位置不會是舊的）', () => {
-    const { policy, seen } = tickPolicy();
-    const controller = wrapPolicy(
-      counterGame,
-      policy,
-      { reactionTicks: 18, decideEvery: 1, depth: 1, epsilon: 0 },
-      7,
-    );
-    states(60).forEach((state, t) => controller.decide(state, 0, t));
-    expect(seen).toHaveLength(60);
-    for (let t = 0; t < 60; t += 1) {
-      expect(seen[t]).toBe(t);
-    }
-  });
-
-  it('第 t 個 tick 輸出的是第 t − reactionTicks 個 tick 做的決定；之前是全放開', () => {
-    const { policy } = tickPolicy();
+describe('wrapPolicy 的反應延遲：自己是現在的、世界是舊的', () => {
+  it('性格看到的自己（分數＝自己按過的 A）是現在的，對手（一直按 A）是 reactionTicks 以前的', () => {
     const reaction = 18;
-    const delayed = wrapPolicy(
+    const { policy, seen } = spyPolicy(PRESS_A);
+    const controller = wrapPolicy(
       counterGame,
       policy,
       { reactionTicks: reaction, decideEvery: 1, depth: 1, epsilon: 0 },
       7,
     );
-    const immediate = wrapPolicy(
-      counterGame,
-      tickPolicy().policy,
-      { reactionTicks: 0, decideEvery: 1, depth: 1, epsilon: 0 },
-      7,
-    );
-    const all = states(80);
-    const outDelayed = all.map((state, t) => delayed.decide(state, 0, t));
-    const outNow = all.map((state, t) => immediate.decide(state, 0, t));
-    for (let t = 0; t < 80; t += 1) {
-      expect(outDelayed[t]).toEqual(t < reaction ? NEUTRAL : outNow[t - reaction]);
+    let state = counterGame.init(1, CONFIG);
+    for (let t = 0; t < 60; t += 1) {
+      const mine = controller.decide(state, 0, t);
+      state = counterGame.step(state, [mine, PRESS_A]);
     }
-    // 沒有被平凡地比成同一串：兩串真的不一樣。
-    expect(outNow.some((b, t) => JSON.stringify(b) !== JSON.stringify(outDelayed[t]))).toBe(true);
+    expect(seen).toHaveLength(60);
+    for (let t = 0; t < 60; t += 1) {
+      const view = seen[t] as CounterState;
+      // 自己：t 個 tick 都按了 A（第 0 個 tick 之前什麼都沒按，所以是 t 次）。現在的位置，不是 t−18 的。
+      expect(view.scores[0]).toBe(t);
+      // 世界：對手那一邊停在 t−18（前 18 個 tick 還沒看到對手動過）。
+      expect(view.scores[1]).toBe(Math.max(0, t - reaction));
+    }
   });
 
-  it('等級 1 的節奏（reactionTicks 12、decideEvery 12）：在第 0、12、24… 個 tick 以「當下的 state」決定', () => {
-    const { policy, seen, ticks } = tickPolicy();
+  it('性格每次被問，拿到的都是「現在」這個 tick 的 state 往前補到現在', () => {
+    const { policy, seen } = spyPolicy(PRESS_A);
     const controller = wrapPolicy(
       counterGame,
       policy,
-      { reactionTicks: 12, decideEvery: 12, depth: 1, epsilon: 0 },
-      3,
+      { reactionTicks: 12, decideEvery: 1, depth: 1, epsilon: 0 },
+      7,
     );
-    states(48).forEach((state, t) => controller.decide(state, 0, t));
-    expect(ticks).toEqual([0, 12, 24, 36]);
-    expect(seen).toEqual([0, 12, 24, 36]);
+    let state = counterGame.init(1, CONFIG);
+    for (let t = 0; t < 40; t += 1) {
+      state = counterGame.step(state, [controller.decide(state, 0, t), PRESS_A]);
+    }
+    seen.forEach((view, t) => {
+      expect(view.tick).toBe(t);
+    });
   });
 
-  it('記憶體：只留還沒生效的決定，不會留整場', () => {
-    const { policy } = tickPolicy();
+  it('決定馬上生效（不是排隊等 reactionTicks）：輸出與 reactionTicks = 0 的一樣', () => {
+    const byTick: Policy = {
+      name: 'by-tick',
+      decide<S>(game: Game<S>, state: S, side: 0 | 1, tick: number): Buttons {
+        const actions = game.actions(state, side);
+        return actions[Math.floor(tick / 7) % actions.length] as Buttons;
+      },
+    };
+    const make = (reactionTicks: number) =>
+      wrapPolicy(counterGame, byTick, { reactionTicks, decideEvery: 1, depth: 1, epsilon: 0 }, 7);
+    const delayed = make(18);
+    const immediate = make(0);
+    const all = states(80);
+    expect(all.map((state, t) => delayed.decide(state, 0, t))).toEqual(
+      all.map((state, t) => immediate.decide(state, 0, t)),
+    );
+  });
+
+  it('記憶體：只留 reactionTicks + 1 個 state，不會留整場', () => {
+    const { policy } = spyPolicy(PRESS_A);
     const controller = wrapPolicy(
       counterGame,
       policy,
@@ -112,6 +117,7 @@ describe('wrapPolicy 的反應延遲：延遲決定生效的時間，不延遲�
       controller.decide(state, 0, t);
       expect(controller.retainedStates()).toBeLessThanOrEqual(19);
     }
+    expect(controller.retainedStates()).toBe(19);
   });
 });
 
