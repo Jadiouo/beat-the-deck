@@ -46,6 +46,14 @@ export interface CardMeta {
    */
   readonly reflexOnly?: boolean;
   /**
+   * 零和均衡牌：這是零和賽局，而低等級與人類模型打的就是均衡策略。均衡的定義是沒有對手贏得了它，
+   * 所以 A2（等級 9 對等級 2）與 A4（等級 10 對人類模型）在數學上被鎖在 50% 附近，不是 AI 太弱。
+   * 契約測試對它跳過 A2 與 A4（測試輸出印出「不適用」與理由，絕不回報通過）；A1、A3、A5 照跑，
+   * 門檻不動。證據改看小規格的劇本玩家表與反讀表（GOAL 第 3 條）。
+   * 這和 `reflexOnly` 是不同的理由，不共用旗標。只有老闆核准的牌可以掛（H-J）。
+   */
+  readonly equilibriumCapped?: boolean;
+  /**
    * 這張牌在遊戲裡一局跑幾個 tick；沒寫就是共同設定的 3600（SPEC 第 9 節，60 秒）。
    * 只有外殼讀它（`matchConfigFor`）；契約測試仍用 3600 跑每一張牌，所以牌自己的 `logic.ts`
    * 要用 `min(config.maxTicks, defaultMaxTicks)`（JK-R 的做法），兩邊都成立。

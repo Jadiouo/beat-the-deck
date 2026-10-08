@@ -14,4 +14,5 @@ export const hJMeta: CardMeta = {
   baseLevel: 4,
   symmetric: true,
   luckHeavy: true,
+  equilibriumCapped: true,
 };

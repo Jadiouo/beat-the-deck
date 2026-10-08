@@ -93,11 +93,6 @@ export interface HJState {
   readonly rng: RngState;
   /** 對手模型開關（消融實驗用 `config.params.model = 0` 關掉）。 */
   readonly model: boolean;
-  /**
-   * 淺層（深度 1、2）的反射規則：false ＝ 均衡抽籤（預設，小規格）；true ＝ 老實牌（只用 K 下注／跟，其餘過牌／棄）。
-   * `config.params.reflex = 1` 打開。量測用，見小規格。
-   */
-  readonly reflex: boolean;
 }
 
 const ALL_CARDS: readonly Card[] = [0, 1, 2];
@@ -156,11 +151,6 @@ const EQ_TABLE: Readonly<Record<Spot, readonly [number, number, number]>> = {
 /** 均衡裡，這張牌在這個局面（`prefix` 是之前的動作）積極（a）的機率。 */
 export function eqAggressiveProb(card: Card, prefix: readonly Act[]): number {
   return EQ_TABLE[spotOf(prefix)][card];
-}
-
-/** 老實牌的反射：只用 K 積極（下注／跟），J、Q 一律消極。 */
-export function reflexAction(card: Card): Act {
-  return card === 2 ? 1 : 0;
 }
 
 /** 用抽籤（0 到 9999）決定均衡動作：抽籤小於機率就是 a。 */
@@ -405,7 +395,6 @@ export function makeState(overrides: Partial<HJState> = {}): HJState {
     eqDraw: [5000, 5000],
     rng: 12345,
     model: true,
-    reflex: false,
     ...overrides,
   };
 }
@@ -563,11 +552,6 @@ function actionsHJ(state: HJState, side: Side): readonly Buttons[] {
   return ONLY_IDLE;
 }
 
-/** 淺層反射要的動作：預設是均衡抽籤，`reflex` 打開時是老實牌。 */
-function habitTarget(state: HJState, card: Card, prefix: readonly Act[], draw: number): Act {
-  return state.reflex ? reflexAction(card) : eqAction(card, prefix, draw);
-}
-
 /**
  * 均衡抽籤的小加分：我剛做的那個動作，和「用我自己的抽籤查均衡表」得到的動作一樣，就加 HABIT。
  * 只讀我自己的牌與我自己的抽籤。
@@ -579,16 +563,14 @@ function habitBonus(state: HJState, side: Side): number {
     if (state.turn !== side || state.pending === null) {
       return 0;
     }
-    return state.pending === habitTarget(state, mine, state.acts, draw) ? HABIT : 0;
+    return state.pending === eqAction(mine, state.acts, draw) ? HABIT : 0;
   }
   if ((state.phase === 'prep' || state.phase === 'showdown') && state.acts.length > 0) {
     const index = state.acts.length - 1;
     if (actorAt(state.first, index) !== side) {
       return 0;
     }
-    return state.acts[index] === habitTarget(state, mine, state.acts.slice(0, index), draw)
-      ? HABIT
-      : 0;
+    return state.acts[index] === eqAction(mine, state.acts.slice(0, index), draw) ? HABIT : 0;
   }
   return 0;
 }
@@ -618,7 +600,6 @@ export const hJGame: Game<HJState> = {
       eqDraw: dealt.eqDraw,
       rng: dealt.rng,
       model: config.params['model'] !== 0,
-      reflex: config.params['reflex'] === 1,
     });
   },
 

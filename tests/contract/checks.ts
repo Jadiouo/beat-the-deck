@@ -646,10 +646,21 @@ export function runsAiChecks(entry: RegistryEntry): boolean {
   return entry.meta.defaultPolicy !== null && entry.meta.suit !== 'JK';
 }
 
-/** A4 的前提：跑 A1–A5，而且不是 `meta.reflexOnly`（純反射牌，A4 不是證據；見 CardMeta）。 */
+/** A4 的前提：跑 A1–A5，而且不是 `meta.reflexOnly`（純反射牌）或 `meta.equilibriumCapped`（零和均衡牌）；見 CardMeta。 */
 export function runsA4(entry: RegistryEntry): boolean {
-  return runsAiChecks(entry) && entry.meta.reflexOnly !== true;
+  return (
+    runsAiChecks(entry) && entry.meta.reflexOnly !== true && entry.meta.equilibriumCapped !== true
+  );
 }
+
+/** A2 的前提：跑 A1–A5，而且不是 `meta.equilibriumCapped`（零和均衡牌，A2 被鎖在 50% 附近；見 CardMeta）。 */
+export function runsA2(entry: RegistryEntry): boolean {
+  return runsAiChecks(entry) && entry.meta.equilibriumCapped !== true;
+}
+
+const EQUILIBRIUM_REASON =
+  '這張牌標了 equilibriumCapped（零和均衡）：低等級與人類模型打的是均衡策略，均衡的定義就是沒有對手贏得了它，' +
+  '所以 A2、A4 在數學上被鎖在 50% 附近，不是 AI 太弱；改看小規格裡的劇本玩家表與反讀表';
 
 const A4_REFLEX_REASON =
   '這張牌標了 reflexOnly（純反射牌）：沒有策略深度，A4 只能靠超人類反應達成，不是「人贏得了」的證據；' +
@@ -1166,12 +1177,12 @@ function aiDefs(): CheckDef[] {
   return defs.map(({ code, title, fn }) => ({
     code,
     title,
-    applies: code === 'A4' ? runsA4 : runsAiChecks,
+    applies: code === 'A4' ? runsA4 : code === 'A2' ? runsA2 : runsAiChecks,
     whyNotApplicable(entry: RegistryEntry): string {
       if (!runsAiChecks(entry)) {
         return '沒有預設性格或是鬼牌，不跑 A1–A5';
       }
-      return A4_REFLEX_REASON;
+      return entry.meta.equilibriumCapped === true ? EQUILIBRIUM_REASON : A4_REFLEX_REASON;
     },
     run(entry: RegistryEntry, seeds: readonly number[]): void {
       void seeds;
