@@ -6,8 +6,9 @@ import { greedy } from '../../ai/policies/greedy';
 import { pathfinder } from '../../ai/policies/pathfinder';
 import { precise } from '../../ai/policies/precise';
 import type { Policy } from '../../ai/types';
+import { playMatch } from '../../core/match';
 import { rngStateFor } from '../../core/rng';
-import type { Buttons, Game, Inputs, Side } from '../../core/types';
+import type { Buttons, Controller, Game, Inputs, Side } from '../../core/types';
 import { bfsDistances, CELLS, cell, cellX, START_CELLS } from '../_diamonds/logic';
 import {
   BEFORE_MOVE,
@@ -24,6 +25,7 @@ import {
 } from '../_diamonds/shared-rules.test-helpers';
 import {
   COOL,
+  createD5Game,
   d5Game,
   DEPOT_COUNT,
   DEPOT_GAP,
@@ -33,6 +35,7 @@ import {
   worthOf,
 } from './logic';
 import type { D5State, Parcel } from './logic';
+import { nearest, reader, trapper, uniform } from './players.test-helpers';
 
 /**
  * D-5 送貨的規則測試。全部用 `makeState` 直接構造局面，不靠跑很多 tick 碰運氣。
@@ -1084,4 +1087,141 @@ describe('D-5 送貨｜盲測（decide、evaluate、actions）', () => {
   it('注入「actions 的順序依 rng 轉動」：相等性抓得到', () => {
     expect(equalityLeaks(leaky('actions-order'), states).length).toBeGreaterThan(0);
   }, 60_000);
+});
+
+// ---------------------------------------------------------------------------
+// 四列劇本玩家與消融（DESIGN-AI-FUN 10.4）。數字寫在 docs/cards/D-5.md。
+// ---------------------------------------------------------------------------
+
+describe('D-5 送貨｜劇本玩家四列與消融（技術有報酬、休息規則有生效）', () => {
+  /** 劇本玩家對 AI（預設性格 policy 的等級 10），偶數種子坐 0 號邊；回傳勝率（平手半場）。 */
+  function winRate(
+    game: Game<D5State>,
+    make: (seed: number, side: Side) => Controller<D5State>,
+    policy: Policy,
+    seeds: number,
+  ): number {
+    let points = 0;
+    for (let seed = 0; seed < seeds; seed += 1) {
+      const side: Side = seed % 2 === 0 ? 0 : 1;
+      const me = make(seed, side);
+      const ai = levelController(game, policy, 10, seed + 1_000_003);
+      const result =
+        side === 0
+          ? playMatch(game, seed, CONFIG, me, ai)
+          : playMatch(game, seed, CONFIG, ai, me);
+      points += result.winner === null ? 0.5 : result.winner === side ? 1 : 0;
+    }
+    return points / seeds;
+  }
+
+  const SEEDS = 100;
+
+  it('四列（對貪心型等級 10，各 100 場）：看顏色與設陷阱的玩家明顯贏過「只撿最近」，均勻亂按輸光', () => {
+    const habit = winRate(d5Game, () => nearest(), greedy, SEEDS);
+    const reads = winRate(d5Game, () => reader(), greedy, SEEDS);
+    const traps = winRate(d5Game, () => trapper(), greedy, SEEDS);
+    const random = winRate(d5Game, (seed, side) => uniform(seed, side), greedy, SEEDS);
+    expect(reads).toBeGreaterThan(habit + 0.25);
+    expect(traps).toBeGreaterThan(habit + 0.25);
+    expect(random).toBeLessThan(habit);
+    expect(random).toBeLessThan(0.1);
+  }, 600_000);
+
+  it('消融：倉庫不休息（COOL = 0）時，「看顏色」比「只撿最近」多贏的部分縮到不到一半（休息規則才是讀對手的理由）', () => {
+    const gap = (game: Game<D5State>): number =>
+      winRate(game, () => reader(), greedy, SEEDS) - winRate(game, () => nearest(), greedy, SEEDS);
+    const withCool = gap(d5Game);
+    const withoutCool = gap(createD5Game(0));
+    expect(withCool).toBeGreaterThan(0.25);
+    expect(withoutCool).toBeLessThan(withCool / 2);
+  }, 600_000);
+});
+
+// ---------------------------------------------------------------------------
+// 互動強度（2.5）與四性格指紋（2.3）
+// ---------------------------------------------------------------------------
+
+describe('D-5 送貨｜互動強度（DESIGN-AI-FUN 2.5）', () => {
+  it('把 AI 換到「背著人最想撿的那個顏色、站在同色倉庫上」vs「空手在自己的起點」，人這一邊 1 步 evaluate 的最好動作改變的局面至少 20%', () => {
+    const samples: D5State[] = [];
+    for (let seed = 0; seed < 8 && samples.length < 200; seed += 1) {
+      const a = levelController(d5Game, greedy, 10, seed);
+      const b = levelController(d5Game, greedy, 10, seed + 1_000_003);
+      let state = d5Game.init(seed, CONFIG);
+      for (let tick = 0; !d5Game.isOver(state); tick += 1) {
+        // 只取人空手的局面（變因只有 AI 的位置與背的貨）。
+        if (tick % 36 === 17 && samples.length < 200 && state.carry[0] === null) {
+          samples.push(state);
+        }
+        state = d5Game.step(state, [a.decide(state, 0, tick), b.decide(state, 1, tick)]);
+      }
+    }
+    let changed = 0;
+    for (const sample of samples) {
+      const field = bfsDistances(sample.walls, sample.players[0].cell);
+      // 人最想撿的那件：最近的包裹。
+      let target = sample.parcels[0] as Parcel;
+      for (const p of sample.parcels) {
+        if ((field[p.cell] as number) < (field[target.cell] as number)) {
+          target = p;
+        }
+      }
+      const carrying: D5State = {
+        ...sample,
+        players: [
+          sample.players[0],
+          { ...sample.players[1], cell: sample.depots[target.colour] as number },
+        ],
+        carry: [null, { colour: target.colour, worth: 3 }],
+      };
+      const empty: D5State = {
+        ...sample,
+        players: [sample.players[0], { ...sample.players[1], cell: START_CELLS[1] }],
+        carry: [null, null],
+      };
+      if (bestIndex(gainsOf(carrying)) !== bestIndex(gainsOf(empty))) {
+        changed += 1;
+      }
+    }
+    expect(samples.length).toBeGreaterThanOrEqual(150);
+    expect(changed / samples.length).toBeGreaterThanOrEqual(0.2);
+  }, 60_000);
+});
+
+describe('D-5 送貨｜四性格指紋', () => {
+  /** 各性格等級 10 對貪心型等級 10，40 場：每人每場平均 waited，與平均每件貨的價值（分數 / 送達件數）。 */
+  function fingerprint(policy: Policy): { waited: number; worth: number } {
+    let waited = 0;
+    let score = 0;
+    let delivered = 0;
+    for (let seed = 0; seed < 40; seed += 1) {
+      const side: Side = seed % 2 === 0 ? 0 : 1;
+      const me = levelController(d5Game, policy, 10, seed);
+      const ai = levelController(d5Game, greedy, 10, seed + 1_000_003);
+      let state = d5Game.init(seed, CONFIG);
+      for (let tick = 0; !d5Game.isOver(state); tick += 1) {
+        const a = me.decide(state, side, tick);
+        const b = ai.decide(state, side === 0 ? 1 : 0, tick);
+        state = d5Game.step(state, side === 0 ? [a, b] : [b, a]);
+      }
+      waited += state.waited[side] as number;
+      score += state.players[side].score;
+      delivered += state.delivered[side] as number;
+    }
+    return { waited: waited / 40, worth: score / Math.max(1, delivered) };
+  }
+
+  it('waited（背著貨在休息中的同色倉庫上白等）貪心／精準 ≥ 1.5', () => {
+    const g = fingerprint(greedy);
+    const p = fingerprint(precise);
+    const b = fingerprint(gambler);
+    expect(g.waited / Math.max(p.waited, 1)).toBeGreaterThanOrEqual(1.5);
+    // 賭徒型的 waited 也比貪心型高（實測 269 對 152），但這不是小規格的預測（預測次高），只當保險。
+    expect(b.waited).toBeGreaterThan(p.waited);
+  }, 600_000);
+
+  // 小規格預測「平均每件價值 賭徒／貪心 ≥ 1.3」實測不成立（2.89／2.92 = 0.99，三個性格都是 2.9 到 3.0）：
+  // 賭徒型被 danger（要白等的程度）吸引，而 danger 與貨的價值無關。沒有放寬門檻，記在 docs/cards/D-5.md。
+  it.todo('平均每件價值 賭徒／貪心 ≥ 1.3（未達成：量到 0.99，見 docs/cards/D-5.md）');
 });
