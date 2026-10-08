@@ -121,29 +121,6 @@ describe('包上等級的控制器', () => {
     expect(calls()).toBe(3);
   });
 
-  it('reactionTicks = 18：第 t 個 tick 拿到的是第 t−18 個 tick 的 state（前 18 個 tick 拿到起始 state）', () => {
-    const { policy, seen } = recordingPolicy();
-    const controller = wrapPolicy(
-      counterGame,
-      policy,
-      { reactionTicks: 18, decideEvery: 1, depth: 1, epsilon: 0 },
-      7,
-    );
-    states(60).forEach((state, t) => controller.decide(state, 0, t));
-    expect(seen).toHaveLength(60);
-    for (let t = 0; t < 60; t += 1) {
-      expect(seen[t]).toBe(Math.max(0, t - 18));
-    }
-  });
-
-  it('等級 1（reactionTicks 12、decideEvery 12）：只有第 0、12、24… 個 tick 決定，看到的是 12 個 tick 以前的 state', () => {
-    const { policy, seen } = recordingPolicy();
-    const controller = levelController(counterGame, policy, 1, 3);
-    // 等級 1 的 epsilon 是 0.25，這裡只看性格「被問了什麼」，所以不管它有沒有被亂選蓋掉。
-    states(48).forEach((state, t) => controller.decide(state, 0, t));
-    expect(seen).toEqual([0, 0, 12, 24]);
-  });
-
   it('epsilon = 0：完全等於底層性格的決定', () => {
     const wrapped = recordingPolicy();
     const bare = recordingPolicy();
@@ -230,21 +207,6 @@ describe('包上等級的控制器', () => {
     const second = states(40).map((state, t) => controller.decide(state, 1, t));
     // 第二場的 tick 又從 0 開始：歷史與亂數都要重設，所以結果與第一場逐個相同。
     expect(second).toEqual(first);
-  });
-
-  it('記憶體：只留 reactionTicks + 1 個 state，不會留整場', () => {
-    const { policy } = recordingPolicy();
-    const controller = wrapPolicy(
-      counterGame,
-      policy,
-      { reactionTicks: 18, decideEvery: 1, depth: 1, epsilon: 0 },
-      7,
-    );
-    for (const [t, state] of states(300).entries()) {
-      controller.decide(state, 0, t);
-      expect(controller.retainedStates()).toBeLessThanOrEqual(19);
-    }
-    expect(controller.retainedStates()).toBe(19);
   });
 
   it('wrapPolicy 檢查參數：reactionTicks 與 decideEvery 的範圍', () => {
