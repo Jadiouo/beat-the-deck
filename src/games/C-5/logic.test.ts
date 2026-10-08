@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
+import { levelController } from '../../ai/level';
+import { pathfinder } from '../../ai/policies/pathfinder';
 import { rngStateFor } from '../../core/rng';
 import type { Buttons, Inputs } from '../../core/types';
 import {
@@ -10,7 +12,7 @@ import {
 } from '../../../tests/contract/fake-context';
 import { deepFreeze } from '../../../tests/contract/freeze';
 import { COLOR } from '../../shell/palette';
-import { CELLS, cell, cellX, cellY, DOWN, HEIGHT, RIGHT, WIDTH } from '../_clubs/logic';
+import { CELLS, cell, cellX, cellY, DOWN, HEIGHT, LEFT, RIGHT, WIDTH } from '../_clubs/logic';
 import {
   describeSharedSnakeAi,
   describeSharedSnakeRules,
@@ -208,10 +210,7 @@ describe('C-5 會動的牆｜牆是硬的', () => {
     const state = makeState({
       tick: 5,
       bars: FIXED_BARS,
-      snakes: [
-        { body: body([1, 9], [1, 8], [1, 7]), dir: DOWN, score: 0 },
-        { score: 5 },
-      ],
+      snakes: [{ body: body([1, 9], [1, 8], [1, 7]), dir: DOWN, score: 0 }, { score: 5 }],
     });
     const next = c5Game.step(state, IDLE);
     expect(next.snakes[0].alive).toBe(false);
@@ -567,30 +566,29 @@ describe('C-5 會動的牆｜落下', () => {
     expect(tie.winner).toBeNull();
   });
 
-  it('3. 蛇可以在牆落下之前走進落點、吃誘餌、走出來', () => {
-    // 蛇頭在 (11,5) 往右，誘餌在 (12,5)；之後往下轉出去。tick 53→54 吃到誘餌；之後一路走出落點，落下時不在裡面。
+  it('3. 蛇可以在牆落下之前走進落點、吃誘餌、走出來：牆落下時身體已經全在落點外面', () => {
+    // 落點 (10..15, 5)，落下在 tick 90。蛇頭 (11,5) 往右，誘餌在 (12,5)：tick 54 吃到，之後一路往下走出落點。
     let state = makeState({
       tick: 53,
       bars: BARS,
       snakes: [{ body: body([11, 5], [10, 5], [9, 5]), dir: RIGHT }, {}],
-      landing: LANDING,
-      bait: { cell: cell(12, 5), until: 300 },
+      landing: { ...LANDING, at: 90 },
+      bait: { cell: cell(12, 5), until: 90 },
     });
     state = c5Game.step(state, IDLE);
     expect(state.snakes[0].score).toBe(2);
-    // 往下走：12 格以內離開落點（y = 5 那一排），然後走到落下為止。
-    let t = state.tick;
     state = c5Game.step(state, [PRESS_DOWN, NONE]);
-    t += 1;
-    while (state.tick < 299 && !state.over) {
+    while (state.tick < 89) {
       state = c5Game.step(state, IDLE);
-      t += 1;
     }
-    expect(t).toBe(299);
     expect(state.snakes[0].alive).toBe(true);
+    expect(state.over).toBe(false);
     const after = c5Game.step(state, IDLE);
-    expect(after.tick).toBe(300);
+    expect(after.tick).toBe(90);
     expect(after.snakes[0].alive).toBe(true);
+    expect(after.over).toBe(false);
+    expect(after.crushed).toEqual([0, 0]);
+    expect(after.bars[0]).toEqual(ZONE_A);
   });
 
   it('落點上的普通食物被壓掉，之後補到 2 個，補的位置不在牆上也不在蛇身上', () => {
@@ -723,13 +721,15 @@ describe('C-5 會動的牆｜danger 的時間算術', () => {
 describe('C-5 會動的牆｜evaluate 與 actions', () => {
   function sampleStates(): C5State[] {
     const out: C5State[] = [];
-    for (let seed = 0; seed < 4; seed += 1) {
+    for (let seed = 0; seed < 6; seed += 1) {
+      const a = levelController(c5Game, pathfinder, 5, seed);
+      const b = levelController(c5Game, pathfinder, 5, seed + 1_000_003);
       let state = c5Game.init(seed, CONFIG);
-      for (let t = 0; t < 700 && !state.over; t += 1) {
-        state = c5Game.step(state, IDLE);
+      for (let t = 0; t < 900 && !state.over; t += 1) {
         if (state.landing !== null && t % 13 === 0) {
           out.push(state);
         }
+        state = c5Game.step(state, [a.decide(state, 0, t), b.decide(state, 1, t)]);
       }
     }
     return out;
@@ -747,8 +747,12 @@ describe('C-5 會動的牆｜evaluate 與 actions', () => {
             { ...state.snakes[1], score: state.snakes[1].score + 7 },
           ],
         };
-        const a = c5Game.actions(state, side).map((m) => c5Game.step(state, side === 0 ? [m, NONE] : [NONE, m]));
-        const b = c5Game.actions(shifted, side).map((m) => c5Game.step(shifted, side === 0 ? [m, NONE] : [NONE, m]));
+        const a = c5Game
+          .actions(state, side)
+          .map((m) => c5Game.step(state, side === 0 ? [m, NONE] : [NONE, m]));
+        const b = c5Game
+          .actions(shifted, side)
+          .map((m) => c5Game.step(shifted, side === 0 ? [m, NONE] : [NONE, m]));
         const gainsA = a.map((s) => c5Game.evaluate(s, side).gain);
         const gainsB = b.map((s) => c5Game.evaluate(s, side).gain);
         expect(gainsB).toEqual(gainsA);
@@ -792,8 +796,7 @@ describe('C-5 會動的牆｜evaluate 與 actions', () => {
       snakes: [{ body: body([11, 5], [10, 5], [9, 5]), dir: RIGHT }, {}],
       foods: [cell(12, 5), cell(15, 20)],
     });
-    const gainOf = (state: C5State): number =>
-      c5Game.evaluate(c5Game.step(state, IDLE), 0).gain;
+    const gainOf = (state: C5State): number => c5Game.evaluate(c5Game.step(state, IDLE), 0).gain;
     expect(gainOf(bait) - gainOf(plain)).toBeGreaterThan(80);
     expect(gainOf(bait)).toBeGreaterThan(150);
   });
@@ -816,7 +819,9 @@ describe('C-5 會動的牆｜純度與契約', () => {
   it('step 不改動傳進來的 state（深度凍結後呼叫不丟錯；含預告開始、走格、落下、壓死那幾個 tick）', () => {
     let state = deepFreeze(c5Game.init(2, CONFIG));
     for (let t = 0; t < 320; t += 1) {
-      state = deepFreeze(c5Game.step(state, t % 40 < 20 ? [PRESS_UP, PRESS_DOWN] : [PRESS_DOWN, PRESS_UP]));
+      state = deepFreeze(
+        c5Game.step(state, t % 40 < 20 ? [PRESS_UP, PRESS_DOWN] : [PRESS_DOWN, PRESS_UP]),
+      );
       if (state.over) {
         break;
       }
