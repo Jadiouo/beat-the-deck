@@ -709,6 +709,64 @@ describe('H-10 暗標｜AI 怎麼出價（等級曲線從結算流程長出來�
   });
 });
 
+describe('H-10 暗標｜等級曲線從結算流程長出來（DESIGN-AI-FUN 10.6 的兩個陷阱）', () => {
+  /** 從 choose 局面用指定深度跑 decide，回傳模擬過程中 evaluate 看過的階段。 */
+  function phasesSeen(depth: number, state: H10State, side: Side): Set<string> {
+    const seen = new Set<string>();
+    const spy: Game<H10State> = {
+      ...h10Game,
+      evaluate: (s, who) => {
+        seen.add(s.phase);
+        return h10Game.evaluate(s, who);
+      },
+    };
+    const controller = wrapPolicy(
+      spy,
+      pathfinder,
+      { reactionTicks: 0, decideEvery: 1, depth, epsilon: 0 },
+      7,
+    );
+    controller.decide(state, side, 0);
+    return seen;
+  }
+
+  it('陷阱二：actions()[0] 是會推進流程的動作（公平價），不是什麼都不按；模擬裡的對手按它就會鎖定', () => {
+    const acts = h10Game.actions(choosing(), 0);
+    expect(levelOf(acts[0] as Buttons)).toBe(FAIR_LEVEL);
+    const afterOne = h10Game.step(choosing(), [acts[0] as Buttons, acts[0] as Buttons]);
+    expect(afterOne.phase).toBe('locked');
+    // 對手已經真的選過了：模擬裡我再按，一樣鎖定
+    const oppDone = h10Game.step(choosing({ pending: [3, null] }), [IDLE, acts[0] as Buttons]);
+    expect(oppDone.phase).toBe('locked');
+  });
+
+  it('陷阱一：選 → 鎖定 → 揭示一共 3 步，在 depth 的 6 格額度之內：深度 1、2 的 decide 沒評估過 resolve，深度 3 以上評估過', () => {
+    const state = choosing({ item: 4, history: oppHistory([3, 3, 3, 3]) });
+    for (const side of [0, 1] as const) {
+      expect(phasesSeen(1, state, side).has('resolve')).toBe(false);
+      expect(phasesSeen(2, state, side).has('resolve')).toBe(false);
+      for (const depth of [3, 4, 6]) {
+        expect(phasesSeen(depth, state, side).has('resolve'), `深度 ${depth} 側 ${side}`).toBe(
+          true,
+        );
+      }
+    }
+  });
+
+  it('等級曲線是階梯：深度 1、2 永遠出公平價（讀不到歷史），深度 3 以上同一個局面會因歷史而不同', () => {
+    const picks = (depth: number): Set<number> =>
+      new Set(
+        [oppHistory([3, 3, 3, 3]), oppHistory([0, 0, 0, 0]), oppHistory([4, 4, 4, 4])].map(
+          (h) => levelOf(decideAtDepth(choosing({ item: 4, history: h }), 1, depth)) as number,
+        ),
+      );
+    expect(picks(1).size).toBe(1);
+    expect(picks(2).size).toBe(1);
+    expect(picks(3).size).toBeGreaterThan(1);
+    expect(picks(6).size).toBeGreaterThan(1);
+  });
+});
+
 describe('H-10 暗標｜AI 能不能玩', () => {
   it('兩個等級 5 的搜尋型打完一整場：10 件都打完，在 maxTicks 之前結束', () => {
     for (const seed of [1, 2, 3]) {
@@ -733,6 +791,29 @@ describe('H-10 暗標｜AI 能不能玩', () => {
       wins10 += r.winner === side ? 1 : 0;
     }
     expect(wins10).toBeGreaterThanOrEqual(14);
+  });
+
+  it('等級 10 不輸給「永遠同一檔」的腳本玩家（×1.3、×1.8、公平價）：籌碼的影子價格太高估時（GAMMA = 1）它對 ×1.8 只贏 11%', () => {
+    for (const level of [3, 4, 5] as const) {
+      let points = 0;
+      const n = 60;
+      for (let seed = 0; seed < n; seed += 1) {
+        const aiSide: Side = seed % 2 === 0 ? 0 : 1;
+        const ai = levelController(h10Game, pathfinder, 10, seed);
+        const flat = {
+          decide: (s: H10State, side: Side): Buttons =>
+            s.phase === 'choose' && s.pending[side] === null
+              ? (LEVEL_BUTTONS[level] as Buttons)
+              : IDLE,
+        };
+        const r =
+          aiSide === 0
+            ? playMatch(h10Game, seed, CONFIG, ai, flat)
+            : playMatch(h10Game, seed, CONFIG, flat, ai);
+        points += r.winner === null ? 0.5 : r.winner === aiSide ? 1 : 0;
+      }
+      expect(points / n, `固定檔位 ${level}`).toBeGreaterThan(0.5);
+    }
   });
 
   it('隨機控制器（亂按）也能把一場打完：不會卡住', () => {
