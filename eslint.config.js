@@ -33,7 +33,17 @@ const restrictedProperties = purity.forbidden
 export default tseslint.config(
   {
     // tests/scratch/ 見 tsconfig.json 的 comment:exclude：量測用的暫存檔，不決定 npm run check 的綠。
-    ignores: ['dist/**', 'coverage/**', 'playwright-report/**', 'test-results/**', 'tests/scratch/**'],
+    ignores: [
+      'dist/**',
+      // dist-offline/ 是 `vite build --base=./ --outDir dist-offline` 的產物（給老闆離線開的版本，
+      // 見 .gitignore）。它是 minified bundle，lint 它會噴幾百條 no-undef；而 npm run check 跑的是
+      // `eslint .`，所以漏掉這一行會讓 check 在 lint 階段就死掉、測試根本跑不到。
+      'dist-offline/**',
+      'coverage/**',
+      'playwright-report/**',
+      'test-results/**',
+      'tests/scratch/**',
+    ],
   },
   js.configs.recommended,
   tseslint.configs.recommended,
