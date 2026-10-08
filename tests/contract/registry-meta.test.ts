@@ -48,10 +48,10 @@ describe('色盤', () => {
 });
 
 describe('reflexOnly（A4 不適用旗標）', () => {
-  /** 老闆核准的四張純反射牌。要加第五張，先去問老闆（docs/TEST_PLAN.md 5.1 訂正）。 */
-  const APPROVED = ['S-3', 'S-7', 'S-J', 'S-Q'];
+  /** 老闆核准的六張純反射牌（S-A、S-2 與 S-3 同構，2026-10-08 補掛）。要加第七張，先去問老闆（docs/TEST_PLAN.md 5.1 訂正）。 */
+  const APPROVED = ['S-A', 'S-2', 'S-3', 'S-7', 'S-J', 'S-Q'];
 
-  it('只有核准的四張掛旗標（梅花與 D-2 有策略深度，不准用旗標蓋掉）', () => {
+  it('只有核准的六張掛旗標（梅花與 D-2 有策略深度，不准用旗標蓋掉）', () => {
     const flagged = registry
       .filter((entry) => entry.meta.reflexOnly === true)
       .map((entry) => entry.id)
