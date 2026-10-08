@@ -18,6 +18,10 @@ import { c5Game } from '../C-5/logic';
 import type { C5State } from '../C-5/logic';
 import { c5Meta } from '../C-5/meta';
 import { c5Render } from '../C-5/render';
+import { c7Game } from '../C-7/logic';
+import type { C7State } from '../C-7/logic';
+import { c7Meta } from '../C-7/meta';
+import { c7Render } from '../C-7/render';
 import { c8Game } from '../C-8/logic';
 import type { C8State } from '../C-8/logic';
 import { c8Meta } from '../C-8/meta';
@@ -69,6 +73,13 @@ export const clubsEntries: readonly RegistryEntry[] = [
     game: c5Game,
     render: c5Render,
     meta: c5Meta,
+  }),
+  defineEntry<C7State>({
+    id: c7Meta.id,
+    kind: 'card',
+    game: c7Game,
+    render: c7Render,
+    meta: c7Meta,
   }),
   defineEntry<C8State>({
     id: c8Meta.id,

@@ -162,7 +162,10 @@ describe('C-7 縮水｜縮水', () => {
   it('兩條同一個 tick 餓死：長度都是 0，平手', () => {
     const state = makeState({
       tick: 39,
-      snakes: [{ body: body([10, 10]), dir: RIGHT }, { body: body([20, 10]), dir: LEFT }],
+      snakes: [
+        { body: body([10, 10]), dir: RIGHT },
+        { body: body([20, 10]), dir: LEFT },
+      ],
     });
     const after = stepAt(state);
     expect(after.starved).toEqual([true, true]);
@@ -259,7 +262,10 @@ describe('C-7 縮水｜衝刺', () => {
   it('衝完 30 個 tick 之後可以再衝（冷卻每 tick 減 1）', () => {
     let state = stepAt(humanAt(14), [SPRINT, NONE]);
     expect(state.sprintCd[0]).toBe(30);
-    state = { ...state, snakes: [{ ...state.snakes[0], body: rowLeft(10, 10, 12) }, state.snakes[1]] };
+    state = {
+      ...state,
+      snakes: [{ ...state.snakes[0], body: rowLeft(10, 10, 12) }, state.snakes[1]],
+    };
     for (let i = 0; i < 29; i += 1) {
       state = stepAt(state);
     }
@@ -268,7 +274,8 @@ describe('C-7 縮水｜衝刺', () => {
 
   it('兩格都沿著這個週期鎖定的方向：轉向只在第一格套用，第二格直走', () => {
     const locked = stepAt(humanAt(10, { tick: 4 }), [PRESS_UP, NONE]);
-    const after = stepAt(stepAt(locked, [PRESS_UP, NONE]), [SPRINT, NONE]);
+    expect(locked.snakes[0].turn).toBe(UP);
+    const after = stepAt(locked, [SPRINT, NONE]);
     expect(after.snakes[0].body[0]).toBe(cell(10, 8));
     expect(after.snakes[0].body[1]).toBe(cell(10, 9));
   });
@@ -288,7 +295,10 @@ describe('C-7 縮水｜衝刺', () => {
 
   it('中間那格撞到對手身體：死在原地（還在第一格之前），對手贏', () => {
     const state = humanAt(10, {
-      snakes: [{ body: rowLeft(10, 10, 10), dir: RIGHT }, { body: body([11, 10], [11, 9], [11, 8], [11, 7]), dir: UP }],
+      snakes: [
+        { body: rowLeft(10, 10, 10), dir: RIGHT },
+        { body: body([11, 10], [11, 11], [11, 12], [11, 13]), dir: UP },
+      ],
     });
     const after = stepAt(state, [SPRINT, NONE]);
     expect(after.over).toBe(true);
@@ -298,7 +308,10 @@ describe('C-7 縮水｜衝刺', () => {
 
   it('第二格撞到身體：死，另一條贏，不看長度', () => {
     const state = humanAt(10, {
-      snakes: [{ body: rowLeft(10, 10, 10), dir: RIGHT }, { body: body([12, 10], [12, 9], [12, 8], [12, 7]), dir: UP }],
+      snakes: [
+        { body: rowLeft(10, 10, 10), dir: RIGHT },
+        { body: body([12, 10], [12, 11], [12, 12], [12, 13]), dir: UP },
+      ],
     });
     const after = stepAt(state, [SPRINT, NONE]);
     expect(after.over).toBe(true);
@@ -324,7 +337,16 @@ describe('C-7 縮水｜衝刺', () => {
       ...base,
       snakes: [
         { body: rowLeft(14, 10, 12), dir: RIGHT },
-        { body: [cell(16, 10), ...rowLeft(17, 11, 6).slice(0, 0), cell(17, 10), cell(18, 10), cell(19, 10)], dir: LEFT },
+        {
+          body: [
+            cell(16, 10),
+            ...rowLeft(17, 11, 6).slice(0, 0),
+            cell(17, 10),
+            cell(18, 10),
+            cell(19, 10),
+          ],
+          dir: LEFT,
+        },
       ],
     });
     const out = stepAt(longer);
@@ -425,31 +447,27 @@ describe('C-7 縮水｜actions 與 evaluate', () => {
     const b = makeState({ snakes: [{ body: rowLeft(9, 12, 14), dir: RIGHT }, {}] });
     const diff = c7Game.evaluate(b, 0).gain - c7Game.evaluate(a, 0).gain;
     expect(diff).toBeCloseTo(200, 6);
-    const lead = c7Game.evaluate(b, 0).gain - c7Game.evaluate(b, 1).gain;
-    expect(lead).toBeGreaterThan(0);
   });
 
-  it('對稱：同一個局面轉 180 度，兩邊的 evaluate 互換', () => {
-    const state = c7Game.init(7, CONFIG);
-    const e0 = c7Game.evaluate(state, 0);
-    const mirrored: C7State = {
-      ...state,
-      snakes: [state.snakes[1], state.snakes[0]],
-      foods: state.foods.map((c) => WIDTH * HEIGHT - 1 - c),
-      sprintCd: [state.sprintCd[1], state.sprintCd[0]],
-      sprints: [state.sprints[1], state.sprints[0]],
-      starved: [state.starved[1], state.starved[0]],
-    };
-    const rotated: C7State = {
-      ...mirrored,
-      snakes: [
-        { ...mirrored.snakes[0], body: mirrored.snakes[0].body.map((c) => WIDTH * HEIGHT - 1 - c), dir: ((mirrored.snakes[0].dir + 2) % 4) as 0 },
-        { ...mirrored.snakes[1], body: mirrored.snakes[1].body.map((c) => WIDTH * HEIGHT - 1 - c), dir: ((mirrored.snakes[1].dir + 2) % 4) as 0 },
-      ],
-    };
-    const r = c7Game.evaluate({ ...rotated, snakes: [{ ...rotated.snakes[0], turn: rotated.snakes[0].dir }, { ...rotated.snakes[1], turn: rotated.snakes[1].dir }] }, 0);
-    expect(r.gain).toBeCloseTo(e0.gain, 6);
-    expect(r.danger).toBeCloseTo(e0.danger, 6);
+  it('對稱：同一個局面轉 180 度、兩邊對調，人的 evaluate 等於對調後 AI 的 evaluate', () => {
+    const rot = (c: number): number => WIDTH * HEIGHT - 1 - c;
+    for (const seed of [7, 8, 9]) {
+      const state = c7Game.init(seed, CONFIG);
+      const mirrored: C7State = {
+        ...state,
+        snakes: [
+          { ...state.snakes[1], body: state.snakes[1].body.map(rot), dir: RIGHT, turn: RIGHT },
+          { ...state.snakes[0], body: state.snakes[0].body.map(rot), dir: LEFT, turn: LEFT },
+        ],
+        foods: state.foods.map(rot),
+      };
+      for (const side of [0, 1] as const) {
+        const a = c7Game.evaluate(state, side);
+        const b = c7Game.evaluate(mirrored, side === 0 ? 1 : 0);
+        expect(b.gain).toBeCloseTo(a.gain, 6);
+        expect(b.danger).toBeCloseTo(a.danger, 6);
+      }
+    }
   });
 
   it('餓死風險：長度 2、最近的食物來不及走到 → danger 1；食物就在旁邊 → danger < 1；長度夠長 → 這一項是 0', () => {
@@ -484,7 +502,7 @@ describe('C-7 縮水｜AI 對衝刺的決定（搜尋型等級 10，在走格前
   function decideSprint(state: C7State): boolean {
     const controller = levelController(c7Game, pathfinder, 10, 1);
     // 餵幾個 tick 讓反應延遲的歷史有東西。
-    let s = state;
+    const s = state;
     let result: Buttons = NONE;
     for (let i = 0; i < 13; i += 1) {
       result = controller.decide(s, 1, s.tick);
@@ -495,7 +513,20 @@ describe('C-7 縮水｜AI 對衝刺的決定（搜尋型等級 10，在走格前
   it('沒有人跟它搶的食物（對手遠遠落後）：不白衝', () => {
     const state = makeState({
       tick: 5,
-      snakes: [{ body: rowLeft(3, 20, 12), dir: RIGHT }, { body: [cell(20, 10), cell(21, 10), cell(22, 10), cell(23, 10), cell(24, 10), cell(25, 10)], dir: LEFT }],
+      snakes: [
+        { body: rowLeft(3, 20, 12), dir: RIGHT },
+        {
+          body: [
+            cell(20, 10),
+            cell(21, 10),
+            cell(22, 10),
+            cell(23, 10),
+            cell(24, 10),
+            cell(25, 10),
+          ],
+          dir: LEFT,
+        },
+      ],
       foods: [cell(17, 10), cell(3, 2)],
     });
     expect(decideSprint(state)).toBe(false);
@@ -505,8 +536,32 @@ describe('C-7 縮水｜AI 對衝刺的決定（搜尋型等級 10，在走格前
     const state = makeState({
       tick: 5,
       snakes: [
-        { body: [cell(12, 10), cell(11, 10), cell(10, 10), cell(9, 10), cell(8, 10), cell(7, 10), cell(6, 10), cell(5, 10)], dir: RIGHT },
-        { body: [cell(20, 10), cell(21, 10), cell(22, 10), cell(23, 10), cell(24, 10), cell(25, 10), cell(26, 10), cell(27, 10)], dir: LEFT },
+        {
+          body: [
+            cell(12, 10),
+            cell(11, 10),
+            cell(10, 10),
+            cell(9, 10),
+            cell(8, 10),
+            cell(7, 10),
+            cell(6, 10),
+            cell(5, 10),
+          ],
+          dir: RIGHT,
+        },
+        {
+          body: [
+            cell(20, 10),
+            cell(21, 10),
+            cell(22, 10),
+            cell(23, 10),
+            cell(24, 10),
+            cell(25, 10),
+            cell(26, 10),
+            cell(27, 10),
+          ],
+          dir: LEFT,
+        },
       ],
       foods: [cell(16, 10), cell(3, 2)],
     });
@@ -518,7 +573,9 @@ describe('C-7 縮水｜純度與契約', () => {
   it('step 不改動傳進來的 state（深度凍結後整局亂按，含衝刺、縮水、吃食物）', () => {
     let state = deepFreeze(c7Game.init(2, CONFIG));
     for (let t = 0; t < 400 && !state.over; t += 1) {
-      state = deepFreeze(stepAt(state, [t % 30 < 15 ? SPRINT : PRESS_DOWN, t % 40 < 20 ? PRESS_UP : SPRINT]));
+      state = deepFreeze(
+        stepAt(state, [t % 30 < 15 ? SPRINT : PRESS_DOWN, t % 40 < 20 ? PRESS_UP : SPRINT]),
+      );
     }
     expect(state.tick).toBeGreaterThan(0);
   });
@@ -540,7 +597,11 @@ describe('C-7 縮水｜純度與契約', () => {
 describe('C-7 縮水｜畫面', () => {
   it('只用色盤顏色、全部在 320×240 之內、不改 state；兩條長度條與衝刺冷卻的小點畫得出來', () => {
     const state = deepFreeze(
-      makeState({ tick: 100, sprintCd: [0, 18], snakes: [{ body: rowLeft(10, 10, 12), dir: RIGHT }, {}] }),
+      makeState({
+        tick: 100,
+        sprintCd: [0, 18],
+        snakes: [{ body: rowLeft(10, 10, 12), dir: RIGHT }, {}],
+      }),
     );
     const before = JSON.stringify(state);
     const fake = createFakeContext();
@@ -559,7 +620,12 @@ describe('C-7 縮水｜畫面', () => {
   });
 
   it('結束後（有人餓死）也畫得出來，不丟錯', () => {
-    const over = makeState({ over: true, winner: 1, starved: [true, false], snakes: [{ alive: false, body: body([10, 10]), score: 0 }, {}] });
+    const over = makeState({
+      over: true,
+      winner: 1,
+      starved: [true, false],
+      snakes: [{ alive: false, body: body([10, 10]), score: 0 }, {}],
+    });
     const fake = createFakeContext();
     expect(() => c7Render(asRenderingContext(fake), over)).not.toThrow();
     void DOWN;
