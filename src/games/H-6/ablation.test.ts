@@ -67,7 +67,7 @@ describe.skipIf(!MEASURE)('H-6 地雷區｜三列劇本玩家表（種子 0 到 
     const weak = rate(uniformChooser);
     const feed = rate(feedThenBreakChooser(4, 5));
     console.log(
-      `H-6 三列表（對等級 10）：強 ${strong}　人類型（15% 亂選）${human}　人類型（只看一步）${oneStep}　弱 ${weak}　餵了再破 ${feed}`,
+      `H-6 三列表（對等級 10）：強 ${strong} 人類型（15% 亂選）${human} 人類型（只看一步）${oneStep} 弱 ${weak} 餵了再破 ${feed}`,
     );
     expect(strong).toBeGreaterThan(human);
     expect(human).toBeGreaterThan(weak);
