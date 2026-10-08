@@ -23,6 +23,7 @@ export const MAX_LEVEL = 10;
  * 為什麼不再隨等級下降：量測顯示等級的差別幾乎全部來自「看得比較快」（快而淺對慢而深在黑桃是
  * 99% 到 100%；人類模型對乒乓等級 5 是 52%、等級 7 是 1%），而不是「想得比較好」。
  * 延遲固定之後，等級的差別只能來自決定頻率、失誤率與搜尋深度。
+ * （延遲的語意見 `wrapPolicy`：世界是舊的、自己是現在的。）
  */
 const REACTION_TICKS = 12;
 
@@ -100,7 +101,18 @@ export interface WrappedController<S> extends Controller<S> {
 interface Remembered<S> {
   readonly tick: number;
   readonly state: S;
+  /** 自己在這個 tick 實際輸出的按鍵。 */
+  output: Buttons;
 }
+
+const NEUTRAL: Buttons = {
+  up: false,
+  down: false,
+  left: false,
+  right: false,
+  a: false,
+  b: false,
+};
 
 function sameButtons(a: Buttons, b: Buttons): boolean {
   return (
@@ -131,16 +143,22 @@ function checkParams(params: LevelParams): void {
 /**
  * 把一個性格包成控制器。
  *
- * - **反應延遲**：第 t 個 tick，性格看到的是第 t − reactionTicks 個 tick 的 state；
- *   t 還小於 reactionTicks 時看到的是起始 state。只留最近 reactionTicks + 1 個 state
- *   （最多 19 個），不是整場 3600 個。
- * - **決定頻率**：第一個 tick 與之後每隔 decideEvery 個 tick 才重新決定，中間回傳同一組按鍵。
- * - **亂選**：每次決定先擲一次骰，小於 epsilon 就從（看到的那個 state 的）`actions()` 裡亂挑一個。
+ * - **反應延遲**：延遲的是「對世界變化的反應」，不是「自己在哪裡」。性格看到的是 reactionTicks
+ *   個 tick 以前的世界（對手、新出現的東西都是舊的），再把「自己這段時間輸出過的按鍵」用
+ *   `game.step` 照原樣重播到現在（對手當作沒動）：自己的位置是現在的。
+ *   人的 200 毫秒反應是看到現在的畫面、手慢一點；舊做法直接餵 t − reactionTicks 的舊 state，
+ *   格子世界裡自己的位置也是舊的，延遲一旦跨過一個移動週期，就會從已經離開的格子算方向，導航失能。
+ *   試過「性格看現在、決定延後生效」：回饋迴圈仍然會過衝震盪，同樣的斷崖，所以不用。
+ *   不需要知道 state 的結構，也不動 core 的契約。
+ *   t 還小於 reactionTicks 時，世界是起始 state，自己重播到現在。
+ * - **決定頻率**：第一個 tick 與之後每隔 decideEvery 個 tick 才重新決定，中間沿用上一個生效的按鍵。
+ * - **亂選**：每次決定先擲一次骰，小於 epsilon 就從（現在這個 state 的）`actions()` 裡亂挑一個。
  *   epsilon = 0 時不擲骰，完全等於底層性格；epsilon = 1 時一定亂挑。
  * - **決定性**：骰子來自 `rngStateFor(seed, 邊)`，推進的狀態存在控制器裡。tick 回到 0（新的一場）
  *   就把歷史與亂數全部重設，所以同一個控制器重複用在多場上，每一場的結果都和新建的一樣。
  *
  * 這是有狀態的（要記歷史與目前的動作），所以每一場、每一邊都要用自己的控制器。
+ * 只留最近 reactionTicks + 1 個 state（與各自的輸出），不是整場。
  */
 export function wrapPolicy<S>(
   game: Game<S>,
@@ -151,6 +169,7 @@ export function wrapPolicy<S>(
 ): WrappedController<S> {
   checkParams(params);
   const avoidIntended = options.avoidIntended === true;
+
   const keep = params.reactionTicks + 1;
 
   let history: Remembered<S>[] = [];
@@ -158,6 +177,17 @@ export function wrapPolicy<S>(
   let lastDecision = 0;
   let lastTick = -1;
   let dice: RngState = 0;
+
+  /** 把最舊那筆 state 用自己輸出過的按鍵（對手放開）重播到現在。 */
+  const believe = (side: Side): S => {
+    const first = history[0] as Remembered<S>;
+    let state = first.state;
+    for (let i = 0; i < history.length - 1 && !game.isOver(state); i += 1) {
+      const mine = (history[i] as Remembered<S>).output;
+      state = game.step(state, side === 0 ? [mine, NEUTRAL] : [NEUTRAL, mine]);
+    }
+    return state;
+  };
 
   const decideFrom = (seen: S, side: Side, tick: number): Buttons => {
     const policyParams = { depth: params.depth, seed };
@@ -196,7 +226,8 @@ export function wrapPolicy<S>(
       }
       lastTick = tick;
 
-      history.push({ tick, state });
+      const entry: Remembered<S> = { tick, state, output: NEUTRAL };
+      history.push(entry);
       // 把「已經夠舊」的丟掉：只要第二筆也已經是 tick − reactionTicks 或更早，第一筆就沒用了。
       while (
         history.length > 1 &&
@@ -209,10 +240,11 @@ export function wrapPolicy<S>(
       }
 
       if (held === null || tick - lastDecision >= params.decideEvery) {
-        const seen = (history[0] as Remembered<S>).state;
+        const seen = params.reactionTicks === 0 ? state : believe(side);
         held = decideFrom(seen, side, tick);
         lastDecision = tick;
       }
+      entry.output = held;
       return { ...held };
     },
     retainedStates(): number {
