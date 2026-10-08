@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   aiController,
+  counterfactualHistories,
   feedThenBreakChooser,
   noisyChooser,
   oneStepChooser,
@@ -54,6 +55,21 @@ describe('H-6 地雷區｜消融在對局層的作用', () => {
     const off = playSeeds((s) => scripted(strongChooser, s), aiController(10), SHORT, { decay: 0 });
     const same = on.signatures.filter((sig, i) => sig === off.signatures[i]).length;
     expect(same).toBeLessThan(SHORT.length);
+  }, 120_000);
+});
+
+describe('H-6 地雷區｜真實對局裡 AI 的決定點：換掉你的歷史，它的選擇會不會變', () => {
+  for (const [name, chooser] of PLAYERS) {
+    it(`${name}玩家：把你的歷史換成「全領頭」「全等」「全存分」「全跟隨」，AI 每一個決定點的最佳動作都不變`, () => {
+      const r = counterfactualHistories(chooser, SHORT);
+      expect(r.decisions).toBeGreaterThan(100);
+      expect(r.flips).toBe(0);
+    }, 120_000);
+  }
+
+  it('歷史確實進了數字（不是沒接上線）：有些決定點「等」的價值因為歷史而不同', () => {
+    const r = counterfactualHistories(strongChooser, SHORT);
+    expect(r.waitValueMoved).toBeGreaterThan(0);
   }, 120_000);
 });
 
