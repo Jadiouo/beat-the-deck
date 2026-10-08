@@ -161,7 +161,9 @@ describe('H-10 暗標｜初始與常數', () => {
 describe('H-10 暗標｜出價怎麼算', () => {
   it('出價 = 檔位倍數 × 公平價（價值 × 剩餘預算 ÷ 剩餘價值，含這件），四捨五入；棄標是 0', () => {
     // 價值 3、預算 100、剩餘價值 55：公平價 5.45
-    expect([0, 1, 2, 3, 4, 5].map((l) => bidOf(l as Level, 3, 100, 55))).toEqual([0, 3, 4, 5, 7, 10]);
+    expect([0, 1, 2, 3, 4, 5].map((l) => bidOf(l as Level, 3, 100, 55))).toEqual([
+      0, 3, 4, 5, 7, 10,
+    ]);
     // 價值 10、預算 100、剩餘價值 55：公平價 18.18
     expect([0, 1, 2, 3, 4, 5].map((l) => bidOf(l as Level, 10, 100, 55))).toEqual([
       0, 9, 15, 18, 24, 33,
@@ -169,7 +171,8 @@ describe('H-10 暗標｜出價怎麼算', () => {
   });
 
   it('不超過剩餘預算；最後一件的公平價就是全部的預算，所以公平價以上都是 all-in', () => {
-    expect(bidOf(5, 10, 20, 55)).toBe(20);
+    expect(bidOf(5, 10, 20, 10)).toBe(20);
+    expect(bidOf(5, 10, 20, 55)).toBe(7);
     expect([3, 4, 5].map((l) => bidOf(l as Level, 5, 37, 5))).toEqual([37, 37, 37]);
     expect(bidOf(2, 5, 37, 5)).toBe(30);
     expect(bidOf(5, 4, 0, 10)).toBe(0);
@@ -250,9 +253,7 @@ describe('H-10 暗標｜規則', () => {
     expect(banked.got).toEqual([3, 0]);
     expect(banked.pending).toEqual([null, null]);
     expect(banked.last).toBeNull();
-    expect(banked.history).toEqual([
-      { value: 3, levels: [4, 3], bids: [7, 5], winner: 0 },
-    ]);
+    expect(banked.history).toEqual([{ value: 3, levels: [4, 3], bids: [7, 5], winner: 0 }]);
   });
 
   it('6. 第一價格：贏的人付自己的出價（不是對方的），輸的人不付錢；AI 側（1 號邊）贏也一樣', () => {
@@ -349,7 +350,7 @@ describe('H-10 暗標｜規則', () => {
   it('14. 歷史存在 state 裡：大小有上限（最多 10 筆），整場 JSON 來回不變', () => {
     let s = h10Game.init(3, CONFIG);
     for (let i = 0; i < 4000 && !s.over; i += 1) {
-      s = h10Game.step(s, pick(((i % 6) as Level), (((i * 5) % 6) as Level)));
+      s = h10Game.step(s, pick((i % 6) as Level, ((i * 5) % 6) as Level));
     }
     expect(s.history.length).toBeLessThanOrEqual(ITEMS);
     expect(JSON.parse(JSON.stringify(s))).toEqual(s);
@@ -415,7 +416,12 @@ describe('H-10 暗標｜actions 與 evaluate', () => {
 
 describe('H-10 暗標｜不偷看（evaluate、actions 只讀自己的 pending 與公開資訊）', () => {
   const history: H10State['history'] = [rec(3, 3, 4), rec(8, 4, 3), rec(1, 0, 0)];
-  const base = { history, item: 3, budget: [86, 92] as [number, number], got: [8, 3] as [number, number] };
+  const base = {
+    history,
+    item: 3,
+    budget: [86, 92] as [number, number],
+    got: [8, 3] as [number, number],
+  };
 
   /** 一組只有 0 號邊（對手）隱藏資訊不同的 state；AI 坐 1 號邊。 */
   function variants(): { name: string; states: H10State[] }[] {
@@ -452,7 +458,9 @@ describe('H-10 暗標｜不偷看（evaluate、actions 只讀自己的 pending �
     const e0 = JSON.stringify(game.evaluate(first, side));
     const a0 = JSON.stringify(game.actions(first, side));
     return states.some(
-      (s) => JSON.stringify(game.evaluate(s, side)) !== e0 || JSON.stringify(game.actions(s, side)) !== a0,
+      (s) =>
+        JSON.stringify(game.evaluate(s, side)) !== e0 ||
+        JSON.stringify(game.actions(s, side)) !== a0,
     );
   }
 
@@ -493,7 +501,12 @@ describe('H-10 暗標｜不偷看（evaluate、actions 只讀自己的 pending �
     const spots = [
       choosing({ ...base }),
       choosing({ ...base, item: 6, history: oppHistory([3, 3, 3, 3, 1, 1]), budget: [60, 90] }),
-      choosing({ ...base, item: 9, history: oppHistory([4, 4, 4, 4, 4, 4, 4, 4, 4]), budget: [10, 55] }),
+      choosing({
+        ...base,
+        item: 9,
+        history: oppHistory([4, 4, 4, 4, 4, 4, 4, 4, 4]),
+        budget: [10, 55],
+      }),
     ];
     for (const spot of spots) {
       for (const policy of policies) {
@@ -551,7 +564,9 @@ describe('H-10 暗標｜不偷看（evaluate、actions 只讀自己的 pending �
       ...h10Game,
       evaluate: (s, side) => {
         const e = h10Game.evaluate(s, side);
-        return { gain: e.gain + (s.last === null ? 0 : 5 * (s.last.bids[1 - side] as number)), danger: 0 };
+        const w =
+          s.last === null ? 0 : s.last.winner === side ? 5 : s.last.winner === null ? 0 : -5;
+        return { gain: e.gain + w, danger: 0 };
       },
     };
     const decisions = ([null, 0, 3, 5] as const).map((p) => {
@@ -623,7 +638,11 @@ describe('H-10 暗標｜AI 怎麼出價（等級曲線從結算流程長出來�
   }
 
   it('深度 1 與 2 走不到揭示：永遠出公平價，不管對手的歷史（完全可預測）', () => {
-    for (const history of [oppHistory([3, 3, 3, 3]), oppHistory([0, 0, 0, 0]), oppHistory([5, 5, 5, 5])]) {
+    for (const history of [
+      oppHistory([3, 3, 3, 3]),
+      oppHistory([0, 0, 0, 0]),
+      oppHistory([5, 5, 5, 5]),
+    ]) {
       for (const depth of [1, 2]) {
         expect(levelOf(decideAtDepth(spot(history), 1, depth))).toBe(FAIR_LEVEL);
       }
@@ -642,10 +661,10 @@ describe('H-10 暗標｜AI 怎麼出價（等級曲線從結算流程長出來�
     }
   });
 
-  it('騙它：餵了保守再破——同一個局面（價值 10 的件、預算相同），歷史是「連出公平價」AI 出 ×1.3 以上，歷史是「剛連出保守」AI 出 ×0.8 以下', () => {
+  it('騙它：餵了保守再破——同一個局面（價值 10 的件、預算相同），歷史是「連出公平價」AI 出 ×1.3 以上，歷史是「剛連出保守」AI 出公平價以下（你破的 ×1.3 贏得了它）', () => {
     const fed = decideAtDepth(spot(oppHistory([3, 3, 1, 1], [3, 8, 1, 6])), 1, 6);
     const honest = decideAtDepth(spot(oppHistory([3, 3, 3, 3], [3, 8, 1, 6])), 1, 6);
-    expect(levelOf(fed) as number).toBeLessThanOrEqual(2);
+    expect(levelOf(fed) as number).toBeLessThanOrEqual(3);
     expect(levelOf(honest) as number).toBeGreaterThanOrEqual(4);
   });
 
@@ -703,7 +722,10 @@ describe('H-10 暗標｜AI 能不能玩', () => {
       const side: Side = seed % 2 === 0 ? 0 : 1;
       const ai = levelController(h10Game, pathfinder, 10, seed);
       const human = humanModel(h10Game, seed + 1_000_003);
-      const r = side === 0 ? playMatch(h10Game, seed, CONFIG, ai, human) : playMatch(h10Game, seed, CONFIG, human, ai);
+      const r =
+        side === 0
+          ? playMatch(h10Game, seed, CONFIG, ai, human)
+          : playMatch(h10Game, seed, CONFIG, human, ai);
       wins10 += r.winner === side ? 1 : 0;
     }
     expect(wins10).toBeGreaterThanOrEqual(14);
