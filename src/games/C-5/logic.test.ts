@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { levelController } from '../../ai/level';
 import { pathfinder } from '../../ai/policies/pathfinder';
 import { rngStateFor } from '../../core/rng';
-import type { Buttons, Inputs } from '../../core/types';
+import type { Buttons, Controller, Inputs } from '../../core/types';
 import {
   asRenderingContext,
   createFakeContext,
@@ -33,6 +33,7 @@ import {
   rotateCell,
 } from './logic';
 import type { C5State } from './logic';
+import { avoider, playTracked, rusher, uniform } from './players.test-helpers';
 import { c5Render } from './render';
 
 /**
@@ -901,4 +902,117 @@ describe('C-5 會動的牆｜畫面', () => {
       expect(p.y).toBeLessThanOrEqual(LOGIC_HEIGHT + 8);
     }
   });
+});
+
+// ---------------------------------------------------------------------------
+// danger：身體全長（接手時發現的缺口）
+// ---------------------------------------------------------------------------
+
+describe('C-5 會動的牆｜danger 要把整條身體算進去', () => {
+  /** 蛇頭在 (11, 6) 往右，下一步進落點 (12..17, 6)；身體往左排成一條 `length` 格的直線。 */
+  function entering(length: number, tick: number): C5State {
+    const zone = hBar(12, 6);
+    return makeState({
+      tick,
+      landing: { pair: 0, bars: [zone, rotated(zone)], at: 300 },
+      bait: { cell: cell(14, 6), until: 300 },
+      snakes: [
+        {
+          body: Array.from({ length }, (_, i) => cell(11 - i, 6)),
+          dir: RIGHT,
+        },
+        {},
+      ],
+      foods: [cell(14, 1), cell(25, 20)],
+    });
+  }
+
+  it('蛇頭剛進落點時身體還全在外面，但整條身體都還要走過這一段：長的蛇來不及、短的蛇來得及（同一個 tick）', () => {
+    // tick 258：離落下還有 6 次走格。出口 1 步；清空要 1 + 長度 − 1 步。
+    expect(c5Game.evaluate(entering(3, 258), 0).danger).toBe(0); // 清空 3 步，餘裕 3
+    expect(c5Game.evaluate(entering(6, 258), 0).danger).toBe(1); // 清空 6 步，餘裕 0
+  });
+
+  it('長度越長，同一個局面的 danger 不會下降', () => {
+    let last = -1;
+    for (const length of [3, 4, 5, 6, 7, 8]) {
+      const { danger } = c5Game.evaluate(entering(length, 258), 0);
+      expect(danger, `長度 ${length}`).toBeGreaterThanOrEqual(last);
+      last = danger;
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 四列證據與消融（DESIGN-AI-FUN 10.4）
+// ---------------------------------------------------------------------------
+
+describe('C-5 會動的牆｜劇本玩家與消融（對搜尋型等級 10，種子 0 到 9，玩家在 0 號邊）', () => {
+  const SEEDS = Array.from({ length: 10 }, (_, i) => i);
+
+  /** 劇本玩家對搜尋型等級 10 的勝率（平手算一半）、每場進預告區與被壓死的平均次數。 */
+  function rate(
+    options: Parameters<typeof createC5Game>[0],
+    make: (seed: number) => Controller<C5State>,
+  ): { win: number; entries: number; crushed: number; baits: number } {
+    const game = createC5Game(options);
+    let points = 0;
+    let entries = 0;
+    let crushed = 0;
+    let baits = 0;
+    for (const seed of SEEDS) {
+      const t = playTracked(
+        game,
+        seed,
+        3600,
+        make(seed),
+        levelController(game, pathfinder, 10, seed + 1_000_003),
+      );
+      points += t.winner === 0 ? 1 : t.winner === null ? 0.5 : 0;
+      entries += t.entries[0];
+      crushed += t.crushed[0];
+      baits += t.baits[0];
+    }
+    const n = SEEDS.length;
+    return { win: points / n, entries: entries / n, crushed: crushed / n, baits: baits / n };
+  }
+
+  const full = {
+    avoider: rate({}, () => avoider()),
+    rusher: rate({}, () => rusher()),
+    uniform: rate({}, (seed) => uniform(seed, 0)),
+  };
+  const noCrush = {
+    avoider: rate({ crush: false }, () => avoider()),
+    rusher: rate({ crush: false }, () => rusher()),
+  };
+  const noBait = { rusher: rate({ bait: false }, () => rusher()) };
+
+  it('照習慣打（只吃普通食物、不碰落點）：基準線，贏過搜尋型等級 10', () => {
+    expect(full.avoider.win).toBeGreaterThanOrEqual(0.7);
+    expect(full.avoider.entries).toBe(0);
+  }, 180_000);
+
+  it('每個誘餌都衝：明顯輸給「不碰誘餌」，而且大多是被壓死的（技術有報酬）', () => {
+    expect(full.rusher.entries).toBeGreaterThan(0.5);
+    expect(full.rusher.crushed).toBeGreaterThanOrEqual(0.6);
+    expect(full.avoider.win - full.rusher.win).toBeGreaterThanOrEqual(0.5);
+  }, 180_000);
+
+  it('均勻亂決定：明顯輸（證明技術有報酬）', () => {
+    expect(full.uniform.win).toBeLessThanOrEqual(0.15);
+  }, 180_000);
+
+  it('消融一：關掉壓死，「衝」與「不衝」的差距消失（壓死是這張牌互動強度的來源）', () => {
+    const spreadFull = full.avoider.win - full.rusher.win;
+    const spreadOff = noCrush.avoider.win - noCrush.rusher.win;
+    expect(noCrush.rusher.crushed).toBe(0);
+    expect(spreadOff).toBeLessThanOrEqual(0.2);
+    expect(spreadFull - spreadOff).toBeGreaterThanOrEqual(0.4);
+  }, 180_000);
+
+  it('消融二：關掉誘餌，衝誘餌的玩家沒東西可衝，被壓死的次數掉下來（誘餌是把人騙進落點的餌）', () => {
+    expect(noBait.rusher.baits).toBe(0);
+    expect(noBait.rusher.crushed).toBeLessThan(full.rusher.crushed);
+  }, 180_000);
 });
