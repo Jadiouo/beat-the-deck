@@ -11,4 +11,5 @@ export const s3Meta: CardMeta = {
   defaultPolicy: 'precise',
   baseLevel: 1,
   symmetric: true,
+  reflexOnly: true,
 };

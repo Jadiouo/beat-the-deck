@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { CARD_IDS, registry } from '../../src/games/registry';
 import type { RegistryEntry } from '../../src/games/types';
-import { AI_CHECKS, AI_SEEDS, runCheck } from '../contract/checks';
+import { AI_CHECKS, AI_SEEDS, notApplicableReason, runCheck } from '../contract/checks';
 import { counterEntry } from '../fixtures/counter-entry';
 
 /**
@@ -66,8 +66,10 @@ export function defineAChecks(bucket: Bucket): void {
   describe.each(entries)('$id', (entry) => {
     for (const check of AI_CHECKS) {
       const title = `${check.code} ${check.title}`;
-      if (!check.applies(entry)) {
-        it.skip(`${title}（這張牌不適用）`, () => undefined);
+      const why = notApplicableReason(check, entry);
+      if (why !== null) {
+        // 不適用要看得見，而且絕不能是綠的：用 skip，並把理由印在名稱裡。
+        it.skip(`${title}（不適用：${why}）`, () => undefined);
         continue;
       }
       it(

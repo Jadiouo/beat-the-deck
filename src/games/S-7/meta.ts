@@ -13,4 +13,5 @@ export const s7Meta: CardMeta = {
   defaultPolicy: 'greedy',
   baseLevel: 3,
   symmetric: true,
+  reflexOnly: true,
 };

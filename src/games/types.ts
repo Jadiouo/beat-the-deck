@@ -38,6 +38,14 @@ export interface CardMeta {
   /** 運氣成分高（紅心）：A1、A2 的門檻降低。 */
   readonly luckHeavy?: boolean;
   /**
+   * 純反射牌：這張牌沒有策略深度可以剝削，所以「等級 10 把人類模型壓在 ≤35%」（A4）只能靠
+   * 超人類的反應達成，那正是 GOAL 第 1 條明文不要的。這張牌的 A4 不是「人贏得了」的證據，
+   * 契約測試對它跳過 A4（測試輸出會印出「不適用」與理由，絕不回報通過），改用劇本玩家
+   * （DESIGN-AI-FUN 5.2、9.3）量「強玩家贏得了、弱玩家輸」，數字寫在 `docs/cards/<id>.md`。
+   * 只有老闆核准的牌可以掛（S-3、S-7、S-J、S-Q）；有路徑搜尋之類真策略的牌不准用它蓋掉 A4。
+   */
+  readonly reflexOnly?: boolean;
+  /**
    * 這張牌在遊戲裡一局跑幾個 tick；沒寫就是共同設定的 3600（SPEC 第 9 節，60 秒）。
    * 只有外殼讀它（`matchConfigFor`）；契約測試仍用 3600 跑每一張牌，所以牌自己的 `logic.ts`
    * 要用 `min(config.maxTicks, defaultMaxTicks)`（JK-R 的做法），兩邊都成立。

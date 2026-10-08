@@ -12,4 +12,5 @@ export const sQMeta: CardMeta = {
   defaultPolicy: 'precise',
   baseLevel: 4,
   symmetric: true,
+  reflexOnly: true,
 };

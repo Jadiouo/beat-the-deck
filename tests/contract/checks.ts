@@ -646,6 +646,23 @@ export function runsAiChecks(entry: RegistryEntry): boolean {
   return entry.meta.defaultPolicy !== null && entry.meta.suit !== 'JK';
 }
 
+/** A4 的前提：跑 A1–A5，而且不是 `meta.reflexOnly`（純反射牌，A4 不是證據；見 CardMeta）。 */
+export function runsA4(entry: RegistryEntry): boolean {
+  return runsAiChecks(entry) && entry.meta.reflexOnly !== true;
+}
+
+const A4_REFLEX_REASON =
+  '這張牌標了 reflexOnly（純反射牌）：沒有策略深度，A4 只能靠超人類反應達成，不是「人贏得了」的證據；' +
+  '改看小規格裡的劇本玩家量測（強玩家贏得了、弱玩家輸）';
+
+/** 這一條 A 檢查對這張牌不適用的理由；適用就回 null。測試名稱與回報都用它，不適用絕不是通過。 */
+export function notApplicableReason(def: CheckDef, entry: RegistryEntry): string | null {
+  if (def.applies(entry)) {
+    return null;
+  }
+  return def.whyNotApplicable?.(entry) ?? '這張牌不適用';
+}
+
 function requirePolicy(entry: RegistryEntry): Policy {
   const policy = defaultPolicyOf(entry.meta);
   if (policy === null) {
@@ -1079,6 +1096,11 @@ export interface CheckDef {
   readonly title: string;
   /** 這張牌需不需要跑這一條（K12 只對 `meta.symmetric`）。 */
   applies(entry: RegistryEntry): boolean;
+  /**
+   * `applies` 回 false 時，為什麼不適用（印在測試名稱裡，讓跳過看得見）。沒寫就是「這張牌不適用」。
+   * 絕不可以用「回報通過」代替不適用。
+   */
+  whyNotApplicable?(entry: RegistryEntry): string;
   /** 對給定的種子清單跑；失敗丟 `ContractViolation`。 */
   run(entry: RegistryEntry, seeds: readonly number[]): void;
 }
@@ -1144,7 +1166,13 @@ function aiDefs(): CheckDef[] {
   return defs.map(({ code, title, fn }) => ({
     code,
     title,
-    applies: runsAiChecks,
+    applies: code === 'A4' ? runsA4 : runsAiChecks,
+    whyNotApplicable(entry: RegistryEntry): string {
+      if (!runsAiChecks(entry)) {
+        return '沒有預設性格或是鬼牌，不跑 A1–A5';
+      }
+      return A4_REFLEX_REASON;
+    },
     run(entry: RegistryEntry, seeds: readonly number[]): void {
       void seeds;
       try {

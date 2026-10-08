@@ -13,4 +13,5 @@ export const sJMeta: CardMeta = {
   defaultPolicy: 'precise',
   baseLevel: 4,
   symmetric: true,
+  reflexOnly: true,
 };
