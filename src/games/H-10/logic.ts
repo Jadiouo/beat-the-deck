@@ -85,6 +85,14 @@ const END_BONUS = 1000;
 /** 反射規則的小加分：偏離公平價一檔扣這麼多（遠小於任何真正的期望值差）。 */
 const HABIT = 0.01;
 
+/**
+ * 籌碼的影子價格的折扣：一個籌碼值 `之後還有多少價值 ÷ (GAMMA × 我的預算)`。
+ * GAMMA = 1 是「所有剩下的預算都能按公平價買到價值」，量出來太保守：AI 讓對手在前幾件用 ×1.8 一路買下去，
+ * 對一直出 ×1.8 的腳本玩家只贏 11%；GAMMA ≥ 1.5 之後對所有固定檔位的玩家都贏（見小規格「量測結果」）。
+ * 原因是預算用不完就沒有價值，而且對手預算見底之後後面的件幾乎不用錢，所以平均每個籌碼的價值高估了邊際價值。
+ */
+const GAMMA = 2;
+
 /** 對手模型的常數（小規格「對手模型」）。 */
 export const WINDOW = 4;
 export const DECAY = 0.6;
@@ -410,8 +418,8 @@ function resolveExpectation(state: H10State, side: Side, mine: Level): number {
   const after = rest - value;
   const myBudget = state.budget[side];
   const oppBudget = state.budget[opp];
-  const nuMe = myBudget > 0 ? after / myBudget : 0;
-  const nuOpp = oppBudget > 0 ? after / oppBudget : 0;
+  const nuMe = myBudget > 0 ? after / (GAMMA * myBudget) : 0;
+  const nuOpp = oppBudget > 0 ? after / (GAMMA * oppBudget) : 0;
   const myBid = bidOf(mine, value, myBudget, rest);
   const probs = predictOpponent(state.history, side, state.model);
   let expected = 0;

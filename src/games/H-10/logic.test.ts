@@ -661,21 +661,25 @@ describe('H-10 暗標｜AI 怎麼出價（等級曲線從結算流程長出來�
     }
   });
 
-  it('騙它：餵了保守再破——同一個局面（價值 10 的件、預算相同），歷史是「連出公平價」AI 出 ×1.3 以上，歷史是「剛連出保守」AI 出公平價以下（你破的 ×1.3 贏得了它）', () => {
-    const fed = decideAtDepth(spot(oppHistory([3, 3, 1, 1], [3, 8, 1, 6])), 1, 6);
+  it('騙它（機制上做得到）：同一個局面（價值 10 的件、預算相同），歷史是「連出公平價」AI 出 ×1.3 以上，歷史是「連續四件棄標」AI 退到 ×0.5（窗口整個被餵滿）', () => {
+    const fed = decideAtDepth(spot(oppHistory([0, 0, 0, 0], [3, 8, 1, 6])), 1, 6);
     const honest = decideAtDepth(spot(oppHistory([3, 3, 3, 3], [3, 8, 1, 6])), 1, 6);
-    expect(levelOf(fed) as number).toBeLessThanOrEqual(3);
+    expect(levelOf(fed)).toBe(1);
     expect(levelOf(honest) as number).toBeGreaterThanOrEqual(4);
   });
 
-  it('騙它的代價不對稱：被餵的 AI 出便宜的檔位，你破的 ×1.3 拿下價值 10 的件，AI 丟了 10 分；你餵的那兩件（價值 1 與 2）加起來才 3 分', () => {
-    const s = spot(oppHistory([3, 3, 1, 1], [3, 8, 1, 6]));
+  it('騙它的代價不對稱（機制）：被餵滿的 AI 出 ×0.5，你破的公平價拿下價值 10 的件；餵的四件（價值 3、8、1、6）是你自己決定要不要真的付出的', () => {
+    const s = spot(oppHistory([0, 0, 0, 0], [3, 8, 1, 6]));
     expect(s.values[4]).toBe(10);
     const aiLevel = levelOf(decideAtDepth(s, 1, 6)) as Level;
-    const resolved = playItem(s, 4, aiLevel);
+    const resolved = playItem(s, FAIR_LEVEL as Level, aiLevel);
     expect(resolved.got[0]).toBe(10);
     expect(resolved.got[1]).toBe(0);
-    expect(ORDER[2]! + ORDER[5]!).toBe(3);
+  });
+
+  it('只餵兩件還不夠讓 AI 退（它對最近一件之外的證據有保留）：歷史 [公平, 公平, 棄標, 棄標] 時 AI 還是出 ×1.3', () => {
+    const s = spot(oppHistory([3, 3, 0, 0], [3, 8, 1, 6]));
+    expect(levelOf(decideAtDepth(s, 1, 6))).toBe(4);
   });
 
   it('最後一件：預算不再值錢，AI 會 all-in（出價 = 剩餘預算）', () => {
