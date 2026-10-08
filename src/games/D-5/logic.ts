@@ -255,6 +255,8 @@ interface View {
   readonly settle: number;
   /** 遊戲剩下的 tick。 */
   readonly left: number;
+  /** 這場倉庫收貨後休息幾個 tick（消融實驗會改成 0）。 */
+  readonly coolTicks: number;
 }
 
 /**
@@ -270,7 +272,7 @@ function restSteps(view: View, colour: number): number {
  * 我走 `mySteps` 步（從 `view.myNext` 算）到倉庫 `colour` 的時候，要白等幾步：算進對手背著同色貨、
  * 而且比我先到的情況（它送了，倉庫就休息 `coolTicks`）。我先到或同時到沒有問題（它去等）。
  */
-function waitSteps(view: View, colour: number, mySteps: number, coolTicks: number): number {
+function waitSteps(view: View, colour: number, mySteps: number): number {
   const rest = restSteps(view, colour);
   const theirCarry = view.state.carry[view.side === 0 ? 1 : 0];
   let ready = rest;
@@ -278,7 +280,7 @@ function waitSteps(view: View, colour: number, mySteps: number, coolTicks: numbe
     const depot = view.state.depots[colour] as number;
     const theirDeliver = Math.max(steps(view.theirs, depot), rest);
     if (theirDeliver < mySteps) {
-      ready = Math.max(ready, theirDeliver + Math.ceil(coolTicks / MOVE_EVERY));
+      ready = Math.max(ready, theirDeliver + Math.ceil(view.coolTicks / MOVE_EVERY));
     }
   }
   return Math.max(0, ready - mySteps);
@@ -310,7 +312,7 @@ function bestParcel(view: View, skip: (p: Parcel) => boolean): Plan | null {
     const worth = worthOf(state.walls, depot, p.cell);
     const toParcel = steps(view.mine, p.cell);
     const total = toParcel + steps(bfsDistances(state.walls, depot), p.cell);
-    const cost = Math.max(total, restSteps(view, p.colour));
+    const cost = total + waitSteps(view, p.colour, total);
     if (tooLate(view, cost)) {
       continue;
     }
@@ -323,7 +325,7 @@ function bestParcel(view: View, skip: (p: Parcel) => boolean): Plan | null {
   return best;
 }
 
-function viewOf(state: D5State, side: Side, atCurrent: boolean): View {
+function viewOf(state: D5State, side: Side, atCurrent: boolean, coolTicks: number): View {
   const other: Side = side === 0 ? 1 : 0;
   const me = state.players[side];
   const opponent = state.players[other];
@@ -338,13 +340,14 @@ function viewOf(state: D5State, side: Side, atCurrent: boolean): View {
     theirs: fields.theirs,
     settle: settleIn(state.tick),
     left: state.maxTicks - state.tick,
+    coolTicks,
   };
 }
 
 /** `actions` 用的目標：背著貨去同色倉庫、空手去最想去的包裹（用現在的位置，不是下一步）。 */
-function focusOf(state: D5State, side: Side): number | null {
+function focusOf(state: D5State, side: Side, coolTicks: number): number | null {
   const carry = state.carry[side];
-  const view = viewOf(state, side, true);
+  const view = viewOf(state, side, true, coolTicks);
   if (carry !== null) {
     return tooLate(view, steps(view.mine, state.depots[carry.colour] as number))
       ? null
@@ -514,7 +517,7 @@ export function createD5Game(coolTicks: number = COOL): Game<D5State> {
     },
 
     actions(state: D5State, side: Side): readonly Buttons[] {
-      return actionsToward(state.walls, state.players[side], side, focusOf(state, side));
+      return actionsToward(state.walls, state.players[side], side, focusOf(state, side, coolTicks));
     },
 
     evaluate(state: D5State, side: Side): { gain: number; danger: number } {
@@ -526,7 +529,7 @@ export function createD5Game(coolTicks: number = COOL): Game<D5State> {
         const sign = difference === 0 ? 0 : difference > 0 ? 1 : -1;
         return { gain: GAIN_PER_POINT * difference + sign * WIN_BONUS, danger: 0 };
       }
-      const view = viewOf(state, side, false);
+      const view = viewOf(state, side, false, coolTicks);
       const moving = view.myNext !== me.cell;
 
       // 下一次走格會發生的事（虛擬）：踩進沒在休息的同色倉庫就送達；空手踩到包裹就撿起。
@@ -556,7 +559,7 @@ export function createD5Game(coolTicks: number = COOL): Game<D5State> {
       if (held !== null) {
         const depot = state.depots[held.colour] as number;
         const toDepot = steps(view.mine, depot);
-        const cost = Math.max(toDepot, restSteps(view, held.colour));
+        const cost = toDepot + waitSteps(view, held.colour, toDepot);
         if (tooLate(view, cost)) {
           held = null; // 來不及送：背著的貨不算數
         } else {
@@ -564,16 +567,14 @@ export function createD5Game(coolTicks: number = COOL): Game<D5State> {
           // 已經背著的貨，白等的估計用「現在的位置」算（五個動作都一樣，不會逼人倒退著走）；
           // 剛要撿起的那一步用撿起來的格子算，兩者在撿起來的前後是同一個數字。
           const from = pickedUp ? toDepot : steps(bfsDistances(state.walls, me.cell), depot);
-          danger = clamp01(waitSteps(view, held.colour, from, coolTicks) / (COOL / MOVE_EVERY));
+          danger = clamp01(waitSteps(view, held.colour, from) / (COOL / MOVE_EVERY));
         }
       } else {
         const oppTakes = (p: Parcel): boolean => view.oppNext === p.cell && theirHeld === null;
         const plan = bestParcel(view, (p) => oppTakes(p) || (moving && p.cell === view.myNext));
         if (plan !== null) {
           potential = plan.value;
-          danger = clamp01(
-            waitSteps(view, plan.colour, plan.steps, coolTicks) / (COOL / MOVE_EVERY),
-          );
+          danger = clamp01(waitSteps(view, plan.colour, plan.steps) / (COOL / MOVE_EVERY));
         }
       }
 
