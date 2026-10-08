@@ -1,5 +1,6 @@
 node_modules
 dist
+dist-offline
 coverage
 playwright-report
 test-results
@@ -9,3 +10,6 @@ test-results
 
 # 量測用的暫存檔（見 tsconfig.json 的 comment:exclude）
 tests/scratch/
+
+# 建置產物的壓縮包（給老闆離線開的版本，用 SendUserFile 送出，不進 repo）
+*.zip
