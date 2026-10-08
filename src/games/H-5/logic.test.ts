@@ -161,12 +161,12 @@ describe('H-5 二十一點｜初始與常數', () => {
     }
   });
 
-  it('常數：7 手、最多 4 張、鎖定 2 tick、公開後停 30 tick、爆牌多扣 1 分、窗口 3 手', () => {
-    expect(HANDS).toBe(7);
+  it('常數：9 手、最多 4 張、鎖定 2 tick、公開後停 30 tick、爆牌多扣 2 分、窗口 3 手', () => {
+    expect(HANDS).toBe(9);
     expect(MAX_CARDS).toBe(4);
     expect(LOCK_TICKS).toBe(2);
     expect(RESULT_TICKS).toBe(30);
-    expect(BUST_EXTRA).toBe(1);
+    expect(BUST_EXTRA).toBe(2);
     expect(WINDOW).toBe(3);
   });
 
@@ -469,7 +469,7 @@ describe('H-5 二十一點｜規則', () => {
     expect(cut.scores).toEqual([1, 0]);
   });
 
-  it('23. 沒有人按任何鍵：每個決定等 300 tick，用不完 7 手也會在 3600 tick 內結束', () => {
+  it('23. 沒有人按任何鍵：每個決定等 300 tick，用不完 9 手也會在 3600 tick 內結束', () => {
     let s = h5Game.init(1, CONFIG);
     for (let i = 0; i < 3600 && !s.over; i += 1) {
       s = h5Game.step(s, idle());
@@ -661,20 +661,20 @@ describe('H-5 二十一點｜unseenCounts、holePosterior（只用公開的資�
 describe('H-5 二十一點｜continuation 與 handValue（這手牌的期望）', () => {
   const FULL = new Array<number>(10).fill(4);
 
-  it('continuation：對手停在 18：17 點停牌 −1；要牌 −0.9（1 平手、2 到 4 贏、5 以上爆）', () => {
+  it('continuation：對手停在 18：17 點停牌 −1；要牌 (3 − 6 × (1 + 爆牌罰分)) ÷ 10（1 平手、2 到 4 贏、5 以上爆）', () => {
     const final = new Array<number>(23).fill(0);
     final[18] = 1;
     const v = continuation(final, FULL, 2, 17);
     expect(v.stop).toBeCloseTo(-1, 12);
-    expect(v.hit).toBeCloseTo(-0.9, 12);
+    expect(v.hit).toBeCloseTo((3 - 6 * (1 + BUST_EXTRA)) / 10, 12);
   });
 
-  it('continuation：對手一定爆牌：停牌 +2；12 點要牌 1.8（拿到 10 反而爆，兩邊都爆是 0）', () => {
+  it('continuation：對手一定爆牌：停牌 +2；12 點要牌 9 ÷ 10 × (1 + 爆牌罰分)（拿到 10 反而爆，兩邊都爆是 0）', () => {
     const final = new Array<number>(23).fill(0);
     final[22] = 1;
     const v = continuation(final, FULL, 2, 12);
     expect(v.stop).toBeCloseTo(1 + BUST_EXTRA, 12);
-    expect(v.hit).toBeCloseTo(1.8, 12);
+    expect(v.hit).toBeCloseTo((9 * (1 + BUST_EXTRA)) / 10, 12);
   });
 
   it('continuation：21 點要牌一定爆；3 張牌 20 點要牌拿到 1 以外都爆', () => {
@@ -1335,7 +1335,7 @@ describe('H-5 二十一點｜AI 怎麼打（等級曲線從結算流程長出來
 });
 
 describe('H-5 二十一點｜AI 能不能玩', () => {
-  it('兩個等級 5 的搜尋型打完一整場：7 手都打完，在 maxTicks 之前結束', () => {
+  it('兩個等級 5 的搜尋型打完一整場：9 手都打完，在 maxTicks 之前結束', () => {
     for (const seed of [1, 2, 3]) {
       const a = levelController(h5Game, pathfinder, 5, seed);
       const b = levelController(h5Game, pathfinder, 5, seed + 1_000_003);

@@ -28,7 +28,7 @@ export type Move = 0 | 1;
 export const HIT: Move = 0;
 export const STOP: Move = 1;
 
-export const HANDS = 7;
+export const HANDS = 9;
 /** 每人最多幾張牌（1 暗 ＋ 3 明）；滿了自動停牌。 */
 export const MAX_CARDS = 4;
 /** 兩邊都選好之後，鎖定幾個 tick 才公開（選 1、鎖定 2、公開 3：深度 3 以上走得到公開）。 */
@@ -36,7 +36,7 @@ export const LOCK_TICKS = 2;
 /** 公開並領牌之後、攤牌之後各停幾個 tick。 */
 export const RESULT_TICKS = 30;
 /** 爆牌的人多扣幾分（贏的人 +1，爆牌的人 −BUST_EXTRA）。 */
-export const BUST_EXTRA = 1;
+export const BUST_EXTRA = 2;
 /** 對手模型只看最近幾手（攤牌之後才寫入）。 */
 export const WINDOW = 3;
 /** 反射規則的小加分（遠小於任何真正的期望值差）。 */
