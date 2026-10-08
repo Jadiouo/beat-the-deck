@@ -115,6 +115,13 @@ function withKnown(triples: readonly (readonly [number, number, 1 | 2])[]): numb
   return known;
 }
 
+/** 只有第 `row` 排有人到過（pair 是 [我, 對手]）的 claimed。 */
+function claimedAt(row: number, pair: readonly [boolean, boolean]): H6State['claimed'] {
+  return Array.from({ length: ROWS }, (_v, i) =>
+    i === row - 1 ? pair : ([false, false] as const),
+  );
+}
+
 /** 歷史：對手（`who`）最近每回合的動作；另一邊一律等。 */
 function histOf(who: Side, acts: readonly Act[]): H6State['history'] {
   return acts.map((a) => (who === 0 ? [a, 'wait'] : ['wait', a]) as readonly [Act, Act]);
@@ -281,30 +288,18 @@ describe('H-6 地雷區｜規則', () => {
 
   it('9. 先到拿全額、後到拿一半（向上取整）：第 3 排先到 3、後到 2；第 1 排後到仍是 1；第 5 排後到 3', () => {
     // 對手已經先到過第 3 排：我後到
-    const claimed3 = new Array(6).fill(null).map((_v, i) => (i === 2 ? [false, true] : [false, false]));
-    const late = playRound(
-      choosing({ row: [2, 2], carry: [0, 0], claimed: claimed3 as H6State['claimed'] }),
-      1,
-      WAIT,
-    );
+    const claimed3 = claimedAt(3, [false, true]);
+    const late = playRound(choosing({ row: [2, 2], carry: [0, 0], claimed: claimed3 }), 1, WAIT);
     expect(late.carry[0]).toBe(2);
     // 沒有人先到過：全額
     const first = playRound(choosing({ row: [2, 2] }), 1, WAIT);
     expect(first.carry[0]).toBe(3);
     // 第 1 排：ceil(1/2) = 1
-    const claimed1 = new Array(6).fill(null).map((_v, i) => (i === 0 ? [false, true] : [false, false]));
-    expect(
-      playRound(choosing({ claimed: claimed1 as H6State['claimed'] }), 1, WAIT).carry[0],
-    ).toBe(1);
+    const claimed1 = claimedAt(1, [false, true]);
+    expect(playRound(choosing({ claimed: claimed1 }), 1, WAIT).carry[0]).toBe(1);
     // 第 5 排：ceil(5/2) = 3
-    const claimed5 = new Array(6).fill(null).map((_v, i) => (i === 4 ? [false, true] : [false, false]));
-    expect(
-      playRound(
-        choosing({ row: [4, 4], claimed: claimed5 as H6State['claimed'] }),
-        3,
-        WAIT,
-      ).carry[0],
-    ).toBe(3);
+    const claimed5 = claimedAt(5, [false, true]);
+    expect(playRound(choosing({ row: [4, 4], claimed: claimed5 }), 3, WAIT).carry[0]).toBe(3);
   });
 
   it('10. 同一回合同時踏上同一排的兩個人都拿全額（先到看的是回合開始時誰已經到過）', () => {
@@ -316,9 +311,7 @@ describe('H-6 地雷區｜規則', () => {
   it('11. 已公開的安全格踏上去沒有風險，而且是跟隨：同一格有人先到過，所以拿一半', () => {
     const s0 = choosing({
       known: withKnown([[1, 1, 1]]),
-      claimed: new Array(6)
-        .fill(null)
-        .map((_v, i) => (i === 0 ? [false, true] : [false, false])) as H6State['claimed'],
+      claimed: claimedAt(1, [false, true]),
     });
     const s = playRound(s0, 1, WAIT);
     expect(s.row[0]).toBe(1);
@@ -328,9 +321,7 @@ describe('H-6 地雷區｜規則', () => {
       choosing({
         row: [1, 1],
         known: withKnown([[2, 0, 1]]),
-        claimed: new Array(6)
-          .fill(null)
-          .map((_v, i) => (i === 1 ? [false, true] : [false, false])) as H6State['claimed'],
+        claimed: claimedAt(2, [false, true]),
       }),
       0,
       WAIT,
@@ -460,14 +451,8 @@ describe('H-6 地雷區｜規則', () => {
   });
 
   it('22. 消融旗標：half = false 時後到的也拿全額；decay = 0 時等不縮水', () => {
-    const claimed3 = new Array(6)
-      .fill(null)
-      .map((_v, i) => (i === 2 ? [false, true] : [false, false])) as H6State['claimed'];
-    const noHalf = playRound(
-      choosing({ row: [2, 2], claimed: claimed3, half: false }),
-      1,
-      WAIT,
-    );
+    const claimed3 = claimedAt(3, [false, true]);
+    const noHalf = playRound(choosing({ row: [2, 2], claimed: claimed3, half: false }), 1, WAIT);
     expect(noHalf.carry[0]).toBe(3);
     const noDecay = playRound(choosing({ carry: [3, 3], decay: 0 }), WAIT, WAIT);
     expect(noDecay.carry).toEqual([3, 3]);
@@ -495,7 +480,12 @@ describe('H-6 地雷區｜safeProb 與 leadRate（AI 只用公開資訊）', () 
   });
 
   it('已知安全是 1、已知雷是 0；同一排公開一顆雷之後，其餘格子的雷率是 (雷數 − 已公開的雷) / 還沒公開的格數', () => {
-    const s = makeState({ known: withKnown([[3, 0, 2], [3, 1, 1]]) });
+    const s = makeState({
+      known: withKnown([
+        [3, 0, 2],
+        [3, 1, 1],
+      ]),
+    });
     expect(safeProb(s, 3, 1)).toBe(1);
     expect(safeProb(s, 3, 0)).toBe(0);
     // 第 3 排兩顆雷，公開了一顆雷與一格安全：剩 2 格沒公開、1 顆雷 → 安全率 1/2
@@ -551,7 +541,10 @@ describe('H-6 地雷區｜safeProb 與 leadRate（AI 只用公開資訊）', () 
     expect(confidenceLevel(makeState({ history: histOf(0, ['lead']) }), 1)).toBe(1);
     expect(confidenceLevel(makeState({ history: histOf(0, ['lead', 'wait']) }), 1)).toBe(2);
     expect(
-      confidenceLevel(makeState({ history: histOf(0, ['lead', 'wait', 'wait', 'lead', 'lead']) }), 1),
+      confidenceLevel(
+        makeState({ history: histOf(0, ['lead', 'wait', 'wait', 'lead', 'lead']) }),
+        1,
+      ),
     ).toBe(3);
     expect(confidenceLevel(makeState({ model: false, history: histOf(0, ['lead']) }), 1)).toBe(0);
   });
@@ -651,9 +644,7 @@ describe('H-6 地雷區｜actions 與 evaluate', () => {
       row: [2, 3],
       carry: [2, 0],
       known: withKnown([[3, 1, 1]]),
-      claimed: new Array(6)
-        .fill(null)
-        .map((_v, i) => (i === 2 ? [false, true] : [false, false])) as H6State['claimed'],
+      claimed: claimedAt(3, [false, true]),
     });
     expect(moveValue(s, 0, 1)).toBeGreaterThan(moveValue(s, 0, 0));
   });
@@ -699,9 +690,7 @@ describe('H-6 地雷區｜不偷看（evaluate、actions、decide 都只讀公�
     row: [1, 1] as readonly [number, number],
     carry: [2, 3] as readonly [number, number],
     totals: [1, 0] as readonly [number, number],
-    claimed: new Array(6)
-      .fill(null)
-      .map((_v, i) => (i === 0 ? [true, true] : [false, false])) as H6State['claimed'],
+    claimed: claimedAt(1, [true, true]),
     round: 3,
     history,
   };
@@ -732,21 +721,23 @@ describe('H-6 地雷區｜不偷看（evaluate、actions、decide 都只讀公�
     });
     groups.push({
       name: 'locked（我剛按了鍵）：雷圖、對手的 pending 不同',
-      states: maps.flatMap((mines) =>
-        ([0, 1, 2, BANK, WAIT] as const).flatMap((mine) =>
-          oppMoves
-            .filter((p): p is Move => p !== null)
-            .map((p) =>
-              makeState({
-                ...shared,
-                mines,
-                phase: 'locked',
-                wait: LOCK_TICKS,
-                pending: [p, mine],
-              }),
-            ),
-        ),
-      ).filter((s) => s.pending[1] === 1),
+      states: maps
+        .flatMap((mines) =>
+          ([0, 1, 2, BANK, WAIT] as const).flatMap((mine) =>
+            oppMoves
+              .filter((p): p is Move => p !== null)
+              .map((p) =>
+                makeState({
+                  ...shared,
+                  mines,
+                  phase: 'locked',
+                  wait: LOCK_TICKS,
+                  pending: [p, mine],
+                }),
+              ),
+          ),
+        )
+        .filter((s) => s.pending[1] === 1),
     });
     groups.push({
       name: 'resolve（公開之後）：我的選擇固定，雷圖、對手的 pending、last 不同',
@@ -839,7 +830,9 @@ describe('H-6 地雷區｜不偷看（evaluate、actions、decide 都只讀公�
       expect(mines[cellIndex(1, 0)]).toBe(1);
       expect(mines[cellIndex(1, 1)]).toBe(0);
       for (let r = 1; r <= ROWS; r += 1) {
-        expect(mines.slice((r - 1) * COLS, r * COLS).reduce((a, b) => a + b, 0)).toBe(minesInRow(r));
+        expect(mines.slice((r - 1) * COLS, r * COLS).reduce((a, b) => a + b, 0)).toBe(
+          minesInRow(r),
+        );
       }
     }
     expect(mapA.join('')).not.toBe(mapB.join(''));
@@ -877,7 +870,9 @@ describe('H-6 地雷區｜不偷看（evaluate、actions、decide 都只讀公�
       '讀雷圖（所有階段，我的下一排）': (s, side) =>
         0.001 * (s.mines[cellIndex(s.row[side] + 1, 1)] as number),
       '讀雷圖（resolve）': (s, side) =>
-        s.phase === 'resolve' ? 0.001 * (s.mines[cellIndex(Math.min(6, s.row[side] + 1), 1)] as number) : 0,
+        s.phase === 'resolve'
+          ? 0.001 * (s.mines[cellIndex(Math.min(6, s.row[side] + 1), 1)] as number)
+          : 0,
       '讀對手的 pending': (s, side) => (s.pending[1 - side] === 1 ? 0.001 : 0),
       '讀對手的 pending（resolve）': (s, side) =>
         s.phase === 'resolve' && s.pending[1 - side] === WAIT ? 0.001 : 0,
@@ -909,7 +904,8 @@ describe('H-6 地雷區｜不偷看（evaluate、actions、decide 都只讀公�
       ...h6Game,
       evaluate: (s, side) => {
         const e = h6Game.evaluate(s, side);
-        const peekedMines = s.mines.reduce((a, b) => a + b, 0) + (s.mines[cellIndex(2, 1)] as number);
+        const peekedMines =
+          s.mines.reduce((a, b) => a + b, 0) + (s.mines[cellIndex(2, 1)] as number);
         return { gain: e.gain + 0.37 * peekedMines, danger: e.danger };
       },
     };
@@ -1026,26 +1022,39 @@ describe('H-6 地雷區｜AI 怎麼打（等級曲線從結算流程長出來）
     }
   });
 
-  it('等級曲線是階梯：深度 1、2 永遠一樣（讀不到歷史），深度 ≥ 3 存在同一個局面因為歷史不同而選不同的鍵', () => {
-    const scenes: H6State[] = [];
-    for (const row of [0, 1, 2, 3]) {
-      for (const carry of [0, 1, 2, 3, 4]) {
-        scenes.push(scene(row, carry));
+  const gridScenes: H6State[] = [];
+  for (const round of [0, 3, 6, 9, 11]) {
+    for (let row = 0; row <= 5; row += 1) {
+      for (let carry = 0; carry <= 8; carry += 1) {
+        gridScenes.push({ ...scene(row, carry), round });
       }
     }
-    const differsAt = (depth: number): boolean =>
-      scenes.some((s) => {
-        const set = new Set(
-          histories.map((history) =>
-            JSON.stringify(decideAtDepth({ ...s, history }, 1, depth)),
-          ),
-        );
-        return set.size > 1;
-      });
-    expect(differsAt(1)).toBe(false);
-    expect(differsAt(2)).toBe(false);
-    expect(differsAt(3)).toBe(true);
-    expect(differsAt(6)).toBe(true);
+  }
+
+  it('等級曲線的階梯在「反射 → 動態規劃」：深度 1、2 永遠是反射、深度 ≥ 3 在存在的局面選不一樣的鍵（而且階梯的另一半——讀歷史——沒有出現）', () => {
+    const differsFromReflex = (depth: number): boolean =>
+      gridScenes.some((s) => moveOf(decideAtDepth(s, 1, depth)) !== reflexMove(s, 1));
+    expect(differsFromReflex(1)).toBe(false);
+    expect(differsFromReflex(2)).toBe(false);
+    expect(differsFromReflex(3)).toBe(true);
+    expect(differsFromReflex(6)).toBe(true);
+    // 同一個局面，深度 3 到 6 的選擇一樣（公開之後的結算流程只有 3 步，再深也看不到更多）
+    for (const s of gridScenes) {
+      expect(moveOf(decideAtDepth(s, 1, 3))).toBe(moveOf(decideAtDepth(s, 1, 6)));
+    }
+  });
+
+  it('誠實的負面結果：歷史（leadRate）會改變 moveValue 的數字，但在 5 個回合 × 6 排 × 0 到 8 分的格子裡，沒有任何一格讓深度 6 的選擇因此不同', () => {
+    for (const s of gridScenes) {
+      const set = new Set(
+        histories.map((history) => JSON.stringify(decideAtDepth({ ...s, history }, 1, 6))),
+      );
+      expect(set.size, `回合 ${s.round} 排 ${s.row[1]} 分 ${s.carry[1]}`).toBe(1);
+    }
+    // 數字層面它確實在讀：同一排、可以等的局面，對手越常領頭，等的價值越高
+    const base = scene(2, 2);
+    const values = histories.map((history) => moveValue({ ...base, history }, 1, WAIT));
+    expect(Math.max(...values)).toBeGreaterThan(Math.min(...values));
   });
 
   it('模型關掉（消融）：深度 6 的 AI 對任何歷史都選一樣的鍵', () => {
@@ -1061,47 +1070,43 @@ describe('H-6 地雷區｜AI 怎麼打（等級曲線從結算流程長出來）
     }
   });
 
-  it('DESIGN-AI-FUN 10.11 (a)(b)(c)：它讀錯你會不會領頭就賠錢——規則層面成立（不是靠參數）', () => {
-    // 真實世界：對手（0 號邊）這回合一定等。AI 若以為對手常領頭（歷史全是領頭），會等著跟；
-    // 真實的期望（用 leadRate 的先驗之外，把對手領頭的機率換成 0）比較低。
+  it('DESIGN-AI-FUN 10.11：(a)(b) 成立、(c) 不成立——AI 的信念會因為你的行為偏離、偏離可預測，但偏離之後它並不賠錢', () => {
     const believedLeader = histOf(0, ['lead', 'lead', 'lead', 'lead']);
     const believedWaiter = histOf(0, ['wait', 'wait', 'wait', 'wait']);
-    let found = 0;
-    let worst = 0;
-    for (let row = 0; row <= 4; row += 1) {
-      for (let carry = 0; carry <= 6; carry += 1) {
-        const lead = scene(row, carry, believedLeader);
-        const wait = scene(row, carry, believedWaiter);
-        const bestOf = (s: H6State): Move => {
-          const options: Move[] = [0, 1, 2, 3, BANK, WAIT];
-          let best: Move = WAIT;
-          let bestV = Number.NEGATIVE_INFINITY;
-          for (const m of options) {
-            if (m === BANK && carry === 0) continue;
-            const v = moveValue(s, 1, m);
-            if (v > bestV) {
-              bestV = v;
-              best = m;
-            }
-          }
-          return best;
-        };
-        const believedBest = bestOf(lead);
-        const trueBest = bestOf(wait);
-        if (believedBest === trueBest) {
+    const moves: Move[] = [0, 1, 2, 3, BANK, WAIT];
+    const bestOf = (s: H6State): Move => {
+      let best: Move = WAIT;
+      let bestV = Number.NEGATIVE_INFINITY;
+      for (const m of moves) {
+        if (m === BANK && s.carry[1] === 0) {
           continue;
         }
-        // (a)(b) 它真的會照信念選
-        expect(moveOf(decideAtDepth(lead, 1, 6))).toBe(believedBest);
-        // (c) 在真實世界（對手是個等待的人）裡照錯誤信念選期望比較低
-        const loss = moveValue(wait, 1, trueBest) - moveValue(wait, 1, believedBest);
-        expect(loss).toBeGreaterThan(0);
-        worst = Math.max(worst, loss);
-        found += 1;
+        const v = moveValue(s, 1, m);
+        if (v > bestV) {
+          bestV = v;
+          best = m;
+        }
+      }
+      return best;
+    };
+    let moved = 0;
+    let flips = 0;
+    for (const s of gridScenes) {
+      const lead = { ...s, history: believedLeader };
+      const wait = { ...s, history: believedWaiter };
+      // (a)(b) 信念偏離而且方向可預測：認定你常領頭，等的價值不會比較低
+      const dv = moveValue(lead, 1, WAIT) - moveValue(wait, 1, WAIT);
+      expect(dv).toBeGreaterThan(-1e-9);
+      if (dv > 1e-9) {
+        moved += 1;
+      }
+      // (c) 偏離之後它選的和「信念正確時」選的不一樣，才會賠錢
+      if (bestOf(lead) !== bestOf(wait)) {
+        flips += 1;
       }
     }
-    expect(found).toBeGreaterThan(0);
-    expect(worst).toBeGreaterThan(0.05);
+    expect(moved).toBeGreaterThan(0);
+    expect(flips).toBe(0);
   });
 
   describe('DESIGN-AI-FUN 10.6 的兩個 pending 陷阱', () => {

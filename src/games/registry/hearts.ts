@@ -14,6 +14,10 @@ import { h5Game } from '../H-5/logic';
 import type { H5State } from '../H-5/logic';
 import { h5Meta } from '../H-5/meta';
 import { h5Render } from '../H-5/render';
+import { h6Game } from '../H-6/logic';
+import type { H6State } from '../H-6/logic';
+import { h6Meta } from '../H-6/meta';
+import { h6Render } from '../H-6/render';
 import { h9Game } from '../H-9/logic';
 import type { H9State } from '../H-9/logic';
 import { h9Meta } from '../H-9/meta';
@@ -73,6 +77,13 @@ export const heartsEntries: readonly RegistryEntry[] = [
     game: h5Game,
     render: h5Render,
     meta: h5Meta,
+  }),
+  defineEntry<H6State>({
+    id: h6Meta.id,
+    kind: 'card',
+    game: h6Game,
+    render: h6Render,
+    meta: h6Meta,
   }),
   defineEntry<H9State>({
     id: h9Meta.id,
