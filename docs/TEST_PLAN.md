@@ -143,7 +143,7 @@
 
 紅心的牌運氣成分高，A1 的門檻降為 60%、A2 降為 55%；要在那張牌的 `meta.ts` 用 `luckHeavy: true` 標明。鬼牌不跑這一節。
 
-> 訂正（2026-10-08）：A4 對「純反射牌」不適用。原文的 A4 門檻（≤35%）沒有動。這是老闆的裁示（GOAL 第 1 條優先）：`src/ai/level.ts` 的 `reactionTicks` 已對所有等級固定成 12 tick（與人類模型相同，見 `docs/DESIGN-AI-FUN.md` 9.7），沒有策略深度可以剝削的牌，等級 10 要把人類模型壓在 35% 以下只能靠超人類的反應，那正是 GOAL 第 1 條明文不要的。所以 `CardMeta` 多一個選用旗標 `reflexOnly: true`（`src/games/types.ts`），只有核准的四張掛：**S-3 擦彈、S-7 拔槍、S-J 射手與靶、S-Q 鏡像**。
+> 訂正（2026-10-08）：A4 對「純反射牌」不適用。原文的 A4 門檻（≤35%）沒有動。這是老闆的裁示（GOAL 第 1 條優先）：`src/ai/level.ts` 的 `reactionTicks` 已對所有等級固定成 12 tick（與人類模型相同，見 `docs/DESIGN-AI-FUN.md` 9.7），沒有策略深度可以剝削的牌，等級 10 要把人類模型壓在 35% 以下只能靠超人類的反應，那正是 GOAL 第 1 條明文不要的。所以 `CardMeta` 多一個選用旗標 `reflexOnly: true`（`src/games/types.ts`），只有核准的牌掛：**S-3 擦彈、S-7 拔槍、S-J 射手與靶、S-Q 鏡像**，以及 2026-10-08 補掛的 **S-A 落雨、S-2 瞄準彈**（共六張；補掛的理由是與 S-3 同構，不是它們的 A4 變紅，見 DESIGN-AI-FUN 10.5）。
 > - 掛旗標的牌，A4 **不跑也不算通過**：`tests/contract/checks.ts` 的 `runCheck` 回 `'skip'`（絕不是 `'pass'`），測試名稱印成 `A4 人打不太贏第十級（不適用：這張牌標了 reflexOnly（純反射牌）……）`，理由由 `notApplicableReason` 集中產生。A1、A2、A3、A5 照跑，門檻照舊。
 > - 取代 A4 的是**劇本玩家**（`docs/DESIGN-AI-FUN.md` 5.2、9.3）：每張牌的小規格（`docs/cards/<id>.md`）必須有「A4 不是證據」一節，量「強玩家對等級 10 贏得了、弱玩家輸」。`tests/contract/registry-meta.test.ts` 檢查這一節存在。
 > - 沒有策略深度才能掛。有路徑搜尋之類真策略的牌（梅花、D-2）不能用旗標蓋掉 A4：那是把問題貼標籤。新增掛旗標的牌要老闆核准，`registry-meta.test.ts` 的清單就是核准的清單。
