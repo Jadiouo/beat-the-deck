@@ -19,12 +19,14 @@ import {
 } from '../_clubs/shared-rules.test-helpers';
 import {
   BAIT_GROW,
+  BAIT_NEAR,
   BAIT_POINTS,
   BAR_LEN,
   c5Game,
   createC5Game,
   crushDanger,
   landingTick,
+  LANDING_CANDIDATES,
   LANDING_TRIES,
   makeState,
   PAIR_OFFSET,
@@ -133,9 +135,11 @@ describe('C-5 會動的牆｜常數與時程', () => {
     expect(BAR_LEN).toBe(6);
     expect(PAIR_PERIOD).toBe(300);
     expect(PAIR_OFFSET).toBe(150);
-    expect(PREVIEW_TICKS).toBe(60);
-    expect(BAIT_POINTS).toBe(2);
+    expect(PREVIEW_TICKS).toBe(120);
+    expect(BAIT_POINTS).toBe(3);
     expect(BAIT_GROW).toBe(2);
+    expect(BAIT_NEAR).toBe(8);
+    expect(LANDING_CANDIDATES).toBe(30);
     expect(LANDING_TRIES).toBe(50);
   });
 
@@ -248,12 +252,12 @@ describe('C-5 會動的牆｜預告', () => {
     });
   }
 
-  it('預告開始前一個 tick 沒有預告；開始的那個 tick（240）寫進 landing 與 bait', () => {
+  it('預告開始前一個 tick 沒有預告；開始的那個 tick（300 − PREVIEW_TICKS）寫進 landing 與 bait', () => {
     const before = calm();
-    expect(before.tick).toBe(239);
+    expect(before.tick).toBe(300 - PREVIEW_TICKS - 1);
     expect(before.landing).toBeNull();
     const started = c5Game.step(before, IDLE);
-    expect(started.tick).toBe(240);
+    expect(started.tick).toBe(300 - PREVIEW_TICKS);
     expect(started.landing).not.toBeNull();
     expect(started.landing?.pair).toBe(0);
     expect(started.landing?.at).toBe(300);
@@ -262,7 +266,7 @@ describe('C-5 會動的牆｜預告', () => {
     expect(started.bait?.until).toBe(300);
   });
 
-  it('1. 落點在預告開始那個 tick 就決定，之後 60 個 tick 逐 tick 相等、誘餌的格子也不變', () => {
+  it('1. 落點在預告開始那個 tick 就決定，之後整段預告逐 tick 相等、誘餌的格子也不變', () => {
     for (const seed of [0, 1, 2, 3, 4]) {
       let state = c5Game.step(calm({ rng: rngStateFor(seed, 'preview') }), IDLE);
       const landing = state.landing;
@@ -271,7 +275,10 @@ describe('C-5 會動的牆｜預告', () => {
       for (let t = state.tick; t < 299; t += 1) {
         state = c5Game.step(state, IDLE);
         expect(state.landing, `種子 ${seed} tick ${state.tick}`).toEqual(landing);
-        expect(state.bait, `種子 ${seed} tick ${state.tick}`).toEqual(bait);
+        // 誘餌離蛇很近，閒置的蛇可能走過去吃掉它：被吃掉以前，誘餌的格子不變。
+        if (state.bait !== null) {
+          expect(state.bait, `種子 ${seed} tick ${state.tick}`).toEqual(bait);
+        }
         // 預告期間，牆還在舊位置（四個空陣列）。
         expect(state.bars).toEqual([[], [], [], []]);
       }
@@ -323,12 +330,14 @@ describe('C-5 會動的牆｜預告', () => {
       const first = c5Game.step(calm({ rng: rngStateFor(seed, 'two') }), IDLE);
       expect(first.landing).not.toBeNull();
       // 直接把時間撥到 299 讓牆落下，再撥到第二次預告的前一個 tick。
-      const landed = c5Game.step({ ...first, tick: 299 }, IDLE);
+      // 誘餌與落點離蛇頭很近，閒置的蛇會被壓死而結束一局；這個測試只看落點，所以關掉壓死。
+      const noCrush = createC5Game({ crush: false });
+      const landed = noCrush.step({ ...first, tick: 299 }, IDLE);
       expect(landed.bars[0]).toEqual(first.landing?.bars[0]);
-      const second = c5Game.step(
+      const second = noCrush.step(
         {
           ...landed,
-          tick: 539,
+          tick: 600 - PREVIEW_TICKS - 1,
           snakes: calm().snakes,
         },
         IDLE,
@@ -344,23 +353,23 @@ describe('C-5 會動的牆｜預告', () => {
     const state = game.step(calm(), IDLE);
     expect(state.landing).toBeNull();
     expect(state.bait).toBeNull();
-    expect(state.tick).toBe(240);
+    expect(state.tick).toBe(300 - PREVIEW_TICKS);
   });
 
-  it('第 1 對的預告從 390 開始、450 落下；第 0 對的下一次預告從 540 開始、600 落下', () => {
-    const one = c5Game.step(calm({ tick: 389 }), IDLE);
+  it('第 1 對的預告在落下前 PREVIEW_TICKS 開始（450 落下）；第 0 對的下一次 600 落下', () => {
+    const one = c5Game.step(calm({ tick: 450 - PREVIEW_TICKS - 1 }), IDLE);
     expect(one.landing?.pair).toBe(1);
     expect(one.landing?.at).toBe(450);
-    const two = c5Game.step(calm({ tick: 539 }), IDLE);
+    const two = c5Game.step(calm({ tick: 600 - PREVIEW_TICKS - 1 }), IDLE);
     expect(two.landing?.pair).toBe(0);
     expect(two.landing?.at).toBe(600);
   });
 
   it('8. 邊界：落下的 tick 剛好等於 maxTicks，或超過 maxTicks，就不開始預告', () => {
     // 600 落下、maxTicks 600：不預告（一場結束的那一刻才落的牆沒有意義）。
-    expect(c5Game.step(calm({ tick: 539, maxTicks: 600 }), IDLE).landing).toBeNull();
+    expect(c5Game.step(calm({ tick: 600 - PREVIEW_TICKS - 1, maxTicks: 600 }), IDLE).landing).toBeNull();
     // maxTicks 601：預告。
-    expect(c5Game.step(calm({ tick: 539, maxTicks: 601 }), IDLE).landing).not.toBeNull();
+    expect(c5Game.step(calm({ tick: 600 - PREVIEW_TICKS - 1, maxTicks: 601 }), IDLE).landing).not.toBeNull();
     // 開局的第一次預告：maxTicks 400 就有（落下在 300）。
     expect(c5Game.step(calm({ maxTicks: 400 }), IDLE).landing).not.toBeNull();
     expect(c5Game.step(calm({ maxTicks: 300 }), IDLE).landing).toBeNull();
@@ -368,7 +377,7 @@ describe('C-5 會動的牆｜預告', () => {
 
   it('預告開始時已經有預告在進行（不該發生）：不會再開第二個預告，原來的預告不被覆蓋', () => {
     const first = c5Game.step(calm(), IDLE);
-    const forced = { ...first, tick: 389 };
+    const forced = { ...first, tick: 450 - PREVIEW_TICKS - 1 };
     const next = c5Game.step(forced, IDLE);
     expect(next.landing).toEqual(first.landing);
   });
@@ -378,7 +387,7 @@ describe('C-5 會動的牆｜誘餌', () => {
   function started(seed = 0): C5State {
     return c5Game.step(
       makeState({
-        tick: 239,
+        tick: 300 - PREVIEW_TICKS - 1,
         rng: rngStateFor(seed, 'bait'),
         snakes: [
           { body: body([10, 12], [9, 12], [8, 12]), dir: RIGHT },
@@ -389,7 +398,10 @@ describe('C-5 會動的牆｜誘餌', () => {
     );
   }
 
-  it('4. 誘餌在落點格子裡，挑的是兩個蛇頭距離之差 |d0 − d1| 最小的格子（同值取格子編號小的）（種子 0 到 29）', () => {
+  it('4. 誘餌在落點格子裡；落點挑成「有一格離兩個蛇頭都不超過 BAIT_NEAR」，誘餌挑那些格子裡 |d0 − d1| 最小的（種子 0 到 29）', () => {
+    const dist = (a: number, b: number): number =>
+      Math.abs(cellX(a) - cellX(b)) + Math.abs(cellY(a) - cellY(b));
+    let near = 0;
     for (let seed = 0; seed < 30; seed += 1) {
       const state = started(seed);
       const landing = state.landing;
@@ -400,17 +412,47 @@ describe('C-5 會動的牆｜誘餌', () => {
       expect(cells).toContain(bait?.cell);
       const h0 = state.snakes[0].body[0] as number;
       const h1 = state.snakes[1].body[0] as number;
-      const dist = (a: number, b: number): number =>
-        Math.abs(cellX(a) - cellX(b)) + Math.abs(cellY(a) - cellY(b));
-      let best = cells[0] as number;
-      for (const c of cells) {
-        if (Math.abs(dist(c, h0) - dist(c, h1)) < Math.abs(dist(best, h0) - dist(best, h1))) {
-          best = c;
+      const far = (c: number): number => Math.max(dist(c, h0), dist(c, h1));
+      const gap = (c: number): number => Math.abs(dist(c, h0) - dist(c, h1));
+      const inRange = cells.filter((c) => far(c) <= BAIT_NEAR && !state.foods.includes(c));
+      if (inRange.length > 0) {
+        near += 1;
+        // 有達標的格子：誘餌一定在達標的格子裡，而且是其中 gap 最小（同值取編號小）的。
+        const best = inRange.reduce((a, c) => (gap(c) < gap(a) ? c : a));
+        expect(bait?.cell, `種子 ${seed}`).toBe(best);
+      }
+    }
+    // 兩個蛇頭只隔 11 格，30 個局面裡幾乎每一個都挑得到達標的落點。
+    expect(near).toBeGreaterThanOrEqual(27);
+  });
+
+  it('4. 誘餌離兩個蛇頭都不遠：整局走下來，每個誘餌出現時 max(d0, d1) 的中位數 ≤ 10（種子 0 到 9，搜尋型等級 10 對打）', () => {
+    const far: number[] = [];
+    for (let seed = 0; seed < 6; seed += 1) {
+      const controllers = [
+        levelController(c5Game, pathfinder, 10, seed + 1),
+        levelController(c5Game, pathfinder, 10, seed + 1_000_003),
+      ];
+      let state = c5Game.init(seed, CONFIG);
+      let last = -1;
+      while (!c5Game.isOver(state)) {
+        state = c5Game.step(state, [
+          (controllers[0] as Controller<C5State>).decide(state, 0, state.tick),
+          (controllers[1] as Controller<C5State>).decide(state, 1, state.tick),
+        ]);
+        if (state.bait !== null && state.bait.cell !== last) {
+          last = state.bait.cell;
+          const d = (i: number): number =>
+            Math.abs(cellX(state.snakes[i]?.body[0] as number) - cellX(last)) +
+            Math.abs(cellY(state.snakes[i]?.body[0] as number) - cellY(last));
+          far.push(Math.max(d(0), d(1)));
         }
       }
-      expect(bait?.cell, `種子 ${seed}`).toBe(best);
     }
-  });
+    far.sort((a, b) => a - b);
+    expect(far.length).toBeGreaterThan(20);
+    expect(far[Math.floor(far.length / 2)] as number).toBeLessThanOrEqual(10);
+  }, 180_000);
 
   it('誘餌是額外的第三顆食物：場上的普通食物還是 2 顆', () => {
     const state = started();
@@ -577,7 +619,7 @@ describe('C-5 會動的牆｜落下', () => {
       bait: { cell: cell(12, 5), until: 90 },
     });
     state = c5Game.step(state, IDLE);
-    expect(state.snakes[0].score).toBe(2);
+    expect(state.snakes[0].score).toBe(BAIT_POINTS);
     state = c5Game.step(state, [PRESS_DOWN, NONE]);
     while (state.tick < 89) {
       state = c5Game.step(state, IDLE);
@@ -636,7 +678,7 @@ describe('C-5 會動的牆｜落下', () => {
     const game = createC5Game({ bait: false });
     const state = game.step(
       makeState({
-        tick: 239,
+        tick: 300 - PREVIEW_TICKS - 1,
         snakes: [
           { body: body([10, 12], [9, 12], [8, 12]), dir: RIGHT },
           { body: body([21, 11], [22, 11], [23, 11]), dir: LEFT },
