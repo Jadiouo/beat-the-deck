@@ -1,6 +1,13 @@
 import type { CardMeta } from '../types';
 
-/** C-7 縮水的 meta（SPEC 第 9 節；小規格 `docs/cards/C-7.md`）。 */
+/**
+ * C-7 縮水的 meta（SPEC 第 9 節；小規格 `docs/cards/C-7.md`）。
+ *
+ * 探針 A（DESIGN-AI-FUN 10.24、10.29；真實規則、真實 AI、1000 場、種子 0 到 999、玩家邊輪流、平手半場）：
+ * 讀 AI 的玩家 52.1%、把 AI 拿掉的玩家 56.0%，差 −3.9 個百分點（標準誤約 2.3，量不到互動）。
+ * 簡化模擬曾是 +24.1，對照 D-5 +44.5。標籤：誠實技術牌，不宣稱自己的 AI 互動。
+ * `CardMeta`（`../types`）沒有放探針數字的欄位，而那是共用檔案，所以數字只放在這個註解與小規格。
+ */
 export const c7Meta: CardMeta = {
   id: 'C-7',
   name: '縮水',
