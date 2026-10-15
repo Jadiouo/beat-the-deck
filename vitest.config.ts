@@ -18,6 +18,8 @@ const HEAVY_FILES = [
   'tests/ai/a-checks.*.test.ts',
   'tests/contract/all-games.*.test.ts',
   'tests/ai/policies.test.ts',
+  // 追目標的取得率（P1）：每張有可追目標的牌跑 16 場對局，慢。
+  'tests/contract/pursuit.test.ts',
 ];
 
 const common = {
@@ -33,7 +35,13 @@ export default defineConfig({
           ...common,
           name: 'light',
           include: ['src/**/*.test.ts', 'tests/**/*.test.ts'],
-          exclude: ['tests/e2e/**', 'tests/scratch/**', 'node_modules/**', 'dist/**', ...HEAVY_FILES],
+          exclude: [
+            'tests/e2e/**',
+            'tests/scratch/**',
+            'node_modules/**',
+            'dist/**',
+            ...HEAVY_FILES,
+          ],
         },
       },
       {

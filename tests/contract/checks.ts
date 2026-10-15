@@ -1327,3 +1327,160 @@ export function failingCodes(
   }
   return failed;
 }
+
+// ---------------------------------------------------------------------------
+// P1｜追目標的取得率（DESIGN-AI-FUN 10.31、10.32：「看得到卻不去拿」）
+// ---------------------------------------------------------------------------
+
+/**
+ * 為什麼有這一項：梅花的搜尋型 AI 在 `evaluateClubs` 的食物梯度太小、被 `PATHFINDER_W × 該層 gain 範圍 × danger`
+ * 蓋過，結果兩個等級 10 的 AI 對打 60 秒只吃 2.7 顆食物（C-A），在離食物 4 格處徘徊 50 秒。A1–A5 的對手都是
+ * 較弱的 AI，K1–K13 不看行為，所以這個缺陷通過了所有檢查（10.31）。
+ *
+ * 為什麼不訂通用門檻：食物、金幣、誘餌的機制與供應量每張牌都不同，「取得率的下限」沒有通用數字。
+ * 所以做法同 `reflexOnly`／`simpleStrategyViable`：判斷集中在這裡，每張牌**必須宣告**（`PURSUIT` 表），
+ * 有可追目標的宣告自己的下限、沒有的宣告「不適用」並寫明理由；檢查只強制「必須宣告、而且必須達到」。
+ * 梅花（`suit === 'C'`）每一張都必須在表裡（`tests/contract/pursuit.test.ts` 守住）；別的花色要加就加一行。
+ *
+ * 量法（普查 `tests/scratch/clubs-survey.test.ts` 的同一套）：兩個預設性格等級 10 對打，
+ * 「取得」＝某條活著的蛇走格後蛇頭落在走格前的某個目標格上；回報每分鐘取得數、局長中位數、放過率
+ * （蛇頭進到任何目標 3 格內的接近片段，結束時既沒吃到、也不是被對手先拿走）。
+ */
+export interface PursuitDeclaration {
+  /** 目前場上「該追的東西」的格子（食物、金幣、誘餌；顏色牌只算現在的正確顏色）。 */
+  readonly targets: (state: PursuitState) => readonly number[];
+  /** 兩邊合計每分鐘至少取得幾個。 */
+  readonly minTakesPerMinute: number;
+  /** 局長中位數（秒）至少多少：防止「吃得到但馬上撞死」（把危險權重調小的失敗模式）。 */
+  readonly minMedianSeconds: number;
+}
+
+export interface PursuitNotApplicable {
+  readonly notApplicable: string;
+}
+
+/** 追目標檢查需要讀的 state 欄位（梅花的 `ClubsState` 與子型別都有）。 */
+export interface PursuitState {
+  readonly foods: readonly number[];
+  readonly foodColors?: readonly number[];
+  readonly correct?: number;
+  readonly bait?: { readonly cell: number } | null;
+  readonly snakes: readonly { readonly body: readonly number[]; readonly alive: boolean }[];
+  readonly tick: number;
+}
+
+const clubFoods = (state: PursuitState): readonly number[] => state.foods;
+const colourFoods = (state: PursuitState): readonly number[] =>
+  state.foods.filter((_cell, i) => state.foodColors?.[i] === state.correct);
+const foodsAndBait = (state: PursuitState): readonly number[] =>
+  state.bait === null || state.bait === undefined ? state.foods : [...state.foods, state.bait.cell];
+
+/**
+ * 宣告表。下限的來源：修之前普查（30 場）的值、修之後的值與取下限的理由，寫在各張牌的小規格
+ * （`docs/cards/<id>.md`「追目標」一節）。要降低下限，先去問老闆。
+ */
+export const PURSUIT: Readonly<Record<string, PursuitDeclaration | PursuitNotApplicable>> = {
+  'C-A': { targets: clubFoods, minTakesPerMinute: 8, minMedianSeconds: 30 },
+  'C-2': { targets: clubFoods, minTakesPerMinute: 8, minMedianSeconds: 30 },
+  'C-3': { targets: colourFoods, minTakesPerMinute: 8, minMedianSeconds: 30 },
+  'C-4': { targets: clubFoods, minTakesPerMinute: 8, minMedianSeconds: 30 },
+  'C-5': { targets: foodsAndBait, minTakesPerMinute: 8, minMedianSeconds: 30 },
+  'C-7': { targets: clubFoods, minTakesPerMinute: 15, minMedianSeconds: 30 },
+  'C-8': { notApplicable: '光軌沒有可追的目標：先撞到牆的輸，贏的是活得久，不是拿到東西' },
+  'C-10': {
+    notApplicable: '追與逃：目標是對手的蛇頭，不是場上的東西；普查 60 個回合全部由追的抓到逃的',
+  },
+  'C-J': {
+    notApplicable:
+      '關卡設計師：一邊控蛇一邊控障礙，食物依固定序列出現；普查蛇每回合吃到 9.43／10 顆',
+  },
+};
+
+export interface PursuitMeasure {
+  readonly games: number;
+  readonly takesPerMinute: number;
+  readonly medianSeconds: number;
+  readonly missRate: number;
+  readonly takesPerGame: number;
+}
+
+/** 追目標的場數與種子：普查用 30 場，這裡用 16 場（理由見 `pursuit.test.ts`）。 */
+export const PURSUIT_SEEDS: readonly number[] = Array.from({ length: 16 }, (_, i) => i);
+
+export function measurePursuit(
+  entry: RegistryEntry,
+  declaration: PursuitDeclaration,
+  seeds: readonly number[] = PURSUIT_SEEDS,
+): PursuitMeasure {
+  const policy = requirePolicy(entry);
+  const game = entry.game as Game<PursuitState>;
+  const lengths: number[] = [];
+  let takes = 0;
+  let episodes = 0;
+  let missed = 0;
+  for (const seed of seeds) {
+    const controllers = [
+      levelController(game, policy, 10, seed + 1),
+      levelController(game, policy, 10, seed + 1_000_003),
+    ] as const;
+    let state = game.init(seed, MATCH_CONFIG);
+    const inEpisode = [false, false];
+    const took = [false, false];
+    const stolen = [false, false];
+    while (!game.isOver(state)) {
+      const before = state;
+      state = game.step(state, [
+        controllers[0].decide(state, 0, state.tick),
+        controllers[1].decide(state, 1, state.tick),
+      ]);
+      const targetsBefore = declaration.targets(before);
+      const targetsAfter = declaration.targets(state);
+      for (const side of [0, 1] as const) {
+        if (!before.snakes[side]?.alive) {
+          continue;
+        }
+        const head = state.snakes[side]?.body[0] as number;
+        const otherHead = state.snakes[side === 0 ? 1 : 0]?.body[0] as number;
+        const ate = targetsBefore.includes(head);
+        if (ate) {
+          takes += 1;
+          took[side] = true;
+        }
+        if (targetsBefore.includes(otherHead)) {
+          stolen[side] = true;
+        }
+        const near = targetsAfter.some((cell) => manhattanCells(head, cell) <= 3);
+        if (near && !inEpisode[side]) {
+          inEpisode[side] = true;
+          took[side] = ate;
+          stolen[side] = false;
+        }
+        if (inEpisode[side] && (!near || ate)) {
+          episodes += 1;
+          if (!took[side] && !stolen[side]) {
+            missed += 1;
+          }
+          inEpisode[side] = false;
+          took[side] = false;
+        }
+      }
+    }
+    lengths.push(state.tick / 60);
+  }
+  lengths.sort((a, b) => a - b);
+  const seconds = lengths.reduce((sum, value) => sum + value, 0);
+  return {
+    games: seeds.length,
+    takesPerMinute: takes / (seconds / 60),
+    medianSeconds: lengths[Math.floor(lengths.length / 2)] as number,
+    missRate: episodes === 0 ? 0 : missed / episodes,
+    takesPerGame: takes / seeds.length,
+  };
+}
+
+function manhattanCells(a: number, b: number): number {
+  const width = 32;
+  return (
+    Math.abs((a % width) - (b % width)) + Math.abs(Math.floor(a / width) - Math.floor(b / width))
+  );
+}
