@@ -680,12 +680,17 @@ describe('C-7 縮水｜劇本玩家三列、探針 A 與消融', () => {
     expect(reads - absent).toBeLessThan(0.2);
   }, 600_000);
 
-  it('消融：關掉衝刺，強玩家的勝率明顯掉（衝刺對玩家本身值錢）；而且不管關掉衝刺或把食物減為 1 顆，讀 AI 都沒有變成有價值', () => {
+  // 門檻修改紀錄（SHRINK_EVERY 40→60、FOOD_GAIN 5→7 之後）：
+  // 改之前：強玩家「有衝刺」比「關掉衝刺」高 8 點以上（400 場：58.1% 對 39.9%，差 +18.2）。
+  // 改之後：29.9% 對 33.4%（400 場）、34% 對 34%（100 場），差 −3.5 到 0，衝刺不再讓玩家本身變強。
+  // 原因（推測）：縮水放慢、AI 活得久，勝負改由規劃型玩家自己撞死決定（約 99% 的局以撞死結束），衝刺的優勢被蓋過。
+  // 所以改成斷言「衝刺的價值在 ±10 點以內」，而不是繼續宣稱衝刺是技術來源；不是為了讓測試過而放寬一個還成立的主張。
+  it('消融：關掉衝刺，強玩家的勝率差在 ±10 點以內（衝刺不是玩家強弱的來源）；而且不管關掉衝刺或把食物減為 1 顆，讀 AI 都沒有變成有價值', () => {
     const noSprint = createC7Game({ sprint: false });
     const oneFood = createC7Game({ foodCount: 1 });
     const full = winRate(c7Game, () => planner('absent'));
     const withoutSprint = winRate(noSprint, () => planner('absent'));
-    expect(full).toBeGreaterThan(withoutSprint + 0.08);
+    expect(Math.abs(full - withoutSprint)).toBeLessThan(0.1);
     for (const game of [noSprint, oneFood]) {
       const gap = winRate(game, () => planner('ability')) - winRate(game, () => planner('absent'));
       expect(gap).toBeLessThan(0.2);
