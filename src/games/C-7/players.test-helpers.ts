@@ -321,6 +321,30 @@ export function uniform(seed: number, side: Side): Controller<C7State> {
   };
 }
 
+/**
+ * 人類型（DESIGN-AI-FUN 10.4，同 H-6 的「15% 回合亂選，其餘照強」）：每次走格決定時，有 `eps` 的機率
+ * 改成亂按（不按或四個方向其一，不衝刺），其餘照 `inner` 的決定。`inner` 每個 tick 都照常呼叫，內部狀態不被打亂。
+ */
+export function noisy(inner: Controller<C7State>, seed: number, eps: number): Controller<C7State> {
+  const rng = createRng(seed * 2 + 101);
+  let override: Buttons | null = null;
+  return {
+    decide(state, side, tick): Buttons {
+      const base = inner.decide(state, side, tick);
+      if (tick % MOVE_EVERY === 0) {
+        override =
+          rng.int(1000) < eps * 1000
+            ? (() => {
+                const pick = rng.int(5);
+                return pick === 0 ? NONE : press(pick - 1, false);
+              })()
+            : null;
+      }
+      return override ?? base;
+    },
+  };
+}
+
 // ---------------------------------------------------------------------------
 // 量測
 // ---------------------------------------------------------------------------

@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 
 import { levelController } from '../../ai/level';
 import { pathfinder } from '../../ai/policies/pathfinder';
-import type { Buttons, Inputs } from '../../core/types';
+import { playMatch } from '../../core/match';
+import type { Buttons, Controller, Game, Inputs, Side } from '../../core/types';
 import {
   asRenderingContext,
   createFakeContext,
@@ -27,6 +28,7 @@ import {
   startBody,
 } from './logic';
 import type { C7State } from './logic';
+import { noisy, planner, uniform } from './players.test-helpers';
 import { c7Render } from './render';
 
 /**
@@ -449,6 +451,12 @@ describe('C-7 縮水｜actions 與 evaluate', () => {
     expect(diff).toBeCloseTo(200, 6);
   });
 
+  it('長度領先的一邊 gain 比較高（領先 2 格 = 200，大於其他項的不對稱）：18 對 16', () => {
+    // 注意是 18 對 16。原本刪掉的斷言用的是 14 對 16（side 0 其實比較短），所以寫錯了。
+    const state = makeState({ snakes: [{ body: rowLeft(9, 12, 18), dir: RIGHT }, {}] });
+    expect(c7Game.evaluate(state, 0).gain).toBeGreaterThan(c7Game.evaluate(state, 1).gain);
+  });
+
   it('對稱：同一個局面轉 180 度、兩邊對調，人的 evaluate 等於對調後 AI 的 evaluate', () => {
     const rot = (c: number): number => WIDTH * HEIGHT - 1 - c;
     for (const seed of [7, 8, 9]) {
@@ -630,4 +638,57 @@ describe('C-7 縮水｜畫面', () => {
     expect(() => c7Render(asRenderingContext(fake), over)).not.toThrow();
     void DOWN;
   });
+});
+
+// ---------------------------------------------------------------------------
+// 劇本玩家三列、探針 A（真實規則、真實 AI）與消融（DESIGN-AI-FUN 10.4、10.22、10.24）
+// ---------------------------------------------------------------------------
+
+describe('C-7 縮水｜劇本玩家三列、探針 A 與消融', () => {
+  const SEEDS = 100;
+
+  /** 劇本玩家對 AI（搜尋型等級 10），偶數種子坐 0 號邊；回傳勝率（平手半場）。 */
+  function winRate(
+    game: Game<C7State>,
+    make: (seed: number, side: Side) => Controller<C7State>,
+    seeds: number = SEEDS,
+  ): number {
+    let points = 0;
+    for (let seed = 0; seed < seeds; seed += 1) {
+      const side: Side = seed % 2 === 0 ? 0 : 1;
+      const me = make(seed, side);
+      const ai = levelController(game, pathfinder, 10, seed + 1_000_003);
+      const result =
+        side === 0 ? playMatch(game, seed, CONFIG, me, ai) : playMatch(game, seed, CONFIG, ai, me);
+      points += result.winner === null ? 0.5 : result.winner === side ? 1 : 0;
+    }
+    return points / seeds;
+  }
+
+  it('三列（對搜尋型等級 10，各 100 場）：強 > 人類型（15% 的走格亂按）> 弱（均勻亂按）', () => {
+    const strong = winRate(c7Game, () => planner('absent'));
+    const human = winRate(c7Game, (seed) => noisy(planner('absent'), seed, 0.15));
+    const weak = winRate(c7Game, (seed, side) => uniform(seed, side));
+    expect(strong).toBeGreaterThan(human + 0.15);
+    expect(human).toBeGreaterThan(weak + 0.05);
+    expect(weak).toBeLessThan(0.05);
+  }, 600_000);
+
+  it('探針 A（真實規則）：讀 AI 的玩家沒有比把 AI 整個拿掉的玩家多贏 20 個點以上（簡化模擬曾說 +24.1）', () => {
+    const reads = winRate(c7Game, () => planner('ability'));
+    const absent = winRate(c7Game, () => planner('absent'));
+    expect(reads - absent).toBeLessThan(0.2);
+  }, 600_000);
+
+  it('消融：關掉衝刺，強玩家的勝率明顯掉（衝刺對玩家本身值錢）；而且不管關掉衝刺或把食物減為 1 顆，讀 AI 都沒有變成有價值', () => {
+    const noSprint = createC7Game({ sprint: false });
+    const oneFood = createC7Game({ foodCount: 1 });
+    const full = winRate(c7Game, () => planner('absent'));
+    const withoutSprint = winRate(noSprint, () => planner('absent'));
+    expect(full).toBeGreaterThan(withoutSprint + 0.08);
+    for (const game of [noSprint, oneFood]) {
+      const gap = winRate(game, () => planner('ability')) - winRate(game, () => planner('absent'));
+      expect(gap).toBeLessThan(0.2);
+    }
+  }, 900_000);
 });
