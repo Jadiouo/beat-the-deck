@@ -31,9 +31,9 @@ import type { ClubsState, Snake } from '../_clubs/logic';
 // ---------------------------------------------------------------------------
 
 export const START_LENGTH = 16;
-export const SHRINK_EVERY = 40;
+export const SHRINK_EVERY = 60;
 export const FOOD_COUNT = 2;
-export const FOOD_GAIN = 5;
+export const FOOD_GAIN = 7;
 export const SPRINT_COST = 2;
 export const SPRINT_CD = 30;
 export const SPRINT_MIN_LEN = 5;
