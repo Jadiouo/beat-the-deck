@@ -69,11 +69,11 @@ function humanAt(length: number, extra: Partial<Parameters<typeof makeState>[0]>
 // ---------------------------------------------------------------------------
 
 describe('C-7 縮水｜常數', () => {
-  it('常數是小規格的值（K=2、起始 16、每 40 tick 縮一格、吃一顆 +5、衝刺花 2 冷卻 30 長度至少 5）', () => {
+  it('常數是小規格的值（K=2、起始 16、每 60 tick 縮一格、吃一顆 +7、衝刺花 2 冷卻 30 長度至少 5）', () => {
     expect(FOOD_COUNT).toBe(2);
     expect(START_LENGTH).toBe(16);
-    expect(SHRINK_EVERY).toBe(40);
-    expect(FOOD_GAIN).toBe(5);
+    expect(SHRINK_EVERY).toBe(60);
+    expect(FOOD_GAIN).toBe(7);
     expect(SPRINT_COST).toBe(2);
     expect(SPRINT_CD).toBe(30);
     expect(SPRINT_MIN_LEN).toBe(5);
@@ -133,25 +133,25 @@ describe('C-7 縮水｜初始', () => {
 });
 
 describe('C-7 縮水｜縮水', () => {
-  it('恰在 tick % 40 === 0 縮：39 → 40 兩邊各少一格，38 → 39 不縮', () => {
-    const at39 = stepAt(makeState({ tick: 38 }));
-    expect(at39.snakes[0].body).toHaveLength(START_LENGTH);
-    const at40 = stepAt(makeState({ tick: 39 }));
-    expect(at40.tick).toBe(40);
-    expect(at40.snakes[0].body).toHaveLength(START_LENGTH - 1);
-    expect(at40.snakes[1].body).toHaveLength(START_LENGTH - 1);
-    expect(at40.snakes[0].score).toBe(START_LENGTH - 1);
+  it('恰在 tick % SHRINK_EVERY === 0 縮：59 → 60 兩邊各少一格（同一個 tick 也是走格，先走格再縮），58 → 59 不縮', () => {
+    const before = stepAt(makeState({ tick: SHRINK_EVERY - 2 }));
+    expect(before.snakes[0].body).toHaveLength(START_LENGTH);
+    const at = stepAt(makeState({ tick: SHRINK_EVERY - 1 }));
+    expect(at.tick).toBe(SHRINK_EVERY);
+    expect(at.snakes[0].body).toHaveLength(START_LENGTH - 1);
+    expect(at.snakes[1].body).toHaveLength(START_LENGTH - 1);
+    expect(at.snakes[0].score).toBe(START_LENGTH - 1);
   });
 
-  it('縮的是尾端（頭不動）', () => {
-    const before = makeState({ tick: 39 });
+  it('縮的是尾端：同一個 tick 先走一格（頭前進、尾巴跟著走），再從尾端少一格', () => {
+    const before = makeState({ tick: SHRINK_EVERY - 1 });
     const after = stepAt(before);
-    expect(after.snakes[0].body).toEqual(before.snakes[0].body.slice(0, -1));
+    expect(after.snakes[0].body).toEqual([cell(10, 12), ...before.snakes[0].body.slice(0, -2)]);
   });
 
   it('長度 1 縮到 0：那條蛇餓死，另一條贏（不看長度）', () => {
     const state = makeState({
-      tick: 39,
+      tick: SHRINK_EVERY - 1,
       snakes: [{ body: body([10, 10]), dir: RIGHT }, {}],
     });
     const after = stepAt(state);
@@ -163,7 +163,7 @@ describe('C-7 縮水｜縮水', () => {
 
   it('兩條同一個 tick 餓死：長度都是 0，平手', () => {
     const state = makeState({
-      tick: 39,
+      tick: SHRINK_EVERY - 1,
       snakes: [
         { body: body([10, 10]), dir: RIGHT },
         { body: body([20, 10]), dir: LEFT },
@@ -174,9 +174,9 @@ describe('C-7 縮水｜縮水', () => {
     expect(after.winner).toBeNull();
   });
 
-  it('同一個 tick 走格又縮水：先走格再縮水，長度 1 的蛇這一格吃到食物不會餓死（淨 +4）', () => {
+  it('同一個 tick 走格又縮水：先走格再縮水，長度 1 的蛇這一格吃到食物不會餓死（淨 +FOOD_GAIN − 1）', () => {
     const state = makeState({
-      tick: 119,
+      tick: 2 * SHRINK_EVERY - 1,
       snakes: [{ body: body([10, 10]), dir: RIGHT }, {}],
       foods: [cell(11, 10), cell(15, 20)],
     });
@@ -188,7 +188,7 @@ describe('C-7 縮水｜縮水', () => {
 });
 
 describe('C-7 縮水｜吃食物', () => {
-  it('吃到食物長 5 格（吃到的那次走格不縮尾，所以淨 +5），分數等於長度，補到 2 顆', () => {
+  it('吃到食物長 FOOD_GAIN = 7 格（吃到的那次走格不縮尾，所以淨 +7），分數等於長度，補到 2 顆', () => {
     const state = humanAt(8, { foods: [cell(11, 10), cell(15, 20)] });
     const after = stepAt(state);
     expect(after.snakes[0].body).toHaveLength(8 + FOOD_GAIN);
