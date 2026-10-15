@@ -293,11 +293,11 @@ describe('S-2 瞄準彈｜邊界與生成', () => {
 });
 
 describe('S-2 瞄準彈｜種子與亂數（擋「忘了把新的 RngState 寫回 state」）', () => {
-  it('不同種子：前 60 個 tick 生成的子彈 x 座標序列不全相同（10 個種子）', () => {
+  it('不同種子：前 120 個 tick 生成的子彈 x 座標序列不全相同（10 個種子）', () => {
     const sequences = Array.from({ length: 10 }, (_v, seed) => {
-      const { regular, aimed } = spawnLog(seed, 60);
+      const { regular, aimed } = spawnLog(seed, 120);
       expect(regular).toHaveLength(4);
-      expect(aimed).toHaveLength(1);
+      expect(aimed).toHaveLength(2);
       return [...regular, ...aimed].map((e) => e.x.toFixed(6)).join(',');
     });
     expect(new Set(sequences).size).toBeGreaterThan(1);
@@ -305,9 +305,9 @@ describe('S-2 瞄準彈｜種子與亂數（擋「忘了把新的 RngState 寫�
   });
 
   it('同一個種子：連續生成的一般子彈與瞄準彈 x 座標不會一直一樣', () => {
-    const { regular, aimed } = spawnLog(4, 900);
+    const { regular, aimed } = spawnLog(4, 1800);
     expect(regular.length).toBe(60);
-    expect(aimed.length).toBe(20);
+    expect(aimed.length).toBe(30);
     expect(new Set(regular.map((e) => e.x)).size).toBe(regular.length);
     expect(new Set(aimed.map((e) => e.x)).size).toBe(aimed.length);
     // 一般子彈與瞄準彈用同一串亂數（交錯取用），所以兩者的 x 也不會重複。
