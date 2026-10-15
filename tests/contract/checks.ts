@@ -1380,12 +1380,12 @@ const foodsAndBait = (state: PursuitState): readonly number[] =>
  * （`docs/cards/<id>.md`「追目標」一節）。要降低下限，先去問老闆。
  */
 export const PURSUIT: Readonly<Record<string, PursuitDeclaration | PursuitNotApplicable>> = {
-  'C-A': { targets: clubFoods, minTakesPerMinute: 8, minMedianSeconds: 30 },
-  'C-2': { targets: clubFoods, minTakesPerMinute: 8, minMedianSeconds: 30 },
-  'C-3': { targets: colourFoods, minTakesPerMinute: 8, minMedianSeconds: 30 },
-  'C-4': { targets: clubFoods, minTakesPerMinute: 8, minMedianSeconds: 30 },
-  'C-5': { targets: foodsAndBait, minTakesPerMinute: 8, minMedianSeconds: 30 },
-  'C-7': { targets: clubFoods, minTakesPerMinute: 15, minMedianSeconds: 30 },
+  'C-A': { targets: clubFoods, minTakesPerMinute: 8, minMedianSeconds: 20 },
+  'C-2': { targets: clubFoods, minTakesPerMinute: 8, minMedianSeconds: 20 },
+  'C-3': { targets: colourFoods, minTakesPerMinute: 12, minMedianSeconds: 20 },
+  'C-4': { targets: clubFoods, minTakesPerMinute: 4, minMedianSeconds: 20 },
+  'C-5': { targets: foodsAndBait, minTakesPerMinute: 10, minMedianSeconds: 20 },
+  'C-7': { targets: clubFoods, minTakesPerMinute: 20, minMedianSeconds: 20 },
   'C-8': { notApplicable: '光軌沒有可追的目標：先撞到牆的輸，贏的是活得久，不是拿到東西' },
   'C-10': {
     notApplicable: '追與逃：目標是對手的蛇頭，不是場上的東西；普查 60 個回合全部由追的抓到逃的',
@@ -1404,8 +1404,8 @@ export interface PursuitMeasure {
   readonly takesPerGame: number;
 }
 
-/** 追目標的場數與種子：普查用 30 場，這裡用 16 場（理由見 `pursuit.test.ts`）。 */
-export const PURSUIT_SEEDS: readonly number[] = Array.from({ length: 16 }, (_, i) => i);
+/** 追目標的場數與種子：普查用 30 場，這裡用 24 場（理由見 `pursuit.test.ts`）。 */
+export const PURSUIT_SEEDS: readonly number[] = Array.from({ length: 24 }, (_, i) => i);
 
 export function measurePursuit(
   entry: RegistryEntry,
