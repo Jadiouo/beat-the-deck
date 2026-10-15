@@ -31,7 +31,8 @@ export const S_A_BULLET_SPEED = 0.7;
 export const S_A_END_INTERVAL = 11;
 
 /** 共用層的間隔是 20 線性縮短到 5；這裡縮短到 11，等於共用層的時鐘走得慢一些。 */
-const RAMP_PACE = (RAIN_START_INTERVAL - S_A_END_INTERVAL) / (RAIN_START_INTERVAL - RAIN_END_INTERVAL);
+const RAMP_PACE =
+  (RAIN_START_INTERVAL - S_A_END_INTERVAL) / (RAIN_START_INTERVAL - RAIN_END_INTERVAL);
 
 /** 測試用：直接構造局面（見 `_spades/logic.ts` 的 `makeSpadesState`）。 */
 export function makeState(overrides: StateOverrides = {}): SpadesState {

@@ -337,8 +337,14 @@ describe('S-2 瞄準彈｜種子與亂數（擋「忘了把新的 RngState 寫�
 describe('S-2 瞄準彈｜真人觀察模型的勝率（對等級 10 的精準型，種子 0 到 23，平手算半場）', () => {
   // 完整量測（200 場 × 七格）在 docs/cards/S-2.md「誠實的限制」；這裡只留回歸用的小樣本。
   const seeds = Array.from({ length: 24 }, (_v, i) => i);
-  const rate = (delay: number, decideEvery: number, epsilon: number): number =>
-    delayedViewWinRate(s2Game, precise, { delay, decideEvery, epsilon }, seeds);
+  // d = 12 是判準裡最緊的一格（200 場量到約 25% 到 30%，24 場的小樣本會抖到 20% 以下），所以這一格用完整的 200 場（種子 0 到 199）。
+  const fullSeeds = Array.from({ length: 200 }, (_v, i) => i);
+  const rate = (
+    delay: number,
+    decideEvery: number,
+    epsilon: number,
+    list: readonly number[] = seeds,
+  ): number => delayedViewWinRate(s2Game, precise, { delay, decideEvery, epsilon }, list);
 
   it('d = 6：強玩家 > 人類型玩家 > 弱玩家（順序看得到）', () => {
     const strong = rate(6, 2, 0.02);
@@ -350,18 +356,18 @@ describe('S-2 瞄準彈｜真人觀察模型的勝率（對等級 10 的精準�
 
   it('人類型玩家：整條判準，人類範圍 d = 6、9、12 都在 20% 到 60%（以後有人改了子彈速度或生成間隔會被抓到）', () => {
     for (const delay of [6, 9, 12]) {
-      const human = rate(delay, 6, 0.08);
+      const human = rate(delay, 6, 0.08, delay === 12 ? fullSeeds : seeds);
       expect(human, `d = ${delay}`).toBeGreaterThanOrEqual(0.2);
       expect(human, `d = ${delay}`).toBeLessThanOrEqual(0.6);
     }
-  }, 300_000);
+  }, 900_000);
 
   it('d = 12：強玩家 > 人類型玩家 > 弱玩家；弱玩家（每 tick 亂按）仍然接近 0，不是亂按也能贏', () => {
-    const strong = rate(12, 2, 0.02);
-    const human = rate(12, 6, 0.08);
-    const weak = rate(12, 1, 1);
+    const strong = rate(12, 2, 0.02, fullSeeds);
+    const human = rate(12, 6, 0.08, fullSeeds);
+    const weak = rate(12, 1, 1, fullSeeds);
     expect(strong).toBeGreaterThan(human);
     expect(human).toBeGreaterThan(weak);
     expect(weak).toBeLessThanOrEqual(0.05);
-  }, 300_000);
+  }, 900_000);
 });
