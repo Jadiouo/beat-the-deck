@@ -9,6 +9,7 @@ import {
   cellX,
   cellY,
   evaluateClubs,
+  FOOD_GRADIENT,
   orderedActions,
   refillFoods,
   steerSnake,
@@ -419,7 +420,7 @@ function evaluateWith(
   }
   let gain = base.gain;
   if (Number.isFinite(nearest)) {
-    gain += nearest + value;
+    gain += FOOD_GRADIENT * nearest + value;
   }
   let danger = base.danger;
   if (me.body.length <= STARVE_LEN && Number.isFinite(nearest)) {

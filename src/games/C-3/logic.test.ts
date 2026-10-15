@@ -9,7 +9,7 @@ import {
 } from '../../../tests/contract/fake-context';
 import { COLOR } from '../../shell/palette';
 import { rngStateFor } from '../../core/rng';
-import { cell, LEFT, MOVE_EVERY, RIGHT } from '../_clubs/logic';
+import { cell, FOOD_GRADIENT, LEFT, MOVE_EVERY, RIGHT } from '../_clubs/logic';
 import { describeSharedSnakeRules } from '../_clubs/shared-rules.test-helpers';
 import { c3Game, makeState } from './logic';
 import type { C3State } from './logic';
@@ -390,10 +390,10 @@ describe('C-3 紅藍食物｜actions 與 evaluate', () => {
       correct: RED,
     });
     // 距離都是 (20,12) 到 (6,12) = 14，藍色的位置不影響 gain。
-    expect(c3Game.evaluate(state, 0).gain).toBe(-14);
-    expect(c3Game.evaluate(farBlue, 0).gain).toBe(-14);
+    expect(c3Game.evaluate(state, 0).gain).toBe(-14 * FOOD_GRADIENT);
+    expect(c3Game.evaluate(farBlue, 0).gain).toBe(-14 * FOOD_GRADIENT);
     // 正確顏色換成藍：最近的正確食物變成 (8,12)，距離 2。
-    expect(c3Game.evaluate({ ...state, correct: BLUE }, 0).gain).toBe(-2);
+    expect(c3Game.evaluate({ ...state, correct: BLUE }, 0).gain).toBe(-2 * FOOD_GRADIENT);
   });
 
   it('gain：下一步正好是錯誤顏色的食物，扣 200（2 分）；是正確顏色的食物就不扣', () => {
@@ -421,8 +421,9 @@ describe('C-3 紅藍食物｜actions 與 evaluate', () => {
     const plusOne = makeState({ snakes: [{ score: 1 }, {}] });
     const negative = makeState({ snakes: [{ score: -3 }, {}] });
     expect(c3Game.evaluate(plusOne, 0).gain - c3Game.evaluate(base, 0).gain).toBe(100);
-    expect(c3Game.evaluate(negative, 0).gain).toBeLessThan(-299);
-    expect(c3Game.evaluate(negative, 1).gain).toBeGreaterThan(250);
+    // 位置都一樣，所以差剛好是 3 分 = 300（不再用絕對門檻：距離項是 FOOD_GRADIENT × 格數，會隨梯度變）。
+    expect(c3Game.evaluate(negative, 0).gain - c3Game.evaluate(base, 0).gain).toBe(-300);
+    expect(c3Game.evaluate(negative, 1).gain - c3Game.evaluate(base, 1).gain).toBe(300);
     for (const state of [base, plusOne, negative]) {
       for (const side of [0, 1] as const) {
         const { gain, danger } = c3Game.evaluate(state, side);

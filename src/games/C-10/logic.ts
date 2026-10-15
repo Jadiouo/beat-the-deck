@@ -12,6 +12,7 @@ import {
   cellX,
   cellY,
   evaluateClubs,
+  FOOD_GRADIENT,
   moveSnakes,
   orderedActions,
   steerSnake,
@@ -488,7 +489,8 @@ function evaluateRunner(state: C10State, side: Side): { gain: number; danger: nu
   const edge = edgeDistance(next);
   const wall = edge < EDGE_CAP ? (EDGE_CAP - edge) * (EDGE_CAP - edge) : 0;
   return {
-    gain: base.gain + manhattan(next, corner) + FLEE_WEIGHT * away - EDGE_WEIGHT * wall,
+    gain:
+      base.gain + FOOD_GRADIENT * manhattan(next, corner) + FLEE_WEIGHT * away - EDGE_WEIGHT * wall,
     danger: base.danger,
   };
 }

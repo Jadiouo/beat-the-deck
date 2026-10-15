@@ -383,14 +383,16 @@ describe('C-4 霧｜actions 與 evaluate 不偷看', () => {
         return { gain: real.gain - 10 * nearest, danger: real.danger };
       },
     };
-    const a = makeState({ tick: 1, foods: body([5, 20], [15, 20]) }); // 食物在下方
-    const b = makeState({ tick: 1, foods: body([5, 4], [15, 3]) }); // 食物在上方
+    // 在走格前一個 tick（BEFORE_MOVE）決定：這一個按鍵就決定下一格往哪走，偷看食物的差別一定會出現在第一步。
+    // （原本用 tick 1：第一個按鍵之後還有好幾個 tick 可以改方向，偷看的影響會被後面的 tick 蓋掉，要靠平手時的取捨才看得出來。）
+    const a = makeState({ tick: BEFORE_MOVE, foods: body([5, 20], [15, 20]) }); // 食物在下方
+    const b = makeState({ tick: BEFORE_MOVE, foods: body([5, 4], [15, 3]) }); // 食物在上方
     const params = { depth: 6, seed: 1 };
     const differs = PERSONAS.some((name) => {
       const policy = policyByName(name);
       return (
-        JSON.stringify(policy.decide(leaky, a, 0, 1, params)) !==
-        JSON.stringify(policy.decide(leaky, b, 0, 1, params))
+        JSON.stringify(policy.decide(leaky, a, 0, BEFORE_MOVE, params)) !==
+        JSON.stringify(policy.decide(leaky, b, 0, BEFORE_MOVE, params))
       );
     });
     expect(differs).toBe(true);

@@ -452,6 +452,17 @@ export function makeState(overrides: StateOverrides = {}): ClubsState {
 // 評估（給 AI）
 // ---------------------------------------------------------------------------
 
+/**
+ * 每走近食物 1 格的 gain。
+ *
+ * 為什麼是 4 不是 1（DESIGN-AI-FUN 10.31、10.32）：搜尋型把 danger 乘上「該層 gain 的範圍」的 2 倍再扣掉（`pathfinder.ts`），
+ * 範圍裡有兩側牆距、對方蛇頭的扣分（最多 50 到 100），每格 1 的食物梯度在那個尺度下等於零，
+ * 兩個等級 10 的 AI 在離食物 4 格處徘徊整場（C-A 60 秒只吃 2.7 顆）。放大到 4，食物梯度才跟那些扣分同量級；
+ * 再大（16 以上）就變成吃得到但馬上撞死（局長掉到 16 秒），所以不是越大越好。
+ * 吃到食物的 +100 沒有跟著放大：吃到後新食物補在別處，距離項會暫時掉，但實測不影響取得率。
+ */
+export const FOOD_GRADIENT = 4;
+
 /** 每 1 分的 gain。比任何距離（最多 54）都大，所以吃到食物永遠比靠近食物重要。 */
 export const GAIN_PER_POINT = 100;
 /**
@@ -583,7 +594,7 @@ export function evaluateClubs(state: ClubsState, side: Side): { gain: number; da
   const head = me.body[0] as number;
   const nx = cellX(head) + (DX[me.turn] as number);
   const ny = cellY(head) + (DY[me.turn] as number);
-  let gain = lead - nearestFood(state.foods, nx, ny);
+  let gain = lead - FOOD_GRADIENT * nearestFood(state.foods, nx, ny);
 
   if (nx < 0 || nx >= WIDTH || ny < 0 || ny >= HEIGHT) {
     return { gain, danger: 1 };
@@ -603,18 +614,25 @@ export function evaluateClubs(state: ClubsState, side: Side): { gain: number; da
   }
 
   // 前方走得到幾格：反應有延遲的 AI 看到的是舊的 state，只看下一步會來不及轉彎。
+  // 直線前方走得到幾格。食物在直線上、盡頭是地圖邊界（食物貼著牆）時，不算前方障礙：蛇會先吃到食物再轉彎，
+  // 吃到之後的局面會重新評估；把食物後面的牆當成危險，會讓 AI 對貼牆的食物永遠不敢走過去（10.31 的逐 tick 證據）。
+  // 盡頭是蛇身（對手或自己）時照舊算危險：那不是轉個彎就能解決的，也是 C-7 衝刺決定（頭對頭搶食物）依賴的行為。
   let run = 1;
+  let foodAhead = state.foods.includes(next);
   while (run < RUN_LOOKAHEAD) {
     const rx = nx + run * (DX[me.turn] as number);
     const ry = ny + run * (DY[me.turn] as number);
-    if (
-      rx < 0 ||
-      rx >= WIDTH ||
-      ry < 0 ||
-      ry >= HEIGHT ||
-      blockedStamp[cell(rx, ry)] === generation
-    ) {
+    if (rx < 0 || rx >= WIDTH || ry < 0 || ry >= HEIGHT) {
+      if (foodAhead) {
+        run = RUN_LOOKAHEAD;
+      }
       break;
+    }
+    if (blockedStamp[cell(rx, ry)] === generation) {
+      break;
+    }
+    if (state.foods.includes(cell(rx, ry))) {
+      foodAhead = true;
     }
     run += 1;
   }
