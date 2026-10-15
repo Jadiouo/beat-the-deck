@@ -5,7 +5,7 @@ import { precise } from '../../ai/policies/precise';
 import { describeDelayedView } from '../_spades/delayed-view-suite.test-helpers';
 import { delayedViewWinRate } from '../_spades/delayed-view.test-helpers';
 import { describeSharedSpadesRules } from '../_spades/shared-rules.test-helpers';
-import { sAGame, makeState } from './logic';
+import { S_A_BULLET_SPEED, S_A_END_INTERVAL, sAGame, makeState } from './logic';
 import type { SpadesState } from './logic';
 
 /**
@@ -89,7 +89,7 @@ describe('S-A 落雨｜TEST_PLAN 第 6 節（1、8、10 條與初始）', () => 
     expect(state.fields[0].hits).not.toBe(state.fields[1].hits);
   });
 
-  it('8. 生成間隔：第 0 tick 附近每 20 tick 一顆，第 3600 tick 附近每 5 tick 一顆', () => {
+  it('8. 生成間隔：第 0 tick 附近每 20 tick 一顆，第 3600 tick 附近每 11 tick 一顆（老闆裁定放慢，原本是 5）', () => {
     const log = spawnLog(0, 3600);
     const ticks = log.map((e) => e.tick);
     expect(ticks[0]).toBe(20);
@@ -103,8 +103,8 @@ describe('S-A 落雨｜TEST_PLAN 第 6 節（1、8、10 條與初始）', () => 
     const late = gaps.filter((_g, i) => (ticks[i] as number) >= 3500);
     expect(late.length).toBeGreaterThanOrEqual(15);
     for (const gap of late) {
-      expect(gap).toBeGreaterThanOrEqual(5);
-      expect(gap).toBeLessThanOrEqual(6);
+      expect(gap).toBeGreaterThanOrEqual(S_A_END_INTERVAL);
+      expect(gap).toBeLessThanOrEqual(S_A_END_INTERVAL + 1);
     }
     // 間隔是單調縮短的：每 900 個 tick 裡的子彈數一段比一段多。
     const perBlock = [0, 1, 2, 3].map(
@@ -115,15 +115,20 @@ describe('S-A 落雨｜TEST_PLAN 第 6 節（1、8、10 條與初始）', () => 
     }
   });
 
-  it('8b. 全場總數：預期 240 × ln4 ≈ 332.7 顆，正負 2 顆之內', () => {
-    const expected = 240 * Math.log(4);
+  it('8a. 旋鈕的值：最後的間隔 11、子彈速度 0.7（掃描表在 docs/cards/S-A.md「延遲掃描四」）', () => {
+    expect(S_A_END_INTERVAL).toBe(11);
+    expect(S_A_BULLET_SPEED).toBe(0.7);
+  });
+
+  it('8b. 全場總數：間隔從 20 線性縮短到 11，預期 (3600 / 9) × ln(20 / 11) ≈ 239.2 顆，正負 2 顆之內', () => {
+    const expected = (3600 / 9) * Math.log(20 / 11);
     for (const seed of [0, 1, 2]) {
       const total = spawnLog(seed, 3600).length;
       expect(Math.abs(total - expected)).toBeLessThanOrEqual(2);
     }
   });
 
-  it('8c. 生成的 x 都在 [2, 148]（整顆在場內），y 是 0，速度是往下 1.2', () => {
+  it('8c. 生成的 x 都在 [2, 148]（整顆在場內），y 是 0，速度是往下 S_A_BULLET_SPEED（0.7）', () => {
     let state = sAGame.init(5, CONFIG);
     let seen = 0;
     for (let t = 0; t < 600; t += 1) {
@@ -133,7 +138,7 @@ describe('S-A 落雨｜TEST_PLAN 第 6 節（1、8、10 條與初始）', () => 
         expect(b.x).toBeGreaterThanOrEqual(2);
         expect(b.x).toBeLessThanOrEqual(148);
         expect(b.vx).toBe(0);
-        expect(b.vy).toBe(1.2);
+        expect(b.vy).toBe(S_A_BULLET_SPEED);
       }
     }
     expect(seen).toBeGreaterThan(20);
@@ -222,13 +227,20 @@ describe('S-A 落雨｜真人觀察模型的勝率（對等級 10 的精準型�
     expect(human).toBeGreaterThan(weak);
   }, 180_000);
 
-  it('人類型玩家：d = 6 在 20% 到 60%；延遲加到 12 之後明顯下降（延遲會被這個模型抓到）', () => {
-    // 判準「d = 6 到 12 都要在 20% 到 60%」目前只有 d = 6 達成（完整量測 d = 9、12 不到），
-    // 所以這裡只釘住確實成立的兩件事，不假裝整條判準成立。
-    const six = rate(6, 6, 0.08);
-    const twelve = rate(12, 6, 0.08);
-    expect(six).toBeGreaterThanOrEqual(0.2);
-    expect(six).toBeLessThanOrEqual(0.6);
-    expect(six - twelve).toBeGreaterThanOrEqual(0.1);
-  }, 180_000);
+  it('人類型玩家：整條判準，人類範圍 d = 6、9、12 都在 20% 到 60%（以後有人改了子彈速度或生成間隔會被抓到）', () => {
+    for (const delay of [6, 9, 12]) {
+      const human = rate(delay, 6, 0.08);
+      expect(human, `d = ${delay}`).toBeGreaterThanOrEqual(0.2);
+      expect(human, `d = ${delay}`).toBeLessThanOrEqual(0.6);
+    }
+  }, 300_000);
+
+  it('d = 12：強玩家 > 人類型玩家 > 弱玩家；弱玩家（每 tick 亂按）仍然接近 0，不是亂按也能贏', () => {
+    const strong = rate(12, 2, 0.02);
+    const human = rate(12, 6, 0.08);
+    const weak = rate(12, 1, 1);
+    expect(strong).toBeGreaterThan(human);
+    expect(human).toBeGreaterThan(weak);
+    expect(weak).toBeLessThanOrEqual(0.05);
+  }, 300_000);
 });

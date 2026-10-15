@@ -6,7 +6,7 @@ import { precise } from '../../ai/policies/precise';
 import { describeDelayedView } from '../_spades/delayed-view-suite.test-helpers';
 import { delayedViewWinRate } from '../_spades/delayed-view.test-helpers';
 import { describeSharedSpadesRules } from '../_spades/shared-rules.test-helpers';
-import { s2Game, makeState } from './logic';
+import { S2_AIMED_INTERVAL, S2_RAIN_INTERVAL, s2Game, makeState } from './logic';
 import type { SpadesState } from './logic';
 
 /**
@@ -55,14 +55,14 @@ function spawnLog(
   return { regular, aimed };
 }
 
-/** 第 44 個 tick 之後的局面：下一個 tick 一定生成一般子彈與瞄準彈。 */
+/** 第 59 個 tick 之後的局面：下一個 tick（第 60 個）一定生成一般子彈與瞄準彈。 */
 function beforeAimed(
   humanAt: [number, number],
   aiAt: [number, number],
   extra: { invuln?: number } = {},
 ): SpadesState {
   return makeState({
-    tick: 44,
+    tick: 59,
     fields: [
       { px: humanAt[0], py: humanAt[1], ...extra },
       { px: aiAt[0], py: aiAt[1], ...extra },
@@ -79,20 +79,25 @@ describeSharedSpadesRules({
 describeDelayedView({ label: 'S-2 瞄準彈', game: s2Game, makeState });
 
 describe('S-2 瞄準彈｜TEST_PLAN 第 6 節（1 到 6 條）', () => {
-  it('1. 一般子彈每 15 tick 一顆：第 15、30、45……個 tick，全場 240 顆；到最後間隔也不縮短', () => {
+  it('0. 旋鈕的值：一般子彈每 30 tick、瞄準彈每 60 tick（老闆裁定放疏，原本是 15 與 45；掃描表在 docs/cards/S-2.md「延遲掃描四」）', () => {
+    expect(S2_RAIN_INTERVAL).toBe(30);
+    expect(S2_AIMED_INTERVAL).toBe(60);
+  });
+
+  it('1. 一般子彈每 30 tick 一顆：第 30、60、90……個 tick，全場 120 顆；到最後間隔也不縮短', () => {
     const { regular } = spawnLog(0, 3600);
-    expect(regular).toHaveLength(240);
+    expect(regular).toHaveLength(120);
     expect(regular.map((e) => e.tick)).toEqual(
-      Array.from({ length: 240 }, (_v, i) => (i + 1) * 15),
+      Array.from({ length: 120 }, (_v, i) => (i + 1) * S2_RAIN_INTERVAL),
     );
-    // 與 S-A 不同：最後一段的間隔也是 15（不是 5）。
+    // 與 S-A 不同：最後一段的間隔也是 30（不縮短）。
     const last = regular.slice(-10).map((e) => e.tick);
     for (let i = 1; i < last.length; i += 1) {
-      expect((last[i] as number) - (last[i - 1] as number)).toBe(15);
+      expect((last[i] as number) - (last[i - 1] as number)).toBe(S2_RAIN_INTERVAL);
     }
   });
 
-  it('2. 每 45 tick 一顆瞄準彈（第 45、90……個 tick，全場 80 顆）；兩個場地的生成位置相同', () => {
+  it('2. 每 60 tick 一顆瞄準彈（第 60、120……個 tick，全場 60 顆）；兩個場地的生成位置相同', () => {
     let state = s2Game.init(2, CONFIG);
     const xs: [number[], number[]] = [[], []];
     const ticks: number[] = [];
@@ -110,7 +115,7 @@ describe('S-2 瞄準彈｜TEST_PLAN 第 6 節（1 到 6 條）', () => {
         }
       }
     }
-    expect(ticks).toEqual(Array.from({ length: 80 }, (_v, i) => (i + 1) * 45));
+    expect(ticks).toEqual(Array.from({ length: 60 }, (_v, i) => (i + 1) * S2_AIMED_INTERVAL));
     expect(xs[0]).toEqual(xs[1]);
   });
 
@@ -205,7 +210,7 @@ describe('S-2 瞄準彈｜TEST_PLAN 第 6 節（1 到 6 條）', () => {
 });
 
 describe('S-2 瞄準彈｜邊界與生成', () => {
-  it('同一個 tick（第 45 個）同時生成一般子彈與瞄準彈：先一般、後瞄準，各用一個亂數，x 不同', () => {
+  it('同一個 tick（第 60 個）同時生成一般子彈與瞄準彈：先一般、後瞄準，各用一個亂數，x 不同', () => {
     const before = beforeAimed([75, 100], [75, 100]);
     const next = s2Game.step(before, IDLE);
     const [first, afterFirst] = nextFrom(before.fields[0].rng);
@@ -219,15 +224,17 @@ describe('S-2 瞄準彈｜邊界與生成', () => {
     expect(regular.x).not.toBe(aimed.x);
   });
 
-  it('第 15 個 tick 只生成一般子彈、第 44 與 46 個 tick 什麼都不生成（亂數也不動）', () => {
-    const at15 = s2Game.step(makeState({ tick: 14 }), IDLE);
-    expect(spawned(at15)).toHaveLength(1);
-    expect(spawned(at15).every(isRegular)).toBe(true);
-    const at44 = s2Game.step(makeState({ tick: 43 }), IDLE);
-    expect(spawned(at44)).toHaveLength(0);
-    expect(at44.fields[0].rng).toBe(makeState().fields[0].rng);
-    const at46 = s2Game.step(makeState({ tick: 45 }), IDLE);
-    expect(spawned(at46)).toHaveLength(0);
+  it('第 30 個 tick 只生成一般子彈、第 15、45、59 與 61 個 tick 什麼都不生成（亂數也不動）', () => {
+    const at30 = s2Game.step(makeState({ tick: 29 }), IDLE);
+    expect(spawned(at30)).toHaveLength(1);
+    expect(spawned(at30).every(isRegular)).toBe(true);
+    for (const t of [15, 45, 59, 61]) {
+      const quiet = s2Game.step(makeState({ tick: t - 1 }), IDLE);
+      expect(spawned(quiet), `第 ${t} 個 tick`).toHaveLength(0);
+      expect(quiet.fields[0].rng).toBe(makeState().fields[0].rng);
+    }
+    // 步進之後 tick 是真實的 tick，不是餵給共用層的假 tick。
+    expect(s2Game.step(makeState({ tick: 29 }), IDLE).tick).toBe(30);
   });
 
   it('子彈離開場地的左右兩側也會被移除；剛好到 x = 152 還在，超過就移除', () => {
@@ -341,13 +348,20 @@ describe('S-2 瞄準彈｜真人觀察模型的勝率（對等級 10 的精準�
     expect(human).toBeGreaterThan(weak);
   }, 180_000);
 
-  it('人類型玩家：d = 6 在 20% 到 60%；延遲加到 12 之後明顯下降（延遲會被這個模型抓到）', () => {
-    // 判準「d = 6 到 12 都要在 20% 到 60%」目前只有 d = 6 達成（完整量測 d = 9、12 不到），
-    // 所以這裡只釘住確實成立的兩件事，不假裝整條判準成立。
-    const six = rate(6, 6, 0.08);
-    const twelve = rate(12, 6, 0.08);
-    expect(six).toBeGreaterThanOrEqual(0.2);
-    expect(six).toBeLessThanOrEqual(0.6);
-    expect(six - twelve).toBeGreaterThanOrEqual(0.1);
-  }, 180_000);
+  it('人類型玩家：整條判準，人類範圍 d = 6、9、12 都在 20% 到 60%（以後有人改了子彈速度或生成間隔會被抓到）', () => {
+    for (const delay of [6, 9, 12]) {
+      const human = rate(delay, 6, 0.08);
+      expect(human, `d = ${delay}`).toBeGreaterThanOrEqual(0.2);
+      expect(human, `d = ${delay}`).toBeLessThanOrEqual(0.6);
+    }
+  }, 300_000);
+
+  it('d = 12：強玩家 > 人類型玩家 > 弱玩家；弱玩家（每 tick 亂按）仍然接近 0，不是亂按也能贏', () => {
+    const strong = rate(12, 2, 0.02);
+    const human = rate(12, 6, 0.08);
+    const weak = rate(12, 1, 1);
+    expect(strong).toBeGreaterThan(human);
+    expect(human).toBeGreaterThan(weak);
+    expect(weak).toBeLessThanOrEqual(0.05);
+  }, 300_000);
 });
