@@ -22,6 +22,8 @@ const HEAVY_FILES = [
   'tests/contract/pursuit.test.ts',
   // 梅花簡單腳本 S4 與對打撞死（10.37）：每張 400 場 + 24 場等級 10 對打，慢。
   'tests/ai/clubs-s4.test.ts',
+  // C-4 霧的探索行為與 A4 兩個種子區塊（10.38 第 7 節）：數十場對打 + 400 場 A4，慢。
+  'tests/ai/c4-fog.test.ts',
 ];
 
 const common = {
