@@ -34,12 +34,14 @@ import {
 } from './logic';
 import type { S10State } from './logic';
 import {
+  blindThreshold,
   delayedView,
   feint,
   masher,
   player,
   playAgainstAi,
   summarize,
+  threshold,
   uniform,
 } from './players.test-helpers';
 
@@ -926,11 +928,15 @@ describe('S-10 彈幕｜劇本玩家與消融（對精準型等級 10）', () =>
     expect(random.hitsMe).toBeGreaterThan(5);
   }, 3_600_000);
 
-  it('已知弱點（量到的，不是設計）：按住 b 的玩家（閃躲照精準型）贏 AI —— 它在無彈期一結束、只有 1 顆子彈時就搶走第二次', () => {
+  it('優勢策略堵死了（老闆裁定的清場門檻）：按住 b、子彈 ≥ 1 顆就按，都贏不了 AI；等到剛好夠 N 顆才按的人不輸給它們', () => {
     const mash = row('masher', (seed) => masher(seed));
-    expect(mash.win).toBeGreaterThanOrEqual(90);
-    expect(mash.myClears).toBeGreaterThanOrEqual(0.9);
-    expect(mash.aiClears).toBeLessThanOrEqual(0.1);
+    const eager = row('blind1', (seed) => blindThreshold(1, seed));
+    const near = row('near-n', (seed) => threshold(CLEAR_MIN, seed));
+    expect(mash.win).toBeLessThanOrEqual(25);
+    expect(eager.win).toBeLessThanOrEqual(25);
+    expect(near.win).toBeGreaterThanOrEqual(35);
+    expect(near.win).toBeGreaterThan(mash.win + 25);
+    expect(near.win).toBeGreaterThan(eager.win + 25);
   }, 3_600_000);
 
   it('第一欄與第二欄：「假裝危險」做不出來 —— 貼近子彈的玩家，險度平均也不到 0.01，被打中次數沒增加，勝率與習慣玩家一樣', () => {

@@ -4,6 +4,7 @@ import type { Buttons, Controller, Game, Side } from '../../core/types';
 import { actionsSpades } from '../_spades/logic';
 import {
   CLEAR_CAP,
+  CLEAR_FROM,
   CLEARS,
   H_BASE,
   canClear,
@@ -190,6 +191,23 @@ export function threshold(limit: number, seed: number): Controller<S10State> {
       return canClear(state) && Math.min(state.bullets.length, CLEAR_CAP) >= limit
         ? { ...move, b: true }
         : move;
+    },
+  };
+}
+
+/**
+ * 看不見門檻的簡單玩法：不看 `minBullets`，只要按得下去（第 300 tick 起、不在無彈期、還有次數）而且場上子彈數
+ * 達到 `limit` 顆就按。`limit` = 1 就是「子彈 ≥ 1 顆就按」。門檻不夠時它會按早（照規則被鎖或被扣）。
+ */
+export function blindThreshold(limit: number, seed: number): Controller<S10State> {
+  return {
+    decide(state: S10State, side: Side, tick: number): Buttons {
+      const move = precise.decide(MOVE_GAME, state, side, tick, { depth: 1, seed });
+      const open =
+        state.clears > 0 &&
+        state.tick >= (state.clears === 1 ? state.lastFrom : CLEAR_FROM) &&
+        state.quiet === 0;
+      return open && state.bullets.length >= limit ? { ...move, b: true } : move;
     },
   };
 }
