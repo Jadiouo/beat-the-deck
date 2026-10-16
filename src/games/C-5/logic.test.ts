@@ -266,6 +266,19 @@ describe('C-5 會動的牆｜預告', () => {
     expect(started.bait?.until).toBe(300);
   });
 
+  it('同一個局面重複 step 預告開始的那個 tick（AI 往前搜尋會這樣做）：每次都得到一樣的落點，也不改動傳進來的 state', () => {
+    const before = calm();
+    const frozen = JSON.stringify(before);
+    const first = c5Game.step(before, IDLE);
+    for (let i = 0; i < 5; i += 1) {
+      const again = c5Game.step(before, IDLE);
+      expect(again.landing).toEqual(first.landing);
+      expect(again.bait).toEqual(first.bait);
+      expect(again.rng).toEqual(first.rng);
+    }
+    expect(JSON.stringify(before)).toBe(frozen);
+  });
+
   it('1. 落點在預告開始那個 tick 就決定，之後整段預告逐 tick 相等、誘餌的格子也不變', () => {
     for (const seed of [0, 1, 2, 3, 4]) {
       let state = c5Game.step(calm({ rng: rngStateFor(seed, 'preview') }), IDLE);
@@ -367,9 +380,13 @@ describe('C-5 會動的牆｜預告', () => {
 
   it('8. 邊界：落下的 tick 剛好等於 maxTicks，或超過 maxTicks，就不開始預告', () => {
     // 600 落下、maxTicks 600：不預告（一場結束的那一刻才落的牆沒有意義）。
-    expect(c5Game.step(calm({ tick: 600 - PREVIEW_TICKS - 1, maxTicks: 600 }), IDLE).landing).toBeNull();
+    expect(
+      c5Game.step(calm({ tick: 600 - PREVIEW_TICKS - 1, maxTicks: 600 }), IDLE).landing,
+    ).toBeNull();
     // maxTicks 601：預告。
-    expect(c5Game.step(calm({ tick: 600 - PREVIEW_TICKS - 1, maxTicks: 601 }), IDLE).landing).not.toBeNull();
+    expect(
+      c5Game.step(calm({ tick: 600 - PREVIEW_TICKS - 1, maxTicks: 601 }), IDLE).landing,
+    ).not.toBeNull();
     // 開局的第一次預告：maxTicks 400 就有（落下在 300）。
     expect(c5Game.step(calm({ maxTicks: 400 }), IDLE).landing).not.toBeNull();
     expect(c5Game.step(calm({ maxTicks: 300 }), IDLE).landing).toBeNull();
