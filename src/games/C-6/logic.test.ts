@@ -388,12 +388,23 @@ describe('C-6 傳送門｜pdist（門口感知距離）', () => {
 
   it('180 度對稱的兩對格子距離相同', () => {
     const pairs: [[number, number], [number, number]][] = [
-      [[2, 3], [27, 20]],
-      [[11, 8], [20, 15]],
-      [[10, 17], [21, 5]],
+      [
+        [2, 3],
+        [27, 20],
+      ],
+      [
+        [11, 8],
+        [20, 15],
+      ],
+      [
+        [10, 17],
+        [21, 5],
+      ],
     ];
     for (const [a, b] of pairs) {
-      expect(pdist(cell(...a), cell(...b))).toBe(pdist(CELLS - 1 - cell(...a), CELLS - 1 - cell(...b)));
+      expect(pdist(cell(...a), cell(...b))).toBe(
+        pdist(CELLS - 1 - cell(...a), CELLS - 1 - cell(...b)),
+      );
     }
   });
 });
@@ -425,18 +436,27 @@ describe('C-6 傳送門｜evaluate 與 actions', () => {
 
   it('下一步踩進門口，對手蛇頭貼在出口旁：danger 至少 0.48；離出口 6 格以上：沒有埋伏的風險', () => {
     const ambush = humanAtL1({
-      snakes: [{ body: row(11, 6, -1, 3), dir: RIGHT }, { body: row(20, 17, 1, 3), dir: LEFT }],
+      snakes: [
+        { body: row(11, 6, -1, 3), dir: RIGHT },
+        { body: row(20, 17, 1, 3), dir: LEFT },
+      ],
     });
     expect(evaluateC6(ambush, 0).danger).toBeGreaterThanOrEqual(0.48);
     const far = humanAtL1({
-      snakes: [{ body: row(11, 6, -1, 3), dir: RIGHT }, { body: row(27, 4, 1, 3), dir: LEFT }],
+      snakes: [
+        { body: row(11, 6, -1, 3), dir: RIGHT },
+        { body: row(27, 4, 1, 3), dir: LEFT },
+      ],
     });
     expect(evaluateC6(far, 0).danger).toBeLessThan(0.3);
   });
 
   it('出口前方 2 格內有牆或身體：danger 至少 0.8', () => {
     const s = humanAtL1({
-      snakes: [{ body: row(11, 6, -1, 3), dir: RIGHT }, { body: col(21, 19, -1, 4), dir: UP }],
+      snakes: [
+        { body: row(11, 6, -1, 3), dir: RIGHT },
+        { body: col(21, 19, -1, 4), dir: UP },
+      ],
     });
     // 出口 (19,17) 朝右，(21,17) 是 AI 的身體。
     expect(evaluateC6(s, 0).danger).toBeGreaterThanOrEqual(0.8);
