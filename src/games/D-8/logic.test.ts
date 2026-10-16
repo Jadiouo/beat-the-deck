@@ -659,3 +659,68 @@ describe('D-8 塗地｜互動強度（DESIGN-AI-FUN 2.5）', () => {
     expect(changed / used).toBeGreaterThanOrEqual(0.2);
   }, 60_000);
 });
+
+describe('D-8 塗地｜兩邊對等（K12 的根因：距離相同的目標，兩邊要選到鏡像的那一格）', () => {
+  const flip = (c: number): number => cell(31 - cellX(c), 23 - cellY(c));
+  const turn = (d: number): number => (d < 0 ? d : (d + 2) % 4);
+  const turnButtons = (b: Buttons): Buttons => ({ ...b, up: b.down, down: b.up, left: b.right, right: b.left });
+
+  /** 把整個局面轉 180 度並交換兩邊：0 號邊的視角變成 1 號邊的視角。 */
+  function mirror(s: D8State): D8State {
+    const walls = new Array<number>(CELLS);
+    const paint = new Array<number>(CELLS);
+    const stamp = new Array<number>(CELLS);
+    for (let c = 0; c < CELLS; c += 1) {
+      const f = flip(c);
+      walls[f] = s.walls[c] as number;
+      const p = s.paint[c] as number;
+      paint[f] = p === 0 ? 0 : 3 - p;
+      stamp[f] = s.stamp[c] as number;
+    }
+    const w = (i: 0 | 1) => ({
+      ...s.players[i],
+      cell: flip(s.players[i].cell),
+      pending: turn(s.players[i].pending) as typeof s.players[0]['pending'],
+    });
+    return {
+      ...s,
+      walls,
+      paint,
+      stamp,
+      players: [w(1), w(0)],
+      heading: [turn(s.heading[1]), turn(s.heading[0])],
+    };
+  }
+
+  /** 兩邊用固定的亂按（只靠種子）打到某個 tick，得到有顏色、有接觸的中局。 */
+  function midgame(seed: number, ticks: number): D8State {
+    let state = d8Game.init(seed, CONFIG);
+    for (let t = 0; t < ticks; t += 1) {
+      const pick = (side: number): Buttons => {
+        const k = (t * 7 + side * 13 + seed * 5) % 23;
+        return k < 4 ? [PRESS_UP, PRESS_RIGHT, PRESS_DOWN, PRESS_LEFT][k] ?? NONE : NONE;
+      };
+      state = d8Game.step(state, [pick(0), pick(1)]);
+    }
+    return state;
+  }
+
+  it('actions：把局面轉 180 度並交換兩邊，另一邊的動作排序就是原來排序轉 180 度（距離相同的目標不偏向任何一邊的內側）', () => {
+    let compared = 0;
+    for (let seed = 0; seed < 12; seed += 1) {
+      for (const ticks of [60, 300, 800, 1500]) {
+        const s = midgame(seed, ticks);
+        const m = mirror(s);
+        for (const side of [0, 1] as const) {
+          const a = d8Game.actions(s, side);
+          const b = d8Game.actions(m, side === 0 ? 1 : 0);
+          expect(b.map((x) => JSON.stringify(x))).toEqual(
+            a.map((x) => JSON.stringify(turnButtons(x))),
+          );
+          compared += 1;
+        }
+      }
+    }
+    expect(compared).toBe(96);
+  });
+});
