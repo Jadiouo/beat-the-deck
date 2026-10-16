@@ -1,7 +1,7 @@
 import { COLOR } from '../../shell/palette';
 import { drawBoard, drawCell, drawScores } from '../_clubs/draw';
 import { CELL_SIZE, cellX, cellY } from '../_clubs/logic';
-import { nextLandingTick, PREVIEW_TICKS } from './logic';
+import { nextLandingTick, PAIR_OFFSET } from './logic';
 import type { C5State } from './logic';
 
 /**
@@ -69,7 +69,7 @@ export function c5Render(ctx: CanvasRenderingContext2D, state: C5State): void {
 
   // 下一次落牆還有多久：中間一條細線，填滿表示快落下了。
   const nextAt = nextLandingTick(state.tick);
-  const fraction = Math.min(1, Math.max(0, 1 - (nextAt - state.tick) / (2.5 * PREVIEW_TICKS)));
+  const fraction = Math.min(1, Math.max(0, 1 - (nextAt - state.tick) / PAIR_OFFSET));
   ctx.fillStyle = COLOR.dark;
   ctx.fillRect(TIMER_X, 2, TIMER_WIDTH, 2);
   ctx.fillStyle = landing === null ? COLOR.light : COLOR.warning;

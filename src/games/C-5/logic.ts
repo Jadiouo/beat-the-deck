@@ -40,11 +40,15 @@ export const BAR_LEN = 6;
 export const PAIR_PERIOD = 300;
 /** 第 1 對比第 0 對晚多少 tick（所以每 2.5 秒場上就有一面牆在換）。 */
 export const PAIR_OFFSET = 150;
-/** 換位置之前幾個 tick 開始預告（1 秒）。 */
-export const PREVIEW_TICKS = 60;
+/** 換位置之前幾個 tick 開始預告（2 秒；原本 1 秒，量到 AI 來不及去，見 docs/cards/C-5.md 決定 14）。 */
+export const PREVIEW_TICKS = 120;
 /** 誘餌：吃到加幾分、長幾格。 */
-export const BAIT_POINTS = 2;
+export const BAIT_POINTS = 3;
 export const BAIT_GROW = 2;
+/** 落點盡量挑成「有一格離兩個蛇頭都不超過這麼多格」（曼哈頓距離）。 */
+export const BAIT_NEAR = 8;
+/** 挑落點時最多收集幾個合法的候選，再從中挑離蛇頭近的。 */
+export const LANDING_CANDIDATES = 30;
 /** 挑落點最多試幾次。 */
 export const LANDING_TRIES = 50;
 /** `init` 的 `maxTicks` 下限（小於這個丟 `RangeError`）。 */
@@ -101,6 +105,12 @@ export interface C5Options {
   readonly landingTries?: number;
   /** 壓死的 danger 在餘裕幾步以上降到 0（測試與調參用）。預設 `CRUSH_MARGIN`。 */
   readonly crushMargin?: number;
+  /** 預告幾個 tick（調參用）。預設 `PREVIEW_TICKS`。 */
+  readonly preview?: number;
+  /** 誘餌分數（調參用）。預設 `BAIT_POINTS`。 */
+  readonly baitPoints?: number;
+  /** 落點要離兩個蛇頭多近（調參用）。預設 `BAIT_NEAR`。 */
+  readonly baitNear?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -213,9 +223,14 @@ function pickBars(
   tries: number,
   forbidden: Uint8Array,
   others: readonly number[],
+  heads: readonly [number, number] | null,
+  foods: readonly number[],
+  near: number,
 ): PickResult {
   let state = rng;
-  for (let attempt = 0; attempt < tries; attempt += 1) {
+  let fallback: readonly [readonly number[], readonly number[]] | null = null;
+  let valid = 0;
+  for (let attempt = 0; attempt < tries && valid < LANDING_CANDIDATES; attempt += 1) {
     const [pick, following] = intFrom(state, CANDIDATES);
     state = following;
     const first = candidateBar(pick);
@@ -248,11 +263,26 @@ function pickBars(
     for (const c of second) {
       blocked[c] = 1;
     }
-    if (stillConnected(blocked)) {
+    if (!stillConnected(blocked)) {
+      continue;
+    }
+    valid += 1;
+    if (fallback === null) {
+      fallback = [first, second];
+    }
+    // 開局放牆沒有蛇頭可以參照：第一個合法的就用。
+    if (
+      heads === null ||
+      [...first, ...second].some((c) => !foods.includes(c) && isNear(c, heads, near))
+    ) {
       return { bars: [first, second], rng: state };
     }
   }
-  return { bars: null, rng: state };
+  return { bars: fallback, rng: state };
+}
+
+function isNear(cellIndex: number, heads: readonly [number, number], near: number): boolean {
+  return manhattan(cellIndex, heads[0]) <= near && manhattan(cellIndex, heads[1]) <= near;
 }
 
 function manhattan(a: number, b: number): number {
@@ -280,7 +310,7 @@ function initialBars(seed: number, base: ClubsState): readonly (readonly number[
     }
   }
   let rng = rngStateFor(seed, 'walls');
-  const first = pickBars(rng, INIT_TRIES, forbidden, []);
+  const first = pickBars(rng, INIT_TRIES, forbidden, [], null, [], 0);
   rng = first.rng;
   if (first.bars === null) {
     return [[], [], [], []];
@@ -289,7 +319,15 @@ function initialBars(seed: number, base: ClubsState): readonly (readonly number[
   for (const c of [...first.bars[0], ...first.bars[1]]) {
     taken[c] = 1;
   }
-  const second = pickBars(rng, INIT_TRIES, taken, [...first.bars[0], ...first.bars[1]]);
+  const second = pickBars(
+    rng,
+    INIT_TRIES,
+    taken,
+    [...first.bars[0], ...first.bars[1]],
+    null,
+    [],
+    0,
+  );
   if (second.bars === null) {
     return [first.bars[0], first.bars[1], [], []];
   }
@@ -305,15 +343,18 @@ function baitCell(
   landingCells: readonly number[],
   snakes: readonly [Snake, Snake],
   foods: readonly number[],
+  near: number,
 ): number | null {
   const h0 = snakes[0].body[0] as number;
   const h1 = snakes[1].body[0] as number;
+  const heads: readonly [number, number] = [h0, h1];
+  const free = [...landingCells].filter((c) => !foods.includes(c));
+  // 有離兩個蛇頭都不遠的格子就只在這些裡面挑；都沒有才退回整個落點。
+  const close = free.filter((c) => isNear(c, heads, near));
+  const pool = close.length > 0 ? close : free;
   let best = -1;
   let bestGap = Number.POSITIVE_INFINITY;
-  for (const c of [...landingCells].sort((a, b) => a - b)) {
-    if (foods.includes(c)) {
-      continue;
-    }
+  for (const c of pool.sort((a, b) => a - b)) {
     const gap = Math.abs(manhattan(c, h0) - manhattan(c, h1));
     if (gap < bestGap) {
       bestGap = gap;
@@ -377,7 +418,7 @@ function stepWith(options: Required<C5Options>, state: C5State, inputs: Inputs):
         next[i] = {
           ...grown,
           body: [...grown.body, ...Array.from({ length: BAIT_GROW - 1 }, () => tail)],
-          score: grown.score + BAIT_POINTS,
+          score: grown.score + options.baitPoints,
         };
       } else {
         next[i] = { ...next[i], score: next[i].score + 1 };
@@ -437,7 +478,7 @@ function stepWith(options: Required<C5Options>, state: C5State, inputs: Inputs):
       rng = filled.rng;
     }
     // 預告：這一刻起，tick + 60 有一對牆要落下。
-    const at = tick + PREVIEW_TICKS;
+    const at = tick + options.preview;
     if (landing === null && at < state.maxTicks && at >= PAIR_PERIOD && at % PAIR_OFFSET === 0) {
       const pair = (Math.floor(at / PAIR_OFFSET) % 2) as 0 | 1;
       const forbidden = new Uint8Array(CELLS);
@@ -455,12 +496,29 @@ function stepWith(options: Required<C5Options>, state: C5State, inputs: Inputs):
           forbidden[c] = 1;
         }
       });
-      const picked = pickBars(rng, options.landingTries, forbidden, rest);
+      const heads: readonly [number, number] = [
+        snakes[0].body[0] as number,
+        snakes[1].body[0] as number,
+      ];
+      const picked = pickBars(
+        rng,
+        options.landingTries,
+        forbidden,
+        rest,
+        heads,
+        foods,
+        options.baitNear,
+      );
       rng = picked.rng;
       if (picked.bars !== null) {
         landing = { pair, bars: picked.bars, at };
         if (options.bait) {
-          const c = baitCell([...picked.bars[0], ...picked.bars[1]], snakes, foods);
+          const c = baitCell(
+            [...picked.bars[0], ...picked.bars[1]],
+            snakes,
+            foods,
+            options.baitNear,
+          );
           bait = c === null ? null : { cell: c, until: at };
         }
       }
@@ -631,7 +689,10 @@ function evaluateWith(
   if (!options.crush || state.over || base.danger >= 1) {
     return base;
   }
-  return { gain: base.gain, danger: Math.max(base.danger, crushDangerOf(state, side, options.crushMargin)) };
+  return {
+    gain: base.gain,
+    danger: Math.max(base.danger, crushDangerOf(state, side, options.crushMargin)),
+  };
 }
 
 function actionsWith(state: C5State, side: Side): readonly Buttons[] {
@@ -650,6 +711,9 @@ export function createC5Game(options: C5Options = {}): Game<C5State> {
     bait: options.bait ?? true,
     landingTries: options.landingTries ?? LANDING_TRIES,
     crushMargin: options.crushMargin ?? CRUSH_MARGIN,
+    preview: options.preview ?? PREVIEW_TICKS,
+    baitPoints: options.baitPoints ?? BAIT_POINTS,
+    baitNear: options.baitNear ?? BAIT_NEAR,
   };
   return {
     id: 'C-5',
