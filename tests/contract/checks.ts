@@ -548,6 +548,26 @@ export function checkSymmetry<S>(
   seeds: readonly number[],
   config: GameConfig,
 ): void {
+  judgeSymmetry(symmetryPoints(entry, seeds, config), seeds.length);
+}
+
+/** K12 的 200 個種子切成幾段（每段各自一個測試案例，見 `all-games.shared.ts`）。 */
+const SYMMETRY_CHUNK_COUNT = 4;
+/** K12 的分段：連續、不漏不重，合起來恰好是 `SYMMETRY_SEEDS`。 */
+export const SYMMETRY_CHUNKS: readonly (readonly number[])[] = Array.from(
+  { length: SYMMETRY_CHUNK_COUNT },
+  (_, i) => {
+    const size = SYMMETRY_SEEDS.length / SYMMETRY_CHUNK_COUNT;
+    return SYMMETRY_SEEDS.slice(i * size, (i + 1) * size);
+  },
+);
+
+/** K12 的成本都在控制器；這一段只負責跑對局並數 0 號邊的得分（平手算半場）。 */
+export function symmetryPoints<S>(
+  entry: RegistryEntry<S>,
+  seeds: readonly number[],
+  config: GameConfig,
+): number {
   let points = 0;
   for (const seed of seeds) {
     const c0 = contractController(entry, seed, 0);
@@ -555,11 +575,16 @@ export function checkSymmetry<S>(
     const { winner } = playMatch(entry.game, seed, config, c0, c1);
     points += winner === 0 ? 1 : winner === null ? 0.5 : 0;
   }
-  const rate = points / seeds.length;
+  return points;
+}
+
+/** K12 的判準：勝率（得分 ÷ 場數）在 40% 到 60% 之間。分段跑與一次跑完共用這一份。 */
+export function judgeSymmetry(points: number, matches: number): void {
+  const rate = points / matches;
   if (rate < 0.4 || rate > 0.6) {
     violation(
       'K12',
-      `${seeds.length} 個種子，0 號邊的勝率是 ${(rate * 100).toFixed(1)}%，應該在 40% 到 60% 之間`,
+      `${matches} 個種子，0 號邊的勝率是 ${(rate * 100).toFixed(1)}%，應該在 40% 到 60% 之間`,
     );
   }
 }

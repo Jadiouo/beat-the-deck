@@ -1,7 +1,17 @@
 import { describe, expect, it } from 'vitest';
 
+import type { RegistryEntry } from '../../src/games/types';
 import { bucketOf, entriesOfBucket, fileNameOf, type Bucket } from '../ai/a-checks.shared';
-import { CHECKS, CONTRACT_SEEDS, runCheck } from './checks';
+import {
+  CHECKS,
+  CONTRACT_CONFIG,
+  CONTRACT_SEEDS,
+  SYMMETRY_CHUNKS,
+  SYMMETRY_SEEDS,
+  judgeSymmetry,
+  runCheck,
+  symmetryPoints,
+} from './checks';
 
 /**
  * TEST_PLAN 第 4 節｜契約測試（K1–K13、R1–R3）依花色分檔跑的共用部分。
@@ -34,6 +44,10 @@ export function defineContractChecks(bucket: Bucket): void {
         it.skip(`${title}（這張牌不適用）`, () => undefined);
         continue;
       }
+      if (check.code === 'K12') {
+        defineSymmetry(entry, title);
+        continue;
+      }
       it(
         title,
         () => {
@@ -47,5 +61,33 @@ export function defineContractChecks(bucket: Bucket): void {
         60_000,
       );
     }
+  });
+}
+
+/**
+ * K12 分段：200 個種子切成 `SYMMETRY_CHUNKS`，每段一個測試案例（各自 60 秒），
+ * 最後一個案例把各段得分加總、用同一個判準判。種子數與判準都沒動（見 `symmetry-chunks.test.ts`）。
+ * 為什麼：最慢的牌（S-Q、S-10、S-A）一次跑完要 70 多秒，成本在控制器，降不下來。
+ * 任何一段沒跑完（出錯、逾時）加總的案例就失敗，不會因為少了一段而假裝通過。
+ */
+function defineSymmetry(entry: RegistryEntry, title: string): void {
+  const done = new Map<number, number>();
+  SYMMETRY_CHUNKS.forEach((chunk, index) => {
+    it(`${title}（第 ${index + 1}/${SYMMETRY_CHUNKS.length} 段：種子 ${chunk[0]} 到 ${chunk[chunk.length - 1]}）`, () => {
+      try {
+        done.set(index, symmetryPoints(entry, chunk, CONTRACT_CONFIG));
+      } catch (error) {
+        const text = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+        throw new Error(`[K12] 遊戲丟出錯誤：${text}`, { cause: error });
+      }
+    }, 60_000);
+  });
+  it(title, () => {
+    expect([...done.keys()].sort(), '有一段沒有跑完').toEqual(SYMMETRY_CHUNKS.map((_, i) => i));
+    let points = 0;
+    for (const value of done.values()) {
+      points += value;
+    }
+    judgeSymmetry(points, SYMMETRY_SEEDS.length);
   });
 }
