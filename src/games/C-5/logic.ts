@@ -152,11 +152,33 @@ function candidateBar(index: number): number[] {
   return cells;
 }
 
+/** 第 `index` 種候選位置的 6 個格子，寫進 `out`（不配置新陣列）。 */
+function fillBar(index: number, out: Int16Array): void {
+  if (index < HORIZONTAL) {
+    const x = index % (WIDTH - BAR_LEN + 1);
+    const y = Math.floor(index / (WIDTH - BAR_LEN + 1));
+    for (let i = 0; i < BAR_LEN; i += 1) {
+      out[i] = cell(x + i, y);
+    }
+  } else {
+    const j = index - HORIZONTAL;
+    const x = j % WIDTH;
+    const y = Math.floor(j / WIDTH);
+    for (let i = 0; i < BAR_LEN; i += 1) {
+      out[i] = cell(x, y + i);
+    }
+  }
+}
+
 function rotatedBar(bar: readonly number[]): number[] {
   return bar.map(rotateCell).sort((a, b) => a - b);
 }
 
 /** 除了 `blocked` 以外的格子是不是四連通（洪水填充）。 */
+const fillSeen = new Uint32Array(CELLS);
+const fillQueue = new Int16Array(CELLS);
+let fillGeneration = 0;
+
 function stillConnected(blocked: Uint8Array): boolean {
   let open = 0;
   let start = -1;
@@ -171,35 +193,37 @@ function stillConnected(blocked: Uint8Array): boolean {
   if (open === 0) {
     return true;
   }
-  const seen = new Uint8Array(CELLS);
-  const queue = new Int16Array(CELLS);
+  fillGeneration += 1;
+  const mark = fillGeneration;
+  const seen = fillSeen;
+  const queue = fillQueue;
   let head = 0;
   let tail = 0;
   queue[tail] = start;
   tail += 1;
-  seen[start] = 1;
+  seen[start] = mark;
   while (head < tail) {
     const current = queue[head] as number;
     head += 1;
     const x = cellX(current);
     const y = cellY(current);
-    if (x > 0 && seen[current - 1] === 0 && blocked[current - 1] === 0) {
-      seen[current - 1] = 1;
+    if (x > 0 && seen[current - 1] !== mark && blocked[current - 1] === 0) {
+      seen[current - 1] = mark;
       queue[tail] = current - 1;
       tail += 1;
     }
-    if (x < WIDTH - 1 && seen[current + 1] === 0 && blocked[current + 1] === 0) {
-      seen[current + 1] = 1;
+    if (x < WIDTH - 1 && seen[current + 1] !== mark && blocked[current + 1] === 0) {
+      seen[current + 1] = mark;
       queue[tail] = current + 1;
       tail += 1;
     }
-    if (y > 0 && seen[current - WIDTH] === 0 && blocked[current - WIDTH] === 0) {
-      seen[current - WIDTH] = 1;
+    if (y > 0 && seen[current - WIDTH] !== mark && blocked[current - WIDTH] === 0) {
+      seen[current - WIDTH] = mark;
       queue[tail] = current - WIDTH;
       tail += 1;
     }
-    if (y < HEIGHT - 1 && seen[current + WIDTH] === 0 && blocked[current + WIDTH] === 0) {
-      seen[current + WIDTH] = 1;
+    if (y < HEIGHT - 1 && seen[current + WIDTH] !== mark && blocked[current + WIDTH] === 0) {
+      seen[current + WIDTH] = mark;
       queue[tail] = current + WIDTH;
       tail += 1;
     }
@@ -228,23 +252,23 @@ function pickBars(
   near: number,
 ): PickResult {
   let state = rng;
-  let fallback: readonly [readonly number[], readonly number[]] | null = null;
+  const deferred: number[] = [];
+  const scratch = new Int16Array(BAR_LEN);
   let valid = 0;
   for (let attempt = 0; attempt < tries && valid < LANDING_CANDIDATES; attempt += 1) {
     const [pick, following] = intFrom(state, CANDIDATES);
     state = following;
-    const first = candidateBar(pick);
-    const second = rotatedBar(first);
+    fillBar(pick, scratch);
     let ok = true;
-    for (const c of first) {
-      if (forbidden[c] === 1 || second.includes(c)) {
+    for (let i = 0; i < BAR_LEN && ok; i += 1) {
+      const c = scratch[i] as number;
+      const r = rotateCell(c);
+      if (forbidden[c] === 1 || forbidden[r] === 1) {
         ok = false;
         break;
       }
-    }
-    if (ok) {
-      for (const c of second) {
-        if (forbidden[c] === 1) {
+      for (let j = 0; j < BAR_LEN; j += 1) {
+        if (scratch[j] === r) {
           ok = false;
           break;
         }
@@ -253,32 +277,70 @@ function pickBars(
     if (!ok) {
       continue;
     }
-    const blocked = new Uint8Array(CELLS);
-    for (const c of others) {
-      blocked[c] = 1;
+    let isNearEnough = heads === null;
+    if (heads !== null) {
+      for (let i = 0; i < BAR_LEN && !isNearEnough; i += 1) {
+        const c = scratch[i] as number;
+        const r = rotateCell(c);
+        isNearEnough =
+          (!foods.includes(c) && isNear(c, heads, near)) ||
+          (!foods.includes(r) && isNear(r, heads, near));
+      }
     }
-    for (const c of first) {
-      blocked[c] = 1;
-    }
-    for (const c of second) {
-      blocked[c] = 1;
-    }
-    if (!stillConnected(blocked)) {
+    if (!isNearEnough) {
+      // 不夠近的候選先不做四連通（貴）：只記下編號，找不到更好的才回頭檢查。
+      valid += 1;
+      deferred.push(pick);
       continue;
     }
-    valid += 1;
-    if (fallback === null) {
-      fallback = [first, second];
+    const first = candidateBar(pick);
+    const second = rotatedBar(first);
+    if (!connectedWith(others, first, second)) {
+      continue;
     }
     // 開局放牆沒有蛇頭可以參照：第一個合法的就用。
-    if (
-      heads === null ||
-      [...first, ...second].some((c) => !foods.includes(c) && isNear(c, heads, near))
-    ) {
+    return { bars: [first, second], rng: state };
+  }
+  for (const pick of deferred) {
+    const first = candidateBar(pick);
+    const second = rotatedBar(first);
+    if (connectedWith(others, first, second)) {
       return { bars: [first, second], rng: state };
     }
   }
-  return { bars: fallback, rng: state };
+  return { bars: null, rng: state };
+}
+
+/** 四連通的結果記起來：AI 往前搜尋時同一組牆會被重複檢查很多次（同樣的輸入永遠同樣的答案）。 */
+const connectedMemo = new Map<string, boolean>();
+const CONNECTED_MEMO_LIMIT = 4000;
+
+function connectedWith(
+  others: readonly number[],
+  first: readonly number[],
+  second: readonly number[],
+): boolean {
+  const key = `${others.join(',')};${first.join(',')}`;
+  const known = connectedMemo.get(key);
+  if (known !== undefined) {
+    return known;
+  }
+  const blocked = new Uint8Array(CELLS);
+  for (const c of others) {
+    blocked[c] = 1;
+  }
+  for (const c of first) {
+    blocked[c] = 1;
+  }
+  for (const c of second) {
+    blocked[c] = 1;
+  }
+  const result = stillConnected(blocked);
+  if (connectedMemo.size >= CONNECTED_MEMO_LIMIT) {
+    connectedMemo.clear();
+  }
+  connectedMemo.set(key, result);
+  return result;
 }
 
 function isNear(cellIndex: number, heads: readonly [number, number], near: number): boolean {
