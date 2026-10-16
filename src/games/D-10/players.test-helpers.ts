@@ -139,17 +139,25 @@ const opponentFits = (state: D10State, side: Side, w: number): boolean => {
  * 只差「規劃時有沒有把對手放進去」。
  * - `unaware`（a）：不知道有對手，什麼貨都去攔。
  * - `aware`（b）：知道有人會搶，但不看它在哪、背什麼：越遠的貨越可能被搶，所以遠的貨一律打折（`HAZARD`）。
- * - `reads`（c）：讀對手的位置、背包、出貨倒數：只攔自己確定先到的（對手放不下、站不到、或比我晚）。
+ * - `reads`（c，事先定好的那一個）：讀對手的位置與背包：它最想攔的那一件（它自己的 worth 最高的），
+ *   如果它比我先到或同時到，我就讓；背包快滿（出貨前的空檔）時照樣出貨。
+ *
+ * 其餘是「讀」的其他寫法，量來看 (c) 的結果是不是只是這一種寫法太差（敏感度，不是標籤）：
+ * - `readsShip`：同 `unaware`，但出貨時機讀對手（接下來 1 秒沒有我確定先到的貨，背包 ≥ 3 就出貨）。
+ * - `avoidTie`：同 `unaware`，但不攔會同時到的貨（讓它）。
+ * - `readsBag`：同 `unaware`，但對手放不下的貨價值減半（它拿不走，晚點再拿）。
+ * - `exploitTie`：同 `unaware`，但同時到的貨價值 ×1.5（賭對手會閃開）。
  */
 export type ProbeKind =
-  'unaware' | 'aware' | 'reads' | 'readsShip' | 'readsTie' | 'readsBoth' | 'readsLead' | 'readsBag';
+  'unaware' | 'aware' | 'reads' | 'readsShip' | 'avoidTie' | 'readsBag' | 'exploitTie';
+
 export function probe(kind: ProbeKind): Controller<D10State> {
   return player(
     (state, side, rows) => {
       let row: CatchRow | null;
       if (kind === 'unaware' || kind === 'readsShip') {
         row = bestRow(rows, () => true);
-      } else if (kind === 'readsTie' || kind === 'readsBoth') {
+      } else if (kind === 'avoidTie') {
         row = bestRow(rows, (r) => r.mineTau !== r.theirsTau);
       } else if (kind === 'readsBag') {
         row = bestRow(
@@ -157,8 +165,12 @@ export function probe(kind: ProbeKind): Controller<D10State> {
           () => true,
           (r) => worth(r) * (opponentFits(state, side, r.w) ? 1 : 0.5),
         );
-      } else if (kind === 'readsLead') {
-        row = bestRow(rows, (r) => !(r.theirsTau + 10 < r.mineTau));
+      } else if (kind === 'exploitTie') {
+        row = bestRow(
+          rows,
+          () => true,
+          (r) => worth(r) * (r.mineTau === r.theirsTau ? 1.5 : 1),
+        );
       } else if (kind === 'aware') {
         row = bestRow(
           rows,
@@ -180,7 +192,7 @@ export function probe(kind: ProbeKind): Controller<D10State> {
       }
       return row === null ? null : row.mineAt;
     },
-    kind === 'reads' || kind === 'readsShip' || kind === 'readsBoth',
+    kind === 'reads' || kind === 'readsShip',
   );
 }
 
@@ -203,7 +215,7 @@ export function dense(): Controller<D10State> {
 
 /** 追預告的下一件：有預告就去它出現的那一格等著（貨一出現就拿），沒有預告時照 `unaware`。 */
 export function upcomingChaser(): Controller<D10State> {
-  return player((state, _side, rows) => {
+  return player((_state, _side, rows) => {
     const up = rows.find((r) => r.kind === 'upcoming');
     if (up !== undefined && up.mineTau !== Number.POSITIVE_INFINITY) {
       return up.mineAt;

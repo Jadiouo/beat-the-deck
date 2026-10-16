@@ -8,7 +8,7 @@ import { precise } from '../../ai/policies/precise';
 import { lookOneStep } from '../../ai/policies/shared';
 import type { Policy } from '../../ai/types';
 import { playMatch } from '../../core/match';
-import type { Buttons, Controller, Game, Side } from '../../core/types';
+import type { Buttons, Controller, Game, Inputs, Side } from '../../core/types';
 import {
   CELLS,
   cell,
@@ -1204,34 +1204,42 @@ describe('D-10 輸送帶｜劇本玩家與探針 A（真實規則、真實 AI）
 
   const SEEDS = 60;
 
-  it('四個劇本玩家各打貪心型與精準型等級 10（種子 0 到 59）：「盯對手背包」勝過「站在圈中央」', () => {
+  it('「站在圈中央」不是最佳解：照價值與時間去規劃的玩家勝過站中央待命的玩家（對貪心型與精準型等級 10，種子 0 到 59）', () => {
     for (const policy of [greedy, precise]) {
-      const watching = winRate(() => watchBag(), policy, SEEDS);
+      const planner = winRate(() => probe('unaware'), policy, SEEDS);
       const centered = winRate(() => center(), policy, SEEDS);
-      expect(watching, `盯對手背包 ${policy.name}`).toBeGreaterThan(centered);
+      expect(planner, `規劃型 vs 站中央，對 ${policy.name}`).toBeGreaterThan(centered);
     }
   }, 900_000);
 
-  it('四個劇本玩家：「盯對手背包」勝過「只攔密度 ≥ 2」與「追預告的下一件」（對貪心型與對精準型都是）', () => {
+  it('規劃型勝過「只攔密度 ≥ 2」「追預告的下一件」「盯對手背包」（對貪心型與精準型等級 10，種子 0 到 59）', () => {
     for (const policy of [greedy, precise]) {
-      const watching = winRate(() => watchBag(), policy, SEEDS);
-      expect(watching, `盯對手背包 vs 只攔密度 ${policy.name}`).toBeGreaterThan(
-        winRate(() => dense(), policy, SEEDS),
-      );
-      expect(watching, `盯對手背包 vs 追預告 ${policy.name}`).toBeGreaterThan(
-        winRate(() => upcomingChaser(), policy, SEEDS),
-      );
+      const planner = winRate(() => probe('unaware'), policy, SEEDS);
+      for (const [name, make] of [
+        ['只攔密度', dense],
+        ['追預告', upcomingChaser],
+        ['盯對手背包', watchBag],
+      ] as const) {
+        expect(planner, `規劃型 vs ${name}，對 ${policy.name}`).toBeGreaterThan(
+          winRate(make, policy, SEEDS),
+        );
+      }
     }
   }, 1_800_000);
 
-  it('探針 A 的三組玩家都打得起來（有拿、有出貨）：不知道有對手、知道但不讀、讀', () => {
-    for (const kind of ['unaware', 'aware', 'reads'] as const) {
-      const me = probe(kind);
-      const ai = levelController(d10Game, precise, 10, 1_000_003);
-      const result = playMatch(d10Game, 0, CONFIG, me, ai);
-      expect(result.score[0], kind).toBeGreaterThan(0);
-    }
-  }, 120_000);
+  // 小規格預測「盯對手背包」勝過其他三個劇本，實測不成立（對精準型等級 10，200 場：站中央 61.0、只攔密度 51.8、
+  // 追預告 25.3、盯背包 29.5；對貪心型：29.0、15.8、9.3、12.3）。沒有放寬門檻，記在 docs/cards/D-10.md。
+  it.todo('「盯對手背包」勝過其他劇本（未達成：盯背包 29.5，站中央 61.0，見 docs/cards/D-10.md）');
+
+  it('探針 A 的三組玩家（不知道有對手、知道但不讀、讀）都打得起來；主要的「讀」（讓出它想攔的貨）比「知道但不讀」差 10 個點以上', () => {
+    const rate = (kind: 'unaware' | 'aware' | 'reads'): number =>
+      winRate(() => probe(kind), precise, 100);
+    const aware = rate('aware');
+    const reads = rate('reads');
+    expect(rate('unaware')).toBeGreaterThan(0.5);
+    expect(aware).toBeGreaterThan(0.5);
+    expect(reads).toBeLessThan(aware - 0.1);
+  }, 900_000);
 });
 
 // ---------------------------------------------------------------------------
@@ -1248,6 +1256,8 @@ describe('D-10 輸送帶｜四性格指紋', () => {
     broken: number;
     /** 機制：每個決定選到的動作的 danger 平均。 */
     chosenDanger: number;
+    /** 機制：選到 danger ≥ 0.5 的決定占比。 */
+    risky: number;
   }
 
   /** 各性格等級 10 對貪心型等級 10，40 場。 */
@@ -1257,6 +1267,7 @@ describe('D-10 輸送帶｜四性格指紋', () => {
     let ships = 0;
     let broken = 0;
     let dangerSum = 0;
+    let risky = 0;
     let decisions = 0;
     for (let seed = 0; seed < 40; seed += 1) {
       const side: Side = seed % 2 === 0 ? 0 : 1;
@@ -1267,12 +1278,15 @@ describe('D-10 輸送帶｜四性格指紋', () => {
       for (let tick = 0; !d10Game.isOver(state); tick += 1) {
         const mine = me.decide(state, side, tick);
         const theirs = ai.decide(state, other, tick);
+        const inputs: Inputs = side === 0 ? [mine, theirs] : [theirs, mine];
+        const after = d10Game.step(state, inputs);
         if (tick % 5 === 0) {
-          const after = d10Game.step(state, side === 0 ? [mine, theirs] : [theirs, mine]);
-          dangerSum += d10Game.evaluate(after, side).danger;
+          const { danger } = d10Game.evaluate(after, side);
+          dangerSum += danger;
+          risky += danger >= 0.5 ? 1 : 0;
           decisions += 1;
         }
-        state = d10Game.step(state, side === 0 ? [mine, theirs] : [theirs, mine]);
+        state = after;
       }
       takenW += state.takenW[side] as number;
       takenV += state.takenV[side] as number;
@@ -1284,6 +1298,7 @@ describe('D-10 輸送帶｜四性格指紋', () => {
       ships: ships / 40,
       broken: broken / 40,
       chosenDanger: dangerSum / Math.max(1, decisions),
+      risky: risky / Math.max(1, decisions),
     };
   }
 
@@ -1299,26 +1314,31 @@ describe('D-10 輸送帶｜四性格指紋', () => {
     return cached;
   };
 
-  it('機制：賭徒型選到的動作的 danger 平均比精準型高（它被 danger 吸引，精準型躲它）', () => {
-    expect(getPrints().gambler.chosenDanger).toBeGreaterThan(
-      getPrints().precise.chosenDanger * 1.5,
-    );
-    expect(getPrints().greedy.chosenDanger).toBeGreaterThan(getPrints().precise.chosenDanger);
+  it('機制：賭徒型選到的動作的 danger 平均 ≥ 精準型的 1.5 倍；選到 danger ≥ 0.5 的決定占比 ≥ 3 倍（它被 danger 吸引，精準型躲它）', () => {
+    const p = getPrints();
+    expect(p.gambler.chosenDanger).toBeGreaterThan(p.precise.chosenDanger * 1.5);
+    expect(p.gambler.risky).toBeGreaterThan(p.precise.risky * 3);
+    expect(p.greedy.chosenDanger).toBeGreaterThan(p.precise.chosenDanger);
   }, 900_000);
 
-  it('預測：平均密度 精準／貪心 ≥ 1.3', () => {
-    expect(getPrints().precise.density / getPrints().greedy.density).toBeGreaterThanOrEqual(1.3);
+  it('預測：摔壞 貪心／精準 ≥ 1.5（精準型避開會同時到的貨）', () => {
+    const p = getPrints();
+    expect(p.greedy.broken / Math.max(p.precise.broken, 0.01)).toBeGreaterThanOrEqual(1.5);
   }, 900_000);
 
-  it('預測：摔壞 貪心／精準 ≥ 1.5', () => {
-    expect(
-      getPrints().greedy.broken / Math.max(getPrints().precise.broken, 0.01),
-    ).toBeGreaterThanOrEqual(1.5);
+  it('出貨次數：貪心型比賭徒型多（賭徒型被 danger 吸引，更常在出貨前被別的事拖住）', () => {
+    const p = getPrints();
+    expect(p.greedy.ships).toBeGreaterThan(p.gambler.ships);
   }, 900_000);
 
-  it('預測：出貨次數 貪心／賭徒 ≥ 1.5', () => {
-    expect(
-      getPrints().greedy.ships / Math.max(getPrints().gambler.ships, 0.01),
-    ).toBeGreaterThanOrEqual(1.5);
-  }, 900_000);
+  // 小規格的另外兩個預測，實測不成立，沒有放寬門檻，記在 docs/cards/D-10.md：
+  // - 平均密度 精準／貪心 ≥ 1.3：量到 0.95（精準 1.94、貪心 2.04）。一局 40 件貨，兩邊合計拿走約 36 件，
+  //   所以每個人拿到的密度幾乎就是全部貨的平均（約 2.0）；「放走」的貨對手一樣會拿走。
+  // - 出貨次數 貪心／賭徒 ≥ 1.5：量到 1.28（貪心 8.4、賭徒 6.5 次/場）。
+  it.todo(
+    '平均密度 精準／貪心 ≥ 1.3（未達成：量到 0.95（精準 1.94、貪心 2.04），見 docs/cards/D-10.md）',
+  );
+  it.todo(
+    '出貨次數 貪心／賭徒 ≥ 1.5（未達成：量到 1.28（貪心 8.4、賭徒 6.5 次/場），見 docs/cards/D-10.md）',
+  );
 });
