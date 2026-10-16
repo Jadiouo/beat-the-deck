@@ -2,6 +2,7 @@ import { createRng } from '../../core/rng';
 import type { Buttons, Controller, Game, Side } from '../../core/types';
 import { cell, cellX, cellY, HEIGHT, MOVE_EVERY, WIDTH } from '../_clubs/logic';
 import type { Dir } from '../_clubs/logic';
+import { BAIT_POINTS } from './logic';
 import type { C5State } from './logic';
 
 /**
@@ -298,7 +299,7 @@ export function playTracked(
       }
     }
     for (const i of [0, 1] as const) {
-      if (state.snakes[i].score - before.snakes[i].score === 2) {
+      if (state.snakes[i].score - before.snakes[i].score === BAIT_POINTS) {
         baits[i] += 1;
       }
     }
