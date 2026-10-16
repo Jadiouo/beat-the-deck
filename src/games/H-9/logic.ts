@@ -594,17 +594,18 @@ function opponentValue(state: H9State, me: Side, diff: number): { gain: number; 
   };
 }
 
-/** 輪到我（對方剛加價）的價值打幾折：見 `myTurnValue`。 */
-const MY_TURN_DISCOUNT = 0.9;
-
-function myTurnValue(state: H9State, me: Side, diff: number): { gain: number; danger: number } {
-  if (state.S <= S0 || state.bidder === me) {
-    return { gain: diff, danger: 0 };
-  }
-  const callGain = 1 - 2 * trueChance(state, me, state.S);
-  // 打折：搜尋型在模擬裡會讓對方「維持 actions 的第一個」（加 1），走到這裡的路是假設對方一定繼續加；
-  // 現在就抓（亮骰）是已經到手的，所以同樣的把握下，現在抓要嚴格勝過「等對方再加一次」。
-  return { gain: diff + MY_TURN_DISCOUNT * Math.max(0, callGain), danger: 0 };
+/**
+ * 輪到我（對方剛加價）：只算勝場差，沒有「再抓一次」的加分，也沒有 danger。
+ *
+ * 搜尋型在模擬裡讓對手維持 `actions()` 的第一個（加 1）。AI 坐 1 號邊、自己喊價之後，0 號邊沒有 45 tick 的等待，
+ * 立刻輪到、模擬裡立刻加 1，深度 6 就走回「我的回合」。以前這裡給「現在抓的把握 × 0.9」的加分、danger 為 0：
+ * 對方被假設一定乖乖加價、我之後再抓，而我自己的喊價被抓的風險一點都沒算，所以只要現在的喊價很可能是假的，
+ * 「再加價」就比「現在抓」好（0.90 對 0.89），AI 在該抓的時候繼續加價。0 號邊喊價之後對手先等 45 tick，
+ * 深度 6 走不到這裡，所以這是座位偏差，也是深度 6 比深度 3 到 5 更弱的原因（`docs/cards/H-9.md`「座位與深度軸」）。
+ * 現在跟深度 4、5 看到的一樣：對方動作中的局面不加分。
+ */
+function myTurnValue(_state: H9State, _me: Side, diff: number): { gain: number; danger: number } {
+  return { gain: diff, danger: 0 };
 }
 
 function evaluateH9(state: H9State, me: Side): { gain: number; danger: number } {
