@@ -454,6 +454,41 @@ describe('C-5 會動的牆｜誘餌', () => {
     expect(far[Math.floor(far.length / 2)] as number).toBeLessThanOrEqual(10);
   }, 180_000);
 
+  it('4. 「要不要冒險」真的發生：搜尋型等級 10 對打，誘餌平均每場被吃到 2 次以上（改前量到 0.2），而且不是每個都吃（5% 到 60%），被牆壓死每場不到 1 次（種子 0 到 11）', () => {
+    let spawned = 0;
+    let taken = 0;
+    let crushedTotal = 0;
+    const games = 12;
+    for (let seed = 0; seed < games; seed += 1) {
+      const controllers = [
+        levelController(c5Game, pathfinder, 10, seed + 1),
+        levelController(c5Game, pathfinder, 10, seed + 1_000_003),
+      ];
+      let state = c5Game.init(seed, CONFIG);
+      let last = -1;
+      while (!c5Game.isOver(state)) {
+        const before = state;
+        state = c5Game.step(state, [
+          (controllers[0] as Controller<C5State>).decide(state, 0, state.tick),
+          (controllers[1] as Controller<C5State>).decide(state, 1, state.tick),
+        ]);
+        if (state.bait !== null && state.bait.cell !== last) {
+          last = state.bait.cell;
+          spawned += 1;
+        }
+        if (before.bait !== null && state.bait === null && state.tick < before.bait.until) {
+          taken += 1;
+        }
+      }
+      crushedTotal += state.crushed[0] + state.crushed[1];
+    }
+    expect(spawned).toBeGreaterThan(0);
+    expect(taken / games).toBeGreaterThanOrEqual(2);
+    expect(taken / spawned).toBeGreaterThanOrEqual(0.05);
+    expect(taken / spawned).toBeLessThanOrEqual(0.6);
+    expect(crushedTotal / games).toBeLessThan(1);
+  }, 300_000);
+
   it('誘餌是額外的第三顆食物：場上的普通食物還是 2 顆', () => {
     const state = started();
     expect(state.foods).toHaveLength(2);
@@ -1053,8 +1088,11 @@ describe('C-5 會動的牆｜劇本玩家與消融（對搜尋型等級 10，種
     expect(spreadFull - spreadOff).toBeGreaterThanOrEqual(0.4);
   }, 180_000);
 
-  it('消融二：關掉誘餌，衝誘餌的玩家沒東西可衝，被壓死的次數掉下來（誘餌是把人騙進落點的餌）', () => {
+  it('消融二：關掉誘餌，衝誘餌的玩家沒東西可衝，被壓死的次數不會比有誘餌時多（落點改挑在蛇頭附近之後，落點本身就會壓到不看牆的玩家，所以不再要求嚴格變少）', () => {
+    // 改前：toBeLessThan（嚴格變少）。改後：落點離蛇頭 8 格內，不看牆的玩家兩種情況都被壓（量到 0.8 對 0.8），
+    // 嚴格不等式不再成立；誘餌仍然要有東西可衝（full.rusher.baits > 0）、關掉之後是 0。
+    expect(full.rusher.baits).toBeGreaterThan(0);
     expect(noBait.rusher.baits).toBe(0);
-    expect(noBait.rusher.crushed).toBeLessThan(full.rusher.crushed);
+    expect(noBait.rusher.crushed).toBeLessThanOrEqual(full.rusher.crushed);
   }, 180_000);
 });
