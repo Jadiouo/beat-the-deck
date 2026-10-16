@@ -366,6 +366,73 @@ describe('S-10 彈幕｜清場門檻（老闆裁定：清場要場上至少 N �
   });
 });
 
+describe('S-10 彈幕｜按早了會被鎖住（lockTicks：第三種變體，老闆指定的兩種之外）', () => {
+  const MIN = 8;
+  const LOCK = 120;
+  const free = (extra: Partial<Parameters<typeof makeState>[0]> = {}): S10State =>
+    makeState({ tick: 400, minBullets: MIN, ...extra });
+  const locked = (extra: Partial<Parameters<typeof makeState>[0]> = {}): S10State =>
+    makeState({ tick: 400, minBullets: MIN, lockTicks: LOCK, ...extra });
+
+  it('1. init：lockTicks 預設是 0（關著），lock 是 [0, 0]；options 可以開', () => {
+    const s = s10Game.init(0, CONFIG);
+    expect([s.lockTicks, s.lock]).toEqual([0, [0, 0]]);
+    expect(createS10Game({ lockTicks: 90 }).init(0, CONFIG).lockTicks).toBe(90);
+  });
+
+  it('2. 按早了（按得下去但子彈不足 N 顆）：只鎖按的那一邊，鎖 LOCK 個 tick；次數、分數、子彈都不變', () => {
+    const s = s10Game.step(locked({ bullets: bulletsFar(MIN - 1) }), CLEAR0);
+    expect(s.lock).toEqual([LOCK, 0]);
+    expect([s.clears, s.cleared, s.bullets.length]).toEqual([3, [0, 0], MIN - 1]);
+    expect(s10Game.step(locked({ bullets: bulletsFar(MIN - 1) }), CLEAR1).lock).toEqual([0, LOCK]);
+    expect(s10Game.step(locked({ bullets: bulletsFar(MIN - 1) }), BOTH).lock).toEqual([LOCK, LOCK]);
+  });
+
+  it('3. 鎖住的期間按 b 沒有用，就算子彈夠；鎖每個 tick 減 1，歸 0 之後又能按', () => {
+    const base = locked({ bullets: bulletsFar(MIN + 5), lock: [3, 0] });
+    const blocked = s10Game.step(base, CLEAR0);
+    expect([blocked.cleared, blocked.clears, blocked.lock]).toEqual([[0, 0], 3, [2, 0]]);
+    // 對手沒被鎖，照樣能按
+    expect(s10Game.step(base, CLEAR1).cleared).toEqual([0, MIN + 5]);
+    const open = s10Game.step({ ...base, lock: [1, 0] }, CLEAR0);
+    expect(open.cleared).toEqual([0, 0]);
+    expect(s10Game.step(s10Game.step({ ...base, lock: [1, 0] }, IDLE), CLEAR0).cleared[0]).toBeGreaterThan(0);
+  });
+
+  it('4. 鎖住的期間再按不會延長鎖', () => {
+    const s = s10Game.step(locked({ bullets: bulletsFar(MIN - 1), lock: [50, 0] }), CLEAR0);
+    expect(s.lock).toEqual([49, 0]);
+  });
+
+  it('5. 第 300 tick 之前、無彈期、次數用完、最後一次的 1200 之前，按了不算按早，不鎖', () => {
+    const few = bulletsFar(2);
+    expect(s10Game.step(locked({ bullets: few, tick: 299 }), CLEAR0).lock).toEqual([0, 0]);
+    expect(s10Game.step(locked({ bullets: few, quiet: 4 }), CLEAR0).lock).toEqual([0, 0]);
+    expect(s10Game.step(locked({ bullets: few, clears: 0 }), CLEAR0).lock).toEqual([0, 0]);
+    expect(s10Game.step(locked({ bullets: few, clears: 1, tick: 1100 }), CLEAR0).lock).toEqual([0, 0]);
+    expect(s10Game.step(locked({ bullets: few, clears: 1, tick: 1200 }), CLEAR0).lock).toEqual([LOCK, 0]);
+  });
+
+  it('6. 子彈夠的時候按，照常清場、不鎖；lockTicks 是 0 時永遠不鎖', () => {
+    const ok = s10Game.step(locked({ bullets: bulletsFar(MIN) }), CLEAR0);
+    expect([ok.cleared[0], ok.lock]).toEqual([MIN, [0, 0]]);
+    expect(s10Game.step(free({ bullets: bulletsFar(MIN - 1) }), CLEAR0).lock).toEqual([0, 0]);
+  });
+
+  it('7. actions：被鎖住的那一邊沒有 b（17 個），另一邊（子彈夠）有 34 個', () => {
+    const s = locked({ bullets: bulletsFar(MIN + 2), lock: [10, 0] });
+    expect(s10Game.actions(s, 0)).toHaveLength(17);
+    expect(s10Game.actions(s, 1)).toHaveLength(34);
+  });
+
+  it('8. 狂按 b 的人被鎖得到、勸退：清場剛用完、子彈還沒長回 N 顆時按 b，之後 LOCK 個 tick 都按不到', () => {
+    let s = s10Game.step(free({ bullets: bulletsFar(20), lockTicks: LOCK }), CLEAR0);
+    s = run(s, QUIET_TICKS + 1, CLEAR0);
+    expect(s.lock[0]).toBeGreaterThan(0);
+    expect(s.bullets.length).toBeLessThan(MIN);
+  });
+});
+
 // ---------------------------------------------------------------------------
 // 險度（公開的，AI 讀它猜對手快不快撐不住）
 // ---------------------------------------------------------------------------
