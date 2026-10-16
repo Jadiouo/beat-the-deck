@@ -1,6 +1,7 @@
 import type { Buttons, Game, GameConfig, Inputs, Side } from '../../core/types';
 import {
   CELLS,
+  FOOD_GRADIENT,
   HEIGHT,
   MOVE_EVERY,
   WIDTH,
@@ -47,6 +48,10 @@ export const RADAR_NEAR = 8;
 export const RADAR_MID = 16;
 /** 探索目標：在蛇頭背後的格子多算這麼多格。 */
 export const BEHIND_PENALTY = 4;
+/** 探索目標：偏離蛇頭行進方向（橫向）的每一格多算這麼多格，讓目標落在正前方、AI 直走而不是走階梯。 */
+export const LATERAL_PENALTY = 2;
+/** 吃完之後挑轉向時，danger 換算成 gain 的權重（與搜尋型的 `PATHFINDER_W` 同量級）。 */
+const AFTER_EAT_W = 200;
 /** 自己死了的 gain（有限，比任何正常局面都低）。 */
 export const DEAD_GAIN = -1_000_000;
 
@@ -62,11 +67,20 @@ export interface Memory {
   readonly rivalHead: number;
   /** 對手蛇頭的行進方向。 */
   readonly rivalTurn: Dir;
+  /**
+   * 探索的目標格子（沒有記得的食物時 AI 往這裡走）；還沒選是 -1。選好之後不變，直到被看見才重選。
+   * 為什麼要記在 state 裡：搜尋型比較「第一步往哪走」時，每個終點都是各自重新找「離自己最近的沒看過的格子」，
+   * 那一格永遠在視野邊緣、在各自的前方，每個方向的距離梯度一樣，AI 就走成階梯（DESIGN-AI-FUN 10.40）。
+   * 目標固定之後，同一個決定裡所有終點看的是同一格，直走才會比轉彎近。
+   */
+  readonly goal: number;
 }
 
 export interface C4State extends ClubsState {
   /** 兩邊各自的記憶。 */
   readonly memory: readonly [Memory, Memory];
+  /** 兩邊各自最近一次吃到食物的 tick（走格的那個 tick）；沒吃過是 -1。只有 `evaluate` 讀（見 `evaluateOf`）。 */
+  readonly ateAt: readonly [number, number];
   /** 有人死了之後，畫面停到哪個 tick；沒有人死是 -1。 */
   readonly endAt: number;
   /** 停格結束時的贏家（只在 `endAt` ≥ 0 時有意義）。 */
@@ -82,6 +96,27 @@ export function isVisible(head: number, target: number): boolean {
   return (
     Math.abs(cellX(head) - cellX(target)) + Math.abs(cellY(head) - cellY(target)) <= FOG_RADIUS
   );
+}
+
+/** 一格最後被看見的時間 `last`，在 `tick` 這個時間點算不算「很久沒看過」（從沒看過也算）。 */
+function isStale(last: number, tick: number): boolean {
+  return last < 0 || last < tick - STALE_TICKS;
+}
+
+/**
+ * 看某一格要站到哪裡：離牆 `FOG_RADIUS` 格以內的格子，站到離牆剛好 `FOG_RADIUS` 格的那一格就看得到（曼哈頓距離 ≤ 4）。
+ * 為什麼不直接走到牆邊：搜尋型對「正前方 20 格內的牆」扣 danger（離牆 4 格 0.51），目標不在正前方直線上時沒有豁免，
+ * AI 會在離牆五六格處繞圈、永遠不敢靠近牆邊的目標（DESIGN-AI-FUN 10.40）。
+ */
+export function viewingPoint(c: number): number {
+  const x = Math.min(WIDTH - 1 - FOG_RADIUS, Math.max(FOG_RADIUS, cellX(c)));
+  const y = Math.min(HEIGHT - 1 - FOG_RADIUS, Math.max(FOG_RADIUS, cellY(c)));
+  return cell(x, y);
+}
+
+/** 站在 `viewingPoint(c)` 看得到 `c` 嗎（四個角落各有幾格看不到，不當探索目標）。 */
+function isViewable(c: number): boolean {
+  return isVisible(viewingPoint(c), c);
 }
 
 /** 以 `head` 為中心、視野內的所有格子（在地圖內的）。 */
@@ -109,6 +144,7 @@ function emptyMemory(): Memory {
     rival: [],
     rivalHead: -1,
     rivalTurn: 0,
+    goal: -1,
   };
 }
 
@@ -131,7 +167,12 @@ function sweep(state: ClubsState, side: Side, tick: number, previous: Memory): M
     rival.body.length > 0 && isVisible(head, rival.body[0] as number)
       ? (rival.body[0] as number)
       : -1;
-  return { foods, seen, rival: rivalCells, rivalHead, rivalTurn: rival.dir };
+  // 沒有記得的食物時才需要探索目標：還沒選、或剛被看見了，就重選（`seen` 已經是新的，所以新目標一定在視野外）。
+  let goal = previous.goal;
+  if (foods.length === 0 && (goal < 0 || !isStale(seen[goal] as number, tick))) {
+    goal = explorationTarget(seen, head, state.snakes[side].dir, tick);
+  }
+  return { foods, seen, rival: rivalCells, rivalHead, rivalTurn: rival.dir, goal };
 }
 
 /**
@@ -149,7 +190,6 @@ export function explorationTarget(
   const hy = cellY(head);
   const forwardX = dir === 1 ? 1 : dir === 3 ? -1 : 0;
   const forwardY = dir === 2 ? 1 : dir === 0 ? -1 : 0;
-  const staleBefore = tick - STALE_TICKS;
   let best = cell(16, 12);
   let bestCost = Number.POSITIVE_INFINITY;
   // 從近到遠一圈一圈找（第 d 圈是曼哈頓距離 d 的格子）；第 d 圈的格子花費至少是 d，超過目前最好的就不用找了。
@@ -166,11 +206,12 @@ export function explorationTarget(
           continue;
         }
         const c = y * WIDTH + x;
-        const last = seen[c] as number;
-        if (last >= 0 && last >= staleBefore) {
+        if (!isStale(seen[c] as number, tick) || !isViewable(c)) {
           continue;
         }
-        const cost = d + (dx * forwardX + dy * forwardY < 0 ? BEHIND_PENALTY : 0);
+        const along = dx * forwardX + dy * forwardY;
+        const lateral = Math.abs(dx * forwardY - dy * forwardX);
+        const cost = d + (along < 0 ? BEHIND_PENALTY : 0) + LATERAL_PENALTY * lateral;
         if (cost < bestCost || (cost === bestCost && c < best)) {
           bestCost = cost;
           best = c;
@@ -262,7 +303,13 @@ export function stepC4(state: C4State, inputs: Inputs): C4State {
   const next = stepClubs(state, inputs);
 
   let memory = swept;
+  let ateAt = state.ateAt;
   if (sweeping) {
+    const ate0 = next.snakes[0].score > state.snakes[0].score;
+    const ate1 = next.snakes[1].score > state.snakes[1].score;
+    if (ate0 || ate1) {
+      ateAt = [ate0 ? tick : state.ateAt[0], ate1 ? tick : state.ateAt[1]];
+    }
     const forget = (side: Side): Memory => {
       const mine = swept[side];
       if (next.snakes[side].score <= state.snakes[side].score) {
@@ -279,13 +326,14 @@ export function stepC4(state: C4State, inputs: Inputs): C4State {
     return {
       ...next,
       memory,
+      ateAt,
       over: false,
       winner: null,
       endAt: tick + DEATH_FREEZE_TICKS,
       pendingWinner: next.winner,
     };
   }
-  return { ...next, memory };
+  return { ...next, memory, ateAt };
 }
 
 // ---------------------------------------------------------------------------
@@ -331,7 +379,11 @@ function evaluateOf(state: C4State, side: Side): { gain: number; danger: number 
   const foods =
     memory.foods.length > 0
       ? memory.foods
-      : [explorationTarget(memory.seen, head, me.dir, state.tick)];
+      : [
+          memory.goal >= 0 && isStale(memory.seen[memory.goal] as number, state.tick)
+            ? viewingPoint(memory.goal)
+            : viewingPoint(explorationTarget(memory.seen, head, me.dir, state.tick)),
+        ];
   const headSeen = memory.rivalHead >= 0;
   const rivalBody = headSeen
     ? [memory.rivalHead, ...memory.rival.filter((c) => c !== memory.rivalHead)]
@@ -343,16 +395,49 @@ function evaluateOf(state: C4State, side: Side): { gain: number; danger: number 
     alive: headSeen,
     score: 0,
   };
-  const world: ClubsState = {
-    tick: state.tick,
-    maxTicks: state.maxTicks,
-    snakes: side === 0 ? [me, rival] : [rival, me],
-    foods,
-    rng: state.rng,
-    over: false,
-    winner: null,
+  const justAte = state.ateAt[side] >= 0 && state.tick - state.ateAt[side] < MOVE_EVERY;
+  const evaluateTurn = (turn: Dir): { gain: number; danger: number } => {
+    const world: ClubsState = {
+      tick: state.tick,
+      maxTicks: state.maxTicks,
+      snakes: side === 0 ? [{ ...me, turn }, rival] : [rival, { ...me, turn }],
+      foods,
+      rng: state.rng,
+      over: false,
+      winner: null,
+    };
+    const result = evaluateClubs(world, side);
+    if (!justAte) {
+      return result;
+    }
+    // 吃到之後記憶裡的食物沒了，距離項改看遠處的探索目標，每格 `FOOD_GRADIENT` 分，離目標 40 格就是 −160，比吃到的 +100 還大，
+    // 「吃」會輸給「在食物旁邊不吃」，AI 繞著食物轉圈（DESIGN-AI-FUN 10.40）。吃到的那個終點把距離項加回來，吃的價值才是 +100。
+    const nx = cellX(head) + (turn === 1 ? 1 : turn === 3 ? -1 : 0);
+    const ny = cellY(head) + (turn === 2 ? 1 : turn === 0 ? -1 : 0);
+    let near = Number.POSITIVE_INFINITY;
+    for (const food of foods) {
+      near = Math.min(near, Math.abs(cellX(food) - nx) + Math.abs(cellY(food) - ny));
+    }
+    return {
+      gain: result.gain + (Number.isFinite(near) ? FOOD_GRADIENT * near : 0),
+      danger: result.danger,
+    };
   };
-  return evaluateClubs(world, side);
+  if (!justAte && !foods.includes(head)) {
+    return evaluateTurn(me.turn);
+  }
+  // 剛吃到食物（這一次走格），或蛇頭正站在探索目標上。搜尋型最多只看到這一次走格為止，看不到走完之後的那個轉向。
+  // 共用的評估用「目前的行進方向」算前方有沒有牆：貼牆的食物吃完以後，終點的蛇頭正對著牆（下一格走出地圖，gain 扣 10000、danger 1），
+  // 或離牆只剩 3 格（danger 0.61），「吃」於是永遠輸給「不吃」，AI 繞著牆邊的食物轉上千個 tick 都不吃（DESIGN-AI-FUN 10.40）。
+  // 走完之後下一個 tick 本來就可以轉向，所以這種終點取三個轉向（直走、順時針、逆時針）裡最好的。
+  let best = evaluateTurn(me.turn);
+  for (const turn of [((me.dir + 1) % 4) as Dir, ((me.dir + 3) % 4) as Dir]) {
+    const candidate = evaluateTurn(turn);
+    if (candidate.gain - AFTER_EAT_W * candidate.danger > best.gain - AFTER_EAT_W * best.danger) {
+      best = candidate;
+    }
+  }
+  return best;
 }
 
 export const c4Game: Game<C4State> = {
@@ -364,6 +449,7 @@ export const c4Game: Game<C4State> = {
     return {
       ...base,
       memory: [sweep(base, 0, 0, blank), sweep(base, 1, 0, blank)],
+      ateAt: [-1, -1],
       endAt: -1,
       pendingWinner: null,
     };
@@ -401,6 +487,7 @@ export const c4Game: Game<C4State> = {
 export interface C4Overrides extends StateOverrides {
   /** 兩邊的記憶要覆蓋的欄位；沒給的欄位是「在這個局面掃視一次」的結果。 */
   readonly memory?: readonly [Partial<Memory>?, Partial<Memory>?];
+  readonly ateAt?: readonly [number, number];
   readonly endAt?: number;
   readonly pendingWinner?: Side | null;
 }
@@ -419,6 +506,7 @@ export function makeState(overrides: C4Overrides = {}): C4State {
   return {
     ...base,
     memory: [patch(0), patch(1)],
+    ateAt: overrides.ateAt ?? [-1, -1],
     endAt: overrides.endAt ?? -1,
     pendingWinner: overrides.pendingWinner ?? null,
   };
