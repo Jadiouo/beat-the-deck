@@ -8,7 +8,7 @@ import { ALL_ENTRIES, TIMING_CODES, entriesOfBucket, BUCKETS } from '../ai/a-che
 import { AI_CHECKS, CHECKS } from './checks';
 
 /**
- * 時間類測試的跑法（TEST_PLAN 第 9 節）：它們集中在 vitest 的 `timing` project，序列執行，
+ * 時間類測試的跑法（TEST_PLAN 第 10 節）：它們集中在 vitest 的 `timing` project，序列執行，
  * 而且排在 light、heavy 之後，不與它們並行。這裡守住三件事，讓「把時間類測試移走」
  * 不會變成「時間類測試沒人跑」：
  * 1. timing project 存在、序列、最後一組；light 與 heavy 都不含 tests/timing。

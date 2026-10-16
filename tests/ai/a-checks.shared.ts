@@ -19,7 +19,7 @@ import { counterEntry } from '../fixtures/counter-entry';
 /**
  * 量時間的檢查（K11 夠快、A5 決策夠快）。它們不在逐牌分檔（`slotNN`）裡跑，
  * 而是由 `tests/timing/checks.test.ts` 對全部登記項跑，且該檔屬於 vitest 的 `timing` project：
- * 序列執行、不與任何其他 project 並行（見 vitest.config.ts 與 TEST_PLAN 第 9 節）。
+ * 序列執行、不與任何其他 project 並行（見 vitest.config.ts 與 TEST_PLAN 第 10 節）。
  * 門檻在 `tests/contract/checks.ts`，沒有動；只是換了跑的地方，沒有跳過。
  */
 export const TIMING_CODES: readonly string[] = ['K11', 'A5'];
