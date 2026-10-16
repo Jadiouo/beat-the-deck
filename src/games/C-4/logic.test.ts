@@ -21,6 +21,7 @@ import {
   RADAR_CYCLE,
   RADAR_ON_TICKS,
   STALE_TICKS,
+  viewingPoint,
 } from './logic';
 import type { C4State } from './logic';
 import { c4Render } from './render';
@@ -600,5 +601,86 @@ describe('C-4 霧｜雷達與畫面', () => {
     const frozen = createFakeContext();
     c4Render(asRenderingContext(frozen), dead);
     expect(frozen.points.length).toBeGreaterThan(0);
+  });
+});
+
+/**
+ * 霧裡的探索與吃牆邊的食物（DESIGN-AI-FUN 10.40）。
+ * 量到的缺陷：兩個等級 10 的 AI 對打時，其中一個會繞著一格食物轉上千個 tick 都不吃（C-4 放過率 68%）；
+ * 以及探索目標每個終點各自重找，走成階梯。
+ */
+describe('C-4 吃牆邊的食物與探索目標', () => {
+  /** 站在 value 的位置的評估：gain − 200 × danger（搜尋型比較終點時大約這個量級）。 */
+  function value(state: C4State): number {
+    const result = c4Game.evaluate(state, 0);
+    return result.gain - 200 * result.danger;
+  }
+
+  it('26. 吃到食物的終點，比「在食物旁邊轉彎不吃」的終點好很多（吃到之後記憶空了，探索目標很遠也一樣）', () => {
+    const start = makeState({
+      tick: BEFORE_MOVE,
+      snakes: [{ body: body([27, 18], [26, 18], [25, 18]), dir: RIGHT }, {}],
+      foods: body([28, 18], [15, 3]),
+      memory: [{ foods: body([28, 18]) }, {}],
+    });
+    const ate = run(start, 1);
+    const skipped = run(start, 1, [PRESS_UP, NONE]);
+    expect(ate.snakes[0].score).toBe(1);
+    expect(skipped.snakes[0].score).toBe(0);
+    // 吃到的終點離探索目標（地圖另一頭）很遠，但吃到的 +100 要贏過不吃
+    expect(value(ate)).toBeGreaterThan(value(skipped) + 50);
+  });
+
+  it('27. 吃到最上面一排的食物：終點的蛇頭正對著牆，也不能被當成必死（下一個 tick 可以轉向）', () => {
+    const start = makeState({
+      tick: BEFORE_MOVE,
+      snakes: [{ body: body([21, 1], [21, 2], [21, 3]), dir: UP }, {}],
+      foods: body([21, 0], [15, 20]),
+      memory: [{ foods: body([21, 0]) }, {}],
+    });
+    const ate = run(start, 1);
+    expect(ate.snakes[0].score).toBe(1);
+    expect(ate.snakes[0].alive).toBe(true);
+    const result = c4Game.evaluate(ate, 0);
+    expect(result.gain).toBeGreaterThan(-1000);
+    expect(result.danger).toBeLessThan(0.5);
+    // 沒吃到、真的正對著牆而且已經鎖定的局面，仍然是死
+    const locked = makeState({
+      snakes: [{ body: body([21, 0], [21, 1], [21, 2]), dir: UP, turn: UP }, {}],
+      memory: [{ foods: [] }, {}],
+    });
+    expect(c4Game.evaluate(locked, 0).danger).toBe(1);
+  });
+
+  it('28. 探索目標記在 memory.goal，被看見之前不變；被看見之後重選，而且在正前方的同一列', () => {
+    const state = makeState();
+    const goal = state.memory[0].goal;
+    expect(goal).toBeGreaterThanOrEqual(0);
+    expect(cellY(goal)).toBe(12);
+    // 走一格（掃視用走格之前的位置 (5,12)；目標在 (10,12)，離 5 格，還沒看到）：目標不變
+    const oneMove = run(state, MOVE_EVERY);
+    expect(oneMove.memory[0].goal).toBe(goal);
+    // 再走一格：目標被看到了，重選，仍在同一列、更遠
+    const twoMoves = run(oneMove, MOVE_EVERY);
+    expect(twoMoves.memory[0].goal).not.toBe(goal);
+    expect(cellY(twoMoves.memory[0].goal)).toBe(12);
+    expect(cellX(twoMoves.memory[0].goal)).toBeGreaterThan(cellX(goal));
+    // 有記得的食物的時候不挑探索目標，食物被忘掉之後才重選
+    const withFood = makeState({ memory: [{ foods: body([14, 12]), goal: -1 }, {}] });
+    expect(run(withFood, MOVE_EVERY).memory[0].goal).toBe(-1);
+  });
+
+  it('29. 看牆邊的格子要站到離牆 4 格的位置；四個角落看不到的格子不當探索目標', () => {
+    expect(viewingPoint(cell(3, 0))).toBe(cell(4, 4));
+    expect(viewingPoint(cell(31, 23))).toBe(cell(27, 19));
+    expect(viewingPoint(cell(16, 12))).toBe(cell(16, 12));
+    expect(viewingPoint(cell(16, 0))).toBe(cell(16, 4));
+    const never = Array.from({ length: 32 * 24 }, () => -1);
+    for (const start of [cell(1, 1), cell(30, 1), cell(1, 22), cell(30, 22)]) {
+      const target = explorationTarget(never, start, RIGHT, 100);
+      expect(isVisible(viewingPoint(target), target)).toBe(true);
+    }
+    const corner = explorationTarget(never, cell(1, 1), LEFT, 100);
+    expect(corner).not.toBe(cell(0, 0));
   });
 });
