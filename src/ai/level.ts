@@ -135,6 +135,14 @@ export const STALL_TICKS = 60;
 export const STALL_WINDOW = 120;
 /** 偵測到僵局之後，接下來這麼多個 tick 都放下 danger 門檻，讓動作有時間走出幾格而不是走一步又退回去。 */
 export const BOLD_TICKS = 90;
+/**
+ * 世界指紋多久算一次（每 STALL_STRIDE 個 tick，只在 `tick % STALL_STRIDE === 0` 的 tick 算）。
+ * 指紋要把整個 state 序列化，是精準型每 tick 最貴的一項（10.41：佔 35% 到 52%）。
+ * 連續 STALL_TICKS 個 tick 沒變的世界，取樣下會連續看到 STALL_TICKS / STALL_STRIDE 次重複，所以仍然測得到；
+ * 代價是觸發最多晚 STALL_STRIDE − 1 個 tick。相位綁 tick（不是計數器），所以同一個 state 不管呼叫順序都算出同一個結果。
+ * 必須整除 STALL_TICKS 與 STALL_WINDOW。
+ */
+export const STALL_STRIDE = 5;
 
 /** 世界的指紋：整個 state 的 JSON（`tick` 設成 0）再壓成兩條 32 位元雜湊加長度。state 是純資料，所以可以 JSON 化。 */
 function worldFingerprint(state: unknown): string {
@@ -262,11 +270,12 @@ export function wrapPolicy<S>(
       lastTick = tick;
 
       // 僵局偵測：世界連續 STALL_TICKS 個 tick 沒變，接下來 BOLD_TICKS 個 tick 通知性格。
-      if (policy.usesStall === true) {
+      if (policy.usesStall === true && tick % STALL_STRIDE === 0) {
         const fingerprint = worldFingerprint(state);
-        frozenFor = recent.includes(fingerprint) ? frozenFor + 1 : 0;
+        // frozenFor 仍以 tick 為單位：每個取樣點代表 STALL_STRIDE 個 tick。
+        frozenFor = recent.includes(fingerprint) ? frozenFor + STALL_STRIDE : 0;
         recent.push(fingerprint);
-        if (recent.length > STALL_WINDOW) {
+        if (recent.length > STALL_WINDOW / STALL_STRIDE) {
           recent.shift();
         }
         if (frozenFor >= STALL_TICKS) {
