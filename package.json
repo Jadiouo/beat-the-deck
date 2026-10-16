@@ -13,6 +13,7 @@
     "test": "vitest run",
     "test:light": "vitest run --project light",
     "test:heavy": "vitest run --project heavy",
+    "test:timing": "vitest run --project timing",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "check": "npm run typecheck && npm run lint && npm run test",

@@ -54,6 +54,26 @@ jobs:
 
       - run: npx vitest run --project heavy --shard=${{ matrix.shard }}/6
 
+  # 時間類測試（A5 的 p99.9 與平均、K11 一場對局的時間、幾條「少於 1 秒」的單元測試）：
+  # 序列跑、獨佔一台機器，不與 check／ai-stats 的測試擠在同一台。這些測試量牆鐘時間，
+  # 與別的測試並行就會假性變紅（10.41）。門檻沒動，也沒有跳過；跑法見 TEST_PLAN 第 10 節。
+  timing:
+    name: timing
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - run: uptime
+
+      - run: npm run test:timing
+
   # 端到端測試（TEST_PLAN 第 7 節）。和 check 並行跑、各自回報，不互相等；
   # 失敗的時候看 check 是不是也紅了就知道是外殼還是核心的問題。
   e2e:
@@ -83,11 +103,11 @@ jobs:
           path: playwright-report/
           retention-days: 7
 
-  # 部署到 GitHub Pages（TASKS T5）。只在 main 分支的 push 才跑，而且要 check、ai-stats 與 e2e 都成功。
+  # 部署到 GitHub Pages（TASKS T5）。只在 main 分支的 push 才跑，而且要 check、ai-stats、timing 與 e2e 都成功。
   # repo 設定要先手動把 Settings → Pages → Build and deployment → Source 選成 GitHub Actions。
   deploy:
     name: deploy
-    needs: [check, ai-stats, e2e]
+    needs: [check, ai-stats, timing, e2e]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:

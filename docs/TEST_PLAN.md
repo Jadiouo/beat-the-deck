@@ -342,3 +342,39 @@ GitHub Actions，一個流程檔：
 3. `logic.ts`、`render.ts`、`meta.ts`。
 4. `registry.ts` 加一行。
 5. 契約測試與 5.1 節的五條自動套用，全部通過。
+
+## 10. 時間類測試的跑法（10.41 之後加）
+
+**問題。** 有些斷言量的是牆鐘時間。vitest 的 light 加 heavy 兩個 project 一起跑會把 4 核機器的負載推到 4 到 6.5，這些斷言就會假性變紅，而且與程式無關。10.41 量到的例子（p99.9 門檻 8ms）：
+
+| 牌 | 整套檢查裡 | 隔離重跑 |
+|---|---|---|
+| S-Q | 8.753ms | 2.155ms |
+| C-8 | 9.366ms | 2.205ms |
+| C-10 | 8.405ms | 1.069ms |
+| D-8 | 8.198ms | 0.731ms |
+
+**做法。** 所有量時間的測試集中在 `tests/timing/`，由 vitest 的第三個 project `timing` 跑（`vitest.config.ts`）：
+
+- 序列：`fileParallelism: false`、`maxWorkers: 1`。
+- 排在 light 與 heavy 全部跑完之後：`sequence.groupOrder` 比它們大，所以 `npm test`／`npm run check` 不需要改指令，timing 自動是最後、而且單獨一組。
+- light 與 heavy 的 worker 數是「核心數減一」，不把機器灌滿；60 秒、120 秒的 timeout 也是時間類斷言，超載時會假性逾時。
+- CI 有獨立的 `timing` job（`npm run test:timing`），獨佔一台機器，並先印 `uptime`。
+- 失敗訊息附上量測當下的 loadavg 與核心數（`tests/timing/load.ts`）。**只用來讓人看出是真的慢還是機器忙，不會跳過或放寬任何斷言。**
+
+**時間類測試清單**（門檻都沒動）：
+
+| 檔案 | 測試 | 門檻 |
+|---|---|---|
+| `tests/timing/checks.test.ts` | 每張牌（含替身牌）的 A5 決策夠快（`tests/contract/checks.ts` 的 `checkDecisionSpeed`） | 平均 < 1ms、p99.9 < 8ms、樣本 ≥ 18,000；timeout 120 秒 |
+| `tests/timing/checks.test.ts` | 每張牌的 K11 夠快（`checkSpeed`） | 一場 < 2000ms；timeout 60 秒 |
+| `tests/timing/wallclock.test.ts` | 進化畫面對 C-A 跑一次（5.3 第二條） | < 1000ms |
+| `tests/timing/wallclock.test.ts` | 進化畫面對 counter-game 跑一次 | < 1000ms |
+| `tests/timing/wallclock.test.ts` | 臨時登記項的 A5 數字與 `runCheck` | 平均 < 1ms、p99.9 < 8ms |
+| `tests/timing/wallclock.test.ts` | 臨時登記項的 K11 | 一場 < 2000ms |
+
+仍留在 light／heavy 的、與時間有關的東西：各測試檔明寫的 timeout（K1–K10、K12 分段 60 秒，A1–A4 120 秒，各牌 `logic.test.ts` 與 `policies`、`pursuit`、`clubs-s4`、`c4-fog` 的長 timeout）。它們是「別卡死」的上限，不是效能門檻；因為 worker 數留了餘裕、而且不再與 timing 並行，負載造成的假逾時應該消失，但它們仍會受機器忙影響。`tests/contract/bad-games.test.ts` 的 slow 假遊戲只要求 K11 抓得到它（機器忙只會讓它更確定被抓到）。
+
+**守門。** `tests/contract/timing-project.test.ts` 確認：三個 project 存在、timing 序列且是最後一組、light 與 heavy 都排除 `tests/timing`、`TIMING_CODES`（K11、A5）都在檢查清單裡。逐牌分檔（`slotNN`）不再定義這兩條，所以「搬走」不會變成「沒人跑」。
+
+**怎麼讀結果。** timing 紅了：先看失敗訊息尾端的 loadavg。遠高於 1 代表機器上還有別的東西在跑（別的 vitest、別的 agent），等空下來重跑；loadavg 在 1 附近還是紅，才是真的慢。**不要改門檻。**

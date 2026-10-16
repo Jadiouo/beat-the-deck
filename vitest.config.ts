@@ -1,3 +1,5 @@
+import { availableParallelism } from 'node:os';
+
 import { defineConfig } from 'vitest/config';
 
 /**
@@ -13,7 +15,19 @@ import { defineConfig } from 'vitest/config';
  * - `heavy`：逐張牌的契約檢查（K1–K13、R1–R3）與 A1–A5 統計檢查，會隨牌數線性變慢。
  *   CI 把它們獨立成幾個並行的 job（`--project heavy --shard=i/N`），讓回饋更快。
  * 兩個 project 的檔案由同一份 HEAVY_FILES 決定，所以不會漏掉任何一個測試檔、也不會重跑。
+ *
+ * 第三個 project `timing`（10.41 之後加）：所有用牆鐘做門檻的測試 —— A5（decide() 平均 < 1ms、
+ * p99.9 < 8ms）、K11（一場 < 2 秒）、以及幾條「跑一次少於 1 秒」的單元測試，檔案都在 tests/timing/。
+ * 這些測試量的是時間，機器一忙就假性變紅（整套檢查裡 A5 是 8 到 9 毫秒，隔離重跑是 0.7 到 2.2），
+ * 所以它們：
+ * - 序列執行（`fileParallelism: false`、`maxWorkers: 1`）：自己不會被同 project 的別的檔案搶；
+ * - 排在 light 與 heavy 全部跑完之後（`sequence.groupOrder` 較大）：不與任何其他 project 並行；
+ * - light 與 heavy 的 worker 數都留一顆核心給作業系統與 vitest 主程序，不把機器灌到超載
+ *   （60 秒、120 秒的 timeout 也是時間類斷言，超載時會假性逾時）。
+ * 門檻一個都沒動、沒有任何一條被跳過。只想跑一個 project 時（例如 CI 的分 job），
+ * 各自 `--project` 指定即可；timing 在 CI 上獨佔一個 job。
  */
+const PARALLEL_WORKERS = Math.max(1, availableParallelism() - 1);
 const HEAVY_FILES = [
   'tests/ai/a-checks.*.test.ts',
   'tests/contract/all-games.*.test.ts',
@@ -38,10 +52,13 @@ export default defineConfig({
         test: {
           ...common,
           name: 'light',
+          maxWorkers: PARALLEL_WORKERS,
+          sequence: { groupOrder: 1 },
           include: ['src/**/*.test.ts', 'tests/**/*.test.ts'],
           exclude: [
             'tests/e2e/**',
             'tests/scratch/**',
+            'tests/timing/**',
             'node_modules/**',
             'dist/**',
             ...HEAVY_FILES,
@@ -53,8 +70,27 @@ export default defineConfig({
         test: {
           ...common,
           name: 'heavy',
+          maxWorkers: PARALLEL_WORKERS,
+          sequence: { groupOrder: 1 },
           include: HEAVY_FILES,
-          exclude: ['tests/e2e/**', 'tests/scratch/**', 'node_modules/**', 'dist/**'],
+          exclude: [
+            'tests/e2e/**',
+            'tests/scratch/**',
+            'tests/timing/**',
+            'node_modules/**',
+            'dist/**',
+          ],
+        },
+      },
+      {
+        extends: true,
+        test: {
+          ...common,
+          name: 'timing',
+          include: ['tests/timing/**/*.test.ts'],
+          fileParallelism: false,
+          maxWorkers: 1,
+          sequence: { groupOrder: 2 },
         },
       },
     ],
