@@ -20,6 +20,8 @@ const HEAVY_FILES = [
   'tests/ai/policies.test.ts',
   // 追目標的取得率（P1）：每張有可追目標的牌跑 16 場對局，慢。
   'tests/contract/pursuit.test.ts',
+  // 梅花簡單腳本 S4 與對打撞死（10.37）：每張 400 場 + 24 場等級 10 對打，慢。
+  'tests/ai/clubs-s4.test.ts',
 ];
 
 const common = {
