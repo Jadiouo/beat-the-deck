@@ -2,9 +2,11 @@ import { rngStateFor } from '../../core/rng';
 import type { Buttons, Game, GameConfig, Inputs, Side } from '../../core/types';
 import {
   CELLS,
+  HEIGHT,
   GAIN_PER_POINT,
   MOVE_EVERY,
   START_CELLS,
+  WIDTH,
   WIN_BONUS,
   actionsToward,
   cellX,
@@ -217,6 +219,14 @@ export function pocketsAround(
   return out;
 }
 
+/** 距離相同的目標怎麼挑：離地圖中心近的優先（2 倍座標的平方距離），再用「從自己這一邊的起點數起」的格子編號。兩邊鏡像一致。 */
+function targetRank(c: number, side: Side): number {
+  const dx = 2 * cellX(c) - (WIDTH - 1);
+  const dy = 2 * cellY(c) - (HEIGHT - 1);
+  const index = side === 0 ? c : CELLS - 1 - c;
+  return (dx * dx + dy * dy) * CELLS + index;
+}
+
 /** 離 `from` 最近的「不是 mine 的顏色」的格子：沒人塗過的（`unpainted`）與對手的（`opponent`）各一個，距離是繞牆的步數。 */
 function nearestTargets(
   walls: readonly number[],
@@ -226,6 +236,7 @@ function nearestTargets(
   from: number,
   now: number,
   avoid: number,
+  side: Side,
 ): { unpaintedDist: number; unpaintedCell: number; opponentDist: number; opponentCell: number } {
   const near = neighborTable(walls);
   const id = nextMark();
@@ -239,6 +250,8 @@ function nearestTargets(
   let unpaintedCell = -1;
   let opponentDist = -1;
   let opponentCell = -1;
+  let unpaintedRank = Number.POSITIVE_INFINITY;
+  let opponentRank = Number.POSITIVE_INFINITY;
   let stopAt = Number.POSITIVE_INFINITY;
   while (head < tail) {
     const c = QUEUE[head] as number;
@@ -253,17 +266,26 @@ function nearestTargets(
       !isProtected(paint, stamp, c, mine, now) &&
       manhattan(c, avoid) > AVOID_RADIUS
     ) {
-      if (p === 0 && unpaintedDist < 0) {
+      // 距離相同的目標不看鄰格的順序（那會讓 0 號邊偏向自己起點內側的那一格），而是兩邊用同一把尺：
+      // 離地圖中心近的先；還一樣就取「從自己這一邊的起點數起」編號小的（1 號邊的編號轉 180 度）。
+      const rank = targetRank(c, side);
+      if (p === 0 && (unpaintedDist < 0 || (d === unpaintedDist && rank < unpaintedRank))) {
         unpaintedDist = d;
         unpaintedCell = c;
-      } else if (p !== 0 && opponentDist < 0) {
+        unpaintedRank = rank;
+      } else if (p !== 0 && (opponentDist < 0 || (d === opponentDist && rank < opponentRank))) {
         opponentDist = d;
         opponentCell = c;
+        opponentRank = rank;
       }
       if (stopAt === Number.POSITIVE_INFINITY) {
         stopAt = d + Math.abs(OPP_BONUS) + 1; // 另一種再近也不會近過這個範圍
       }
-      if (unpaintedDist >= 0 && opponentDist >= 0) {
+    }
+    if (unpaintedDist >= 0 && opponentDist >= 0 && d >= Math.max(unpaintedDist, opponentDist)) {
+      // 兩種都找到了，而且這一層（距離相同的格子）已經看完。
+      const upcoming = head < tail ? (DIST[QUEUE[head] as number] as number) : Number.POSITIVE_INFINITY;
+      if (upcoming > d) {
         break;
       }
     }
@@ -450,6 +472,7 @@ export const d8Game: Game<D8State> = {
         planned.cell,
         state.tick,
         state.players[side === 0 ? 1 : 0].cell,
+        side,
       ),
     );
     return actionsToward(state.walls, me, side, target === null ? null : target.cell);
@@ -496,7 +519,7 @@ export const d8Game: Game<D8State> = {
       paint = virtual;
     }
     const target = pickTarget(
-      nearestTargets(state.walls, paint, state.stamp, mine, myNext, state.tick, oppNext),
+      nearestTargets(state.walls, paint, state.stamp, mine, myNext, state.tick, oppNext, side),
     );
     const gain =
       GAIN_PER_POINT * (myCount - OPP_WEIGHT * oppCount) - (target === null ? 0 : target.term);
