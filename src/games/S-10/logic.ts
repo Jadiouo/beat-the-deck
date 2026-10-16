@@ -105,6 +105,10 @@ export interface S10State {
   readonly minBullets: number;
   /** 子彈不足門檻時按 b：true 是照扣一次共用的清場（沒有分數、子彈不消失），false 是無效、不扣。 */
   readonly burn: boolean;
+  /** 子彈不足門檻就按，按的人被鎖住這麼多個 tick 不能清場（0 是關著；一局固定）。 */
+  readonly lockTicks: number;
+  /** 各自還要被鎖幾個 tick（公開）。 */
+  readonly lock: readonly [number, number];
   /** 各自清場得到的分數總和。 */
   readonly cleared: readonly [number, number];
   /** 公開的「險度」：最近幾十個 tick 裡，離子彈有多近（0 到 1 的移動平均）。AI 讀它來猜對手快不快撐不住。 */
@@ -131,6 +135,8 @@ export interface S10Options {
   readonly minBullets?: number;
   /** 子彈不足門檻時按 b 要不要照扣一次共用的清場（預設不扣）。 */
   readonly burn?: boolean;
+  /** 子彈不足門檻就按要被鎖幾個 tick（預設 0，不鎖）。 */
+  readonly lockTicks?: number;
   /** AI 的 `evaluate` 讀不讀對手的 danger（預設讀）。 */
   readonly readsDanger?: boolean;
 }
@@ -153,6 +159,8 @@ export function initState(seed: number, config: GameConfig, options: S10Options 
     lastFrom: options.lastFrom ?? LAST_CLEAR_FROM,
     minBullets: options.minBullets ?? CLEAR_MIN,
     burn: options.burn ?? false,
+    lockTicks: options.lockTicks ?? 0,
+    lock: [0, 0],
     cleared: [0, 0],
     exposure: [0, 0],
     fanCount: 0,
@@ -233,17 +241,31 @@ export function step(state: S10State, inputs: Inputs): S10State {
   let clears = state.clears;
   let quiet = state.quiet;
   let cleared = state.cleared;
-  const pressed = inputs[0].b || inputs[1].b;
-  if (pressed && !canClear(state) && state.burn && pressable(state)) {
+  // 被鎖住的那一邊按 b 沒有用；鎖每個 tick 減 1（先減，再看這個 tick 有沒有新的鎖）。
+  const press0 = inputs[0].b && state.lock[0] === 0;
+  const press1 = inputs[1].b && state.lock[1] === 0;
+  const lock: [number, number] = [Math.max(0, state.lock[0] - 1), Math.max(0, state.lock[1] - 1)];
+  const pressed = press0 || press1;
+  const early = pressed && !canClear(state) && pressable(state);
+  if (early && state.burn) {
     // 照扣的變體：子彈不夠就按，白白用掉一次共用的清場（兩邊同時按也只扣 1 次）。
     clears -= 1;
   }
+  if (early && state.lockTicks > 0) {
+    // 鎖住的變體：按早了的人（只有按的那一邊）被鎖住，這段時間不能清場。
+    if (press0) {
+      lock[0] = state.lockTicks;
+    }
+    if (press1) {
+      lock[1] = state.lockTicks;
+    }
+  }
   if (pressed && canClear(state)) {
     const n = Math.min(bullets.length, CLEAR_CAP);
-    if (inputs[0].b && inputs[1].b) {
+    if (press0 && press1) {
       const half = Math.floor(n / 2);
       cleared = [cleared[0] + half, cleared[1] + half];
-    } else if (inputs[0].b) {
+    } else if (press0) {
       cleared = [cleared[0] + n, cleared[1]];
     } else {
       cleared = [cleared[0], cleared[1] + n];
@@ -369,6 +391,7 @@ export function step(state: S10State, inputs: Inputs): S10State {
     players,
     clears,
     quiet,
+    lock,
     cleared,
     exposure,
     fanCount,
@@ -401,8 +424,8 @@ const MOVES_WITH_CLEAR: readonly Buttons[] = MOVES.map((m): Buttons => ({ ...m, 
 const ALL_ACTIONS: readonly Buttons[] = [...MOVES, ...MOVES_WITH_CLEAR];
 
 /** 17 個移動動作（全放開排第一）；現在能清場時再加上同樣 17 個加 b 的。 */
-export function actions(state: S10State, _side: Side): readonly Buttons[] {
-  return canClear(state) ? ALL_ACTIONS : MOVES;
+export function actions(state: S10State, side: Side): readonly Buttons[] {
+  return canClear(state) && state.lock[side] === 0 ? ALL_ACTIONS : MOVES;
 }
 
 // ---------------------------------------------------------------------------
@@ -627,6 +650,8 @@ export interface StateOverrides {
   readonly quiet?: number;
   readonly minBullets?: number;
   readonly burn?: boolean;
+  readonly lockTicks?: number;
+  readonly lock?: readonly [number, number];
   readonly cleared?: readonly [number, number];
   readonly exposure?: readonly [number, number];
   readonly fanCount?: number;
@@ -655,6 +680,8 @@ export function makeState(overrides: StateOverrides = {}): S10State {
     quiet: overrides.quiet ?? 0,
     minBullets: overrides.minBullets ?? base.minBullets,
     burn: overrides.burn ?? base.burn,
+    lockTicks: overrides.lockTicks ?? base.lockTicks,
+    lock: overrides.lock ?? base.lock,
     cleared: overrides.cleared ?? [0, 0],
     exposure: overrides.exposure ?? [0, 0],
     fanCount: overrides.fanCount ?? 0,
