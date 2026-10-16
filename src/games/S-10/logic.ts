@@ -56,7 +56,9 @@ export const CLEAR_FROM = 300;
 export const LAST_CLEAR_FROM = 1200;
 export const QUIET_TICKS = 45;
 /** 清場要場上至少這麼多顆子彈才有效（老闆裁定；沒有達到時按 b 不發生任何事）。 */
-export const CLEAR_MIN = 1;
+export const CLEAR_MIN = 8;
+/** 子彈不足就按，按的人被鎖住這麼多個 tick（2 秒）不能清場。 */
+export const CLEAR_LOCK = 120;
 export const CLEAR_CAP = 60;
 export const HIT_PENALTY = 10;
 
@@ -135,7 +137,7 @@ export interface S10Options {
   readonly minBullets?: number;
   /** 子彈不足門檻時按 b 要不要照扣一次共用的清場（預設不扣）。 */
   readonly burn?: boolean;
-  /** 子彈不足門檻就按要被鎖幾個 tick（預設 0，不鎖）。 */
+  /** 子彈不足門檻就按要被鎖幾個 tick（預設 `CLEAR_LOCK`；0 是不鎖）。 */
   readonly lockTicks?: number;
   /** AI 的 `evaluate` 讀不讀對手的 danger（預設讀）。 */
   readonly readsDanger?: boolean;
@@ -159,7 +161,7 @@ export function initState(seed: number, config: GameConfig, options: S10Options 
     lastFrom: options.lastFrom ?? LAST_CLEAR_FROM,
     minBullets: options.minBullets ?? CLEAR_MIN,
     burn: options.burn ?? false,
-    lockTicks: options.lockTicks ?? 0,
+    lockTicks: options.lockTicks ?? CLEAR_LOCK,
     lock: [0, 0],
     cleared: [0, 0],
     exposure: [0, 0],

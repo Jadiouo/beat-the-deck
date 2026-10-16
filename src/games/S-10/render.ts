@@ -61,8 +61,17 @@ export function s10Render(ctx: CanvasRenderingContext2D, state: S10State): void 
   ctx.textAlign = 'right';
   ctx.fillStyle = COLOR.accent;
   ctx.fillText(String(ai), ORIGIN_X + FIELD_W, 1);
-  // 場上的子彈數（清場值多少分）：中間
+  // 被鎖住（按早了）的倒數：右側由下往上縮的細條，人是左邊那條、AI 是右邊那條
+  for (const side of [0, 1] as const) {
+    const left = state.lock[side];
+    if (left > 0 && state.lockTicks > 0) {
+      ctx.fillStyle = colors[side];
+      const h = Math.round((left / state.lockTicks) * 60);
+      ctx.fillRect(ORIGIN_X + FIELD_W + 4 + side * 5, ORIGIN_Y + 140 - h, 4, h);
+    }
+  }
+  // 場上的子彈數（清場值多少分）：中間；達到門檻（可以清場）才亮成警示色
   ctx.textAlign = 'center';
-  ctx.fillStyle = COLOR.light;
+  ctx.fillStyle = state.bullets.length >= state.minBullets ? COLOR.warning : COLOR.light;
   ctx.fillText(String(Math.min(state.bullets.length, 60)), ORIGIN_X + FIELD_W / 2, 1);
 }

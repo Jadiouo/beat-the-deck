@@ -9,6 +9,7 @@ import { deepFreeze } from '../../../tests/contract/freeze';
 import {
   CLEAR_CAP,
   CLEAR_FROM,
+  CLEAR_LOCK,
   CLEAR_MIN,
   CLEARS,
   EXPOSURE_FAR,
@@ -221,6 +222,7 @@ describe('S-10 彈幕｜清場', () => {
   it('8. 按下去的那一刻就保護了自己：這個 tick 本來會打中的子彈被清掉，沒有被打中', () => {
     const base = makeState({
       tick: 400,
+      minBullets: 1,
       players: [{ x: 45, y: 190 }, { x: 105, y: 190 }],
       bullets: [{ x: 45, y: 185, vx: 0, vy: 1 }],
     });
@@ -263,11 +265,11 @@ describe('S-10 彈幕｜清場', () => {
     const ok = s10Game.step(last(1200), CLEAR0);
     expect([ok.clears, ok.cleared[0]]).toEqual([0, 30]);
     // 還有兩次以上的時候，第 300 tick 起就能按
-    expect(canClear(makeState({ tick: 300, clears: 2, bullets: bulletsFar(3) }))).toBe(true);
+    expect(canClear(makeState({ tick: 300, clears: 2, bullets: bulletsFar(CLEAR_MIN) }))).toBe(true);
   });
 
   it('12. canClear：次數、tick、無彈期、場上有子彈，四個條件缺一不可', () => {
-    const ok = makeState({ tick: 300, bullets: bulletsFar(1) });
+    const ok = makeState({ tick: 300, bullets: bulletsFar(CLEAR_MIN) });
     expect(canClear(ok)).toBe(true);
     expect(canClear({ ...ok, clears: 0 })).toBe(false);
     expect(canClear({ ...ok, tick: 299 })).toBe(false);
@@ -279,7 +281,7 @@ describe('S-10 彈幕｜清場', () => {
 describe('S-10 彈幕｜清場門檻（老闆裁定：清場要場上至少 N 顆子彈才有效）', () => {
   const MIN = 8;
   const free = (extra: Partial<Parameters<typeof makeState>[0]> = {}): S10State =>
-    makeState({ tick: 400, minBullets: MIN, ...extra });
+    makeState({ tick: 400, minBullets: MIN, lockTicks: 0, ...extra });
 
   it('1. init：minBullets 預設是 CLEAR_MIN，可以用 options 改；burn 預設是 false', () => {
     expect(s10Game.init(0, CONFIG).minBullets).toBe(CLEAR_MIN);
@@ -372,14 +374,15 @@ describe('S-10 彈幕｜按早了會被鎖住（lockTicks：第三種變體，�
   const MIN = 8;
   const LOCK = 120;
   const free = (extra: Partial<Parameters<typeof makeState>[0]> = {}): S10State =>
-    makeState({ tick: 400, minBullets: MIN, ...extra });
+    makeState({ tick: 400, minBullets: MIN, lockTicks: 0, ...extra });
   const locked = (extra: Partial<Parameters<typeof makeState>[0]> = {}): S10State =>
     makeState({ tick: 400, minBullets: MIN, lockTicks: LOCK, ...extra });
 
-  it('1. init：lockTicks 預設是 0（關著），lock 是 [0, 0]；options 可以開', () => {
+  it('1. init：lockTicks 預設是 CLEAR_LOCK（120），lock 是 [0, 0]；options 可以改、可以關（0）', () => {
     const s = s10Game.init(0, CONFIG);
-    expect([s.lockTicks, s.lock]).toEqual([0, [0, 0]]);
+    expect([s.lockTicks, s.lock]).toEqual([CLEAR_LOCK, [0, 0]]);
     expect(createS10Game({ lockTicks: 90 }).init(0, CONFIG).lockTicks).toBe(90);
+    expect(createS10Game({ lockTicks: 0 }).init(0, CONFIG).lockTicks).toBe(0);
   });
 
   it('2. 按早了（按得下去但子彈不足 N 顆）：只鎖按的那一邊，鎖 LOCK 個 tick；次數、分數、子彈都不變', () => {
@@ -691,11 +694,11 @@ describe('S-10 彈幕｜結束與分數', () => {
 
 describe('S-10 彈幕｜actions', () => {
   it('不能清場時 17 個動作（全放開排第一、都沒有 b）；能清場時 34 個，後 17 個是同樣的移動加 b', () => {
-    const plain = s10Game.actions(makeState({ tick: 100, bullets: bulletsFar(5) }), 0);
+    const plain = s10Game.actions(makeState({ tick: 100, bullets: bulletsFar(CLEAR_MIN) }), 0);
     expect(plain).toHaveLength(17);
     expect(plain[0]).toEqual(NONE);
     expect(plain.every((a) => !a.b)).toBe(true);
-    const withClear = s10Game.actions(makeState({ tick: 400, bullets: bulletsFar(5) }), 1);
+    const withClear = s10Game.actions(makeState({ tick: 400, bullets: bulletsFar(CLEAR_MIN) }), 1);
     expect(withClear).toHaveLength(34);
     expect(withClear.slice(17).every((a) => a.b)).toBe(true);
     expect(withClear.slice(0, 17).every((a) => !a.b)).toBe(true);
@@ -725,7 +728,7 @@ describe('S-10 彈幕｜evaluate', () => {
     xs.reduce((best, x) => (x.gain > best.gain ? x : best));
 
   it('danger 在 0 到 1、gain 是有限的數；子彈直接砸向自己時 danger 是 1，按 b 之後是 0', () => {
-    const doomed = makeState({ tick: 400, bullets: [{ x: 45, y: 170, vx: 0, vy: 1.2 }], players: [{ x: 45, y: 190, vx: 0, vy: 0 }, {}] });
+    const doomed = makeState({ minBullets: 1, tick: 400, bullets: [{ x: 45, y: 170, vx: 0, vy: 1.2 }], players: [{ x: 45, y: 190, vx: 0, vy: 0 }, {}] });
     const all = scores(doomed);
     for (const x of all) {
       expect(Number.isFinite(x.gain)).toBe(true);
@@ -737,13 +740,13 @@ describe('S-10 彈幕｜evaluate', () => {
   });
 
   it('子彈很多（45 顆、3 次還在、tick 1000）：按 b 的 gain 最高；很少（8 顆）：不按', () => {
-    expect(bestOf(scores(makeState({ tick: 1000, bullets: leaving(45) }))).clear).toBe(true);
-    expect(bestOf(scores(makeState({ tick: 1000, bullets: leaving(8) }))).clear).toBe(false);
+    expect(bestOf(scores(makeState({ minBullets: 1, tick: 1000, bullets: leaving(45) }))).clear).toBe(true);
+    expect(bestOf(scores(makeState({ minBullets: 1, tick: 1000, bullets: leaving(8) }))).clear).toBe(false);
   });
 
   it('等待的價值看預測：場上的子彈 30 tick 後還在（加上新發的）時，值比「馬上要飛走」的高', () => {
-    const stay = makeState({ tick: 1000, bullets: bulletsFar(30) });
-    const go = makeState({ tick: 1000, bullets: leaving(30) });
+    const stay = makeState({ minBullets: 1, tick: 1000, bullets: bulletsFar(30) });
+    const go = makeState({ minBullets: 1, tick: 1000, bullets: leaving(30) });
     expect(predictCount(stay, 30)).toBeGreaterThan(predictCount(go, 30) + 25);
     expect(holdValue(stay, 3, 0.5)).toBeGreaterThan(holdValue(go, 3, 0.5));
   });
@@ -751,7 +754,7 @@ describe('S-10 彈幕｜evaluate', () => {
   it('門檻：時間充裕時，握著 1、2、3 次的門檻一樣（約 10 顆）；時間緊迫時，握著越多次越急', () => {
     const thresholdFor = (tick: number, clears: number): number => {
       for (let n = 1; n <= 60; n += 1) {
-        if (bestOf(scores(makeState({ tick, clears, bullets: leaving(n) }))).clear) {
+        if (bestOf(scores(makeState({ minBullets: 1, tick, clears, bullets: leaving(n) }))).clear) {
           return n;
         }
       }
@@ -765,14 +768,14 @@ describe('S-10 彈幕｜evaluate', () => {
   });
 
   it('剩下的時間不夠再等：tick 2690 時，同樣 6 顆就該按；tick 1000 時 6 顆還在等', () => {
-    expect(bestOf(scores(makeState({ tick: 1000, bullets: leaving(6) }))).clear).toBe(false);
-    expect(bestOf(scores(makeState({ tick: 2690, clears: 1, bullets: leaving(6) }))).clear).toBe(true);
+    expect(bestOf(scores(makeState({ minBullets: 1, tick: 1000, bullets: leaving(6) }))).clear).toBe(false);
+    expect(bestOf(scores(makeState({ minBullets: 1, tick: 2690, clears: 1, bullets: leaving(6) }))).clear).toBe(true);
   });
 
   it('等待價值的 h 讀對手的險度：對手一直貼著子彈（險度高）時，同樣的子彈數更早該按；險度滿的時候門檻明顯降低', () => {
     const threshold = (oppExposure: number): number => {
       for (let n = 1; n <= 60; n += 1) {
-        const s = { ...makeState({ tick: 1000, bullets: leaving(n) }), exposure: [0, oppExposure] as const };
+        const s = { ...makeState({ minBullets: 1, tick: 1000, bullets: leaving(n) }), exposure: [0, oppExposure] as const };
         if (bestOf(scores(s)).clear) {
           return n;
         }
@@ -786,35 +789,35 @@ describe('S-10 彈幕｜evaluate', () => {
     // 險度超過「滿」之後不再加碼
     expect(threshold(1)).toBe(edgy);
     // 我自己的險度不影響我的 h（讀的是對手的）
-    const mine = { ...makeState({ tick: 1000, bullets: leaving(calm) }), exposure: [1, 0] as const };
+    const mine = { ...makeState({ minBullets: 1, tick: 1000, bullets: leaving(calm) }), exposure: [1, 0] as const };
     expect(bestOf(scores(mine)).clear).toBe(true);
   });
 
   it('h 只看公開的險度，不看對手的按鍵或速度：對手的 vx、vy 不同，evaluate 完全相同', () => {
-    const a = makeState({ tick: 1000, bullets: bulletsFar(30), players: [{}, { x: 105, y: 190, vx: 0, vy: 0 }] });
-    const b = makeState({ tick: 1000, bullets: bulletsFar(30), players: [{}, { x: 105, y: 190, vx: 1.5, vy: -1.5 }] });
+    const a = makeState({ minBullets: 1, tick: 1000, bullets: bulletsFar(30), players: [{}, { x: 105, y: 190, vx: 0, vy: 0 }] });
+    const b = makeState({ minBullets: 1, tick: 1000, bullets: bulletsFar(30), players: [{}, { x: 105, y: 190, vx: 1.5, vy: -1.5 }] });
     expect(s10Game.evaluate(a, 0)).toEqual(s10Game.evaluate(b, 0));
   });
 
   it('沒有橡皮筋：兩邊的清場分數同時加上同一個常數，evaluate 不變', () => {
-    const a = makeState({ tick: 1000, bullets: bulletsFar(30) });
+    const a = makeState({ minBullets: 1, tick: 1000, bullets: bulletsFar(30) });
     const b = { ...a, cleared: [17, 17] as const };
     expect(s10Game.evaluate(b, 0)).toEqual(s10Game.evaluate(a, 0));
     expect(s10Game.evaluate(b, 1)).toEqual(s10Game.evaluate(a, 1));
   });
 
   it('領先越多 gain 越高，對方領先越多越低；結束的局 gain 是分差、danger 是 0', () => {
-    const base = makeState({ tick: 1000, bullets: bulletsFar(10) });
+    const base = makeState({ minBullets: 1, tick: 1000, bullets: bulletsFar(10) });
     const ahead = { ...base, cleared: [20, 0] as const };
     expect(s10Game.evaluate(ahead, 0).gain).toBeGreaterThan(s10Game.evaluate(base, 0).gain);
     expect(s10Game.evaluate(ahead, 1).gain).toBeLessThan(s10Game.evaluate(base, 1).gain);
-    const over = makeState({ tick: 2700, maxTicks: 2700, cleared: [20, 5] });
+    const over = makeState({ minBullets: 1, tick: 2700, maxTicks: 2700, cleared: [20, 5] });
     expect(s10Game.evaluate(over, 0)).toEqual({ gain: 1500, danger: 0 });
     expect(s10Game.evaluate(over, 1)).toEqual({ gain: -1500, danger: 0 });
   });
 
   it('單位一致（不會讓 AI 站著不動）：沒有子彈威脅時，往中央移動的 gain 與站著的 gain 同一個量級，且按 b 與等待可以比', () => {
-    const s = makeState({ tick: 1000, bullets: bulletsFar(30) });
+    const s = makeState({ minBullets: 1, tick: 1000, bullets: bulletsFar(30) });
     const xs = scores(s);
     const spread = Math.max(...xs.map((x) => x.gain)) - Math.min(...xs.map((x) => x.gain));
     expect(spread).toBeGreaterThan(0);
@@ -824,17 +827,17 @@ describe('S-10 彈幕｜evaluate', () => {
   });
 
   it('predictCount：沒有子彈、tick 130 往後 30 tick：照發射規則算出 5 顆螺旋（132 到 156）；有子彈飛出去的不算', () => {
-    expect(predictCount(makeState({ tick: 130, angle: 0 }), 0)).toBe(0);
-    expect(predictCount(makeState({ tick: 130, angle: 0 }), 30)).toBe(5);
-    expect(predictCount(makeState({ tick: 100, angle: 0 }), 30)).toBe(5 + 9);
-    const leaving = makeState({ tick: 100, bullets: [{ x: 149, y: 50, vx: 1, vy: 0 }] });
-    expect(predictCount(leaving, 1)).toBe(1 + predictCount(makeState({ tick: 100 }), 1));
-    expect(predictCount(leaving, 10)).toBe(predictCount(makeState({ tick: 100 }), 10));
+    expect(predictCount(makeState({ minBullets: 1, tick: 130, angle: 0 }), 0)).toBe(0);
+    expect(predictCount(makeState({ minBullets: 1, tick: 130, angle: 0 }), 30)).toBe(5);
+    expect(predictCount(makeState({ minBullets: 1, tick: 100, angle: 0 }), 30)).toBe(5 + 9);
+    const leaving = makeState({ minBullets: 1, tick: 100, bullets: [{ x: 149, y: 50, vx: 1, vy: 0 }] });
+    expect(predictCount(leaving, 1)).toBe(1 + predictCount(makeState({ minBullets: 1, tick: 100 }), 1));
+    expect(predictCount(leaving, 10)).toBe(predictCount(makeState({ minBullets: 1, tick: 100 }), 10));
   });
 
   it('predictCount：無彈期內不算新發的；無彈期過了才算', () => {
-    expect(predictCount(makeState({ tick: 300, quiet: 30 }), 20)).toBe(0);
-    expect(predictCount(makeState({ tick: 300, quiet: 10 }), 30)).toBeGreaterThan(0);
+    expect(predictCount(makeState({ minBullets: 1, tick: 300, quiet: 30 }), 20)).toBe(0);
+    expect(predictCount(makeState({ minBullets: 1, tick: 300, quiet: 10 }), 30)).toBeGreaterThan(0);
   });
 });
 
@@ -912,18 +915,21 @@ describe('S-10 彈幕｜劇本玩家與消融（對精準型等級 10）', () =>
   }
   const habit = (): ReturnType<typeof summarize> => row('habit', (seed) => player('habit', seed));
 
-  it('三列（強／人類型／弱，順序要看得到）：讀 AI 決定規則的狙擊手 > 人類模型 > 均勻亂決定；習慣玩家與 AI 幾乎全平手', () => {
-    const sniper = row('sniper', (seed) => player('sniper', seed));
+  it('三列（強／人類型／弱，順序要看得到）：剛好夠 N 顆才按的人 > 人類模型 > 均勻亂決定；讀 AI 規則提早一個 tick 按的狙擊手被門檻鎖住', () => {
+    const near = row('near-n', (seed) => threshold(CLEAR_MIN, seed));
     const human = row('human', (seed) => humanModel(s10Game, seed));
     const random = row('uniform', (seed, side) => uniform(seed, side));
-    expect(sniper.win).toBeGreaterThanOrEqual(90);
+    const sniper = row('sniper', (seed) => player('sniper', seed));
+    expect(near.win).toBeGreaterThanOrEqual(35);
     expect(human.win).toBeGreaterThanOrEqual(25);
     expect(human.win).toBeLessThanOrEqual(70);
     expect(random.win).toBeLessThanOrEqual(10);
-    expect(sniper.win).toBeGreaterThan(human.win + 25);
+    expect(near.win).toBeGreaterThan(random.win + 25);
     expect(human.win).toBeGreaterThan(random.win + 25);
     expect(habit().win).toBeGreaterThanOrEqual(30);
     expect(habit().win).toBeLessThanOrEqual(70);
+    // 狙擊手要比 AI 早一個 tick，但那一刻子彈還不到 N 顆：按早了，被鎖住（以前是 100%，門檻之後是 0）
+    expect(sniper.win).toBeLessThanOrEqual(25);
     // 均勻亂決定輸在被打中（每場約 11 次），不是輸在清場
     expect(random.hitsMe).toBeGreaterThan(5);
   }, 3_600_000);
