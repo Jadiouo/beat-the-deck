@@ -12,6 +12,6 @@ export const h9Meta: CardMeta = {
   rank: '9',
   defaultPolicy: 'pathfinder',
   baseLevel: 3,
-  symmetric: false,
+  symmetric: true,
   luckHeavy: true,
 };
