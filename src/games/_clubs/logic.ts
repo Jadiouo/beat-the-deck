@@ -463,6 +463,18 @@ export function makeState(overrides: StateOverrides = {}): ClubsState {
  */
 export const FOOD_GRADIENT = 4;
 
+/**
+ * 下一步必死（走出地圖、或走進蛇身）時，gain 額外扣多少。
+ *
+ * 為什麼要扣在 gain（DESIGN-AI-FUN 10.38）：搜尋型每一層用 `gain − 2 × 該層 gain 範圍 × danger` 給節點打分並修剪（束搜尋），
+ * 而 danger 不能超過 1。「前方 2 格有牆」的 danger 已經是 0.73，「下一步必死」只有 1.0，兩者只差 0.27；
+ * 但必死的那一步通常離食物更近（gain 較高），所以在還沒走到那一格的中間層，必死的分支分數反而比較高，
+ * 把其他第一步全部擠出束搜尋，最後被選中、走進自己的身體。實測等級 10 對打的撞死全部是這種「下一格就是自己的蛇身」。
+ * 扣在 gain 讓這個節點把該層的 gain 範圍撐大，必死的分支自己拿 `−3 ×` 範圍的分數，安全的分支只被扣 `−2 × 範圍 × 小於 1`，
+ * 所以必死永遠輸給任何活路。10_000 ＝ 100 分，比任何食物梯度與兩側扣分（上百）大得多，又比局終的 `RESULT_BONUS` 小得多。
+ */
+export const DEATH_GAIN_PENALTY = 10_000;
+
 /** 每 1 分的 gain。比任何距離（最多 54）都大，所以吃到食物永遠比靠近食物重要。 */
 export const GAIN_PER_POINT = 100;
 /**
@@ -597,7 +609,7 @@ export function evaluateClubs(state: ClubsState, side: Side): { gain: number; da
   let gain = lead - FOOD_GRADIENT * nearestFood(state.foods, nx, ny);
 
   if (nx < 0 || nx >= WIDTH || ny < 0 || ny >= HEIGHT) {
-    return { gain, danger: 1 };
+    return { gain: gain - DEATH_GAIN_PENALTY, danger: 1 };
   }
   const next = cell(nx, ny);
 
@@ -610,7 +622,7 @@ export function evaluateClubs(state: ClubsState, side: Side): { gain: number; da
     }
   }
   if (blockedStamp[next] === generation) {
-    return { gain, danger: 1 };
+    return { gain: gain - DEATH_GAIN_PENALTY, danger: 1 };
   }
 
   // 前方走得到幾格：反應有延遲的 AI 看到的是舊的 state，只看下一步會來不及轉彎。
