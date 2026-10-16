@@ -55,6 +55,8 @@ export const CLEAR_FROM = 300;
 /** 最後一次清場要到這個 tick 才能按（小規格「誠實的疑慮」預先批准的補救：前兩次太早用完時）。 */
 export const LAST_CLEAR_FROM = 1200;
 export const QUIET_TICKS = 45;
+/** 清場要場上至少這麼多顆子彈才有效（老闆裁定；沒有達到時按 b 不發生任何事）。 */
+export const CLEAR_MIN = 1;
 export const CLEAR_CAP = 60;
 export const HIT_PENALTY = 10;
 
@@ -99,6 +101,10 @@ export interface S10State {
   readonly quietFor: number;
   /** 最後一次清場從第幾個 tick 起才能按（一局固定；消融用）。 */
   readonly lastFrom: number;
+  /** 清場要場上至少幾顆子彈才有效（一局固定）。 */
+  readonly minBullets: number;
+  /** 子彈不足門檻時按 b：true 是照扣一次共用的清場（沒有分數、子彈不消失），false 是無效、不扣。 */
+  readonly burn: boolean;
   /** 各自清場得到的分數總和。 */
   readonly cleared: readonly [number, number];
   /** 公開的「險度」：最近幾十個 tick 裡，離子彈有多近（0 到 1 的移動平均）。AI 讀它來猜對手快不快撐不住。 */
@@ -121,6 +127,10 @@ export interface S10Options {
   readonly quiet?: number;
   /** 最後一次清場從第幾個 tick 起才能按（預設 1200）。 */
   readonly lastFrom?: number;
+  /** 清場要場上至少幾顆子彈才有效（預設 `CLEAR_MIN`）。 */
+  readonly minBullets?: number;
+  /** 子彈不足門檻時按 b 要不要照扣一次共用的清場（預設不扣）。 */
+  readonly burn?: boolean;
   /** AI 的 `evaluate` 讀不讀對手的 danger（預設讀）。 */
   readonly readsDanger?: boolean;
 }
@@ -141,6 +151,8 @@ export function initState(seed: number, config: GameConfig, options: S10Options 
     quiet: 0,
     quietFor: options.quiet ?? QUIET_TICKS,
     lastFrom: options.lastFrom ?? LAST_CLEAR_FROM,
+    minBullets: options.minBullets ?? CLEAR_MIN,
+    burn: options.burn ?? false,
     cleared: [0, 0],
     exposure: [0, 0],
     fanCount: 0,
@@ -186,14 +198,18 @@ function inField(x: number, y: number): boolean {
   return x >= -BULLET_R && x <= FIELD_W + BULLET_R && y >= -BULLET_R && y <= FIELD_H + BULLET_R;
 }
 
-/** 現在能不能清場：次數還有、第 300 tick 起、不在無彈期、場上有子彈。 */
-export function canClear(state: S10State): boolean {
+/** 按得下去：次數還有、第 300 tick 起（最後一次到 lastFrom）、不在無彈期。不看子彈夠不夠。 */
+function pressable(state: S10State): boolean {
   return (
     state.clears > 0 &&
     state.tick >= (state.clears === 1 ? state.lastFrom : CLEAR_FROM) &&
-    state.quiet === 0 &&
-    state.bullets.length > 0
+    state.quiet === 0
   );
+}
+
+/** 現在能不能清場：按得下去，而且場上至少有 `minBullets` 顆子彈（至少 1 顆）。 */
+export function canClear(state: S10State): boolean {
+  return pressable(state) && state.bullets.length >= Math.max(1, state.minBullets);
 }
 
 export function isOver(state: S10State): boolean {
@@ -217,7 +233,12 @@ export function step(state: S10State, inputs: Inputs): S10State {
   let clears = state.clears;
   let quiet = state.quiet;
   let cleared = state.cleared;
-  if ((inputs[0].b || inputs[1].b) && canClear(state)) {
+  const pressed = inputs[0].b || inputs[1].b;
+  if (pressed && !canClear(state) && state.burn && pressable(state)) {
+    // 照扣的變體：子彈不夠就按，白白用掉一次共用的清場（兩邊同時按也只扣 1 次）。
+    clears -= 1;
+  }
+  if (pressed && canClear(state)) {
     const n = Math.min(bullets.length, CLEAR_CAP);
     if (inputs[0].b && inputs[1].b) {
       const half = Math.floor(n / 2);
@@ -604,6 +625,8 @@ export interface StateOverrides {
   readonly players?: readonly [PlayerOverrides, PlayerOverrides];
   readonly clears?: number;
   readonly quiet?: number;
+  readonly minBullets?: number;
+  readonly burn?: boolean;
   readonly cleared?: readonly [number, number];
   readonly exposure?: readonly [number, number];
   readonly fanCount?: number;
@@ -630,6 +653,8 @@ export function makeState(overrides: StateOverrides = {}): S10State {
     ],
     clears: overrides.clears ?? base.clears,
     quiet: overrides.quiet ?? 0,
+    minBullets: overrides.minBullets ?? base.minBullets,
+    burn: overrides.burn ?? base.burn,
     cleared: overrides.cleared ?? [0, 0],
     exposure: overrides.exposure ?? [0, 0],
     fanCount: overrides.fanCount ?? 0,

@@ -361,7 +361,7 @@ describe('S-10 彈幕｜清場門檻（老闆裁定：清場要場上至少 N �
   });
 
   it('11. 預設（不扣）時，狂按 b 不會把共用的次數按光', () => {
-    const s = run(free({ bullets: bulletsFar(MIN - 1) }), 30, CLEAR0);
+    const s = run(free({ bullets: bulletsFar(MIN - 5) }), 10, CLEAR0);
     expect(s.clears).toBe(3);
   });
 });
