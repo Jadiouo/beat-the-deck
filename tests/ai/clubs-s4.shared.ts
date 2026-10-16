@@ -199,9 +199,26 @@ export function s4WinRate(cardId: string, delay: number, games: number): number 
 // ---------------------------------------------------------------------------
 
 export interface DuelStats {
+  /** 有蛇死掉的場數（撞牆、撞身體、頭對頭、被壓死、餓死……任何死因）。 */
   readonly crashed: number;
+  /** 有蛇「走進自己的蛇身」死掉的場數（10.38 修的那一種）；一場裡兩條蛇都這樣死也只算一場。 */
+  readonly selfCrashed: number;
   readonly games: number;
   readonly medianSeconds: number;
+}
+
+/** 這一步（`before` 的 turn 方向走一格）蛇頭落在自己的蛇身上嗎（在地圖內；尾巴那格除非吃到食物才算）。 */
+function hitOwnBody(before: ClubsState, side: Side): boolean {
+  const snake = before.snakes[side];
+  const head = snake.body[0] as number;
+  const x = cellX(head) + (DX[snake.turn] as number);
+  const y = cellY(head) + (DY[snake.turn] as number);
+  if (!inBounds(x, y)) {
+    return false;
+  }
+  const target = cell(x, y);
+  const at = snake.body.indexOf(target);
+  return at !== -1 && (at !== snake.body.length - 1 || before.foods.includes(target));
 }
 
 export function duelStats(cardId: string, games: number): DuelStats {
@@ -212,23 +229,39 @@ export function duelStats(cardId: string, games: number): DuelStats {
   const game = entry.game as Game<ClubsState>;
   const lengths: number[] = [];
   let crashed = 0;
+  let selfCrashed = 0;
   for (let seed = 0; seed < games; seed += 1) {
     const controllers = [
       levelController(game, pathfinder, 10, seed + 1),
       levelController(game, pathfinder, 10, seed + 1_000_003),
     ] as const;
     let state = game.init(seed, MATCH_CONFIG);
+    let self = false;
     while (!game.isOver(state)) {
+      const before = state;
       state = game.step(state, [
         controllers[0].decide(state, 0, state.tick),
         controllers[1].decide(state, 1, state.tick),
       ]);
+      for (const side of [0, 1] as const) {
+        if (before.snakes[side].alive && !state.snakes[side].alive && hitOwnBody(before, side)) {
+          self = true;
+        }
+      }
     }
     lengths.push(state.tick / 60);
     if (!state.snakes[0].alive || !state.snakes[1].alive) {
       crashed += 1;
     }
+    if (self) {
+      selfCrashed += 1;
+    }
   }
   lengths.sort((a, b) => a - b);
-  return { crashed, games, medianSeconds: lengths[Math.floor(lengths.length / 2)] as number };
+  return {
+    crashed,
+    selfCrashed,
+    games,
+    medianSeconds: lengths[Math.floor(lengths.length / 2)] as number,
+  };
 }
