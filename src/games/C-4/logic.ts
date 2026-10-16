@@ -70,7 +70,7 @@ export interface Memory {
   /**
    * 探索的目標格子（沒有記得的食物時 AI 往這裡走）；還沒選是 -1。選好之後不變，直到被看見才重選。
    * 為什麼要記在 state 裡：搜尋型比較「第一步往哪走」時，每個終點都是各自重新找「離自己最近的沒看過的格子」，
-   * 那一格永遠在視野邊緣、在各自的前方，每個方向的距離梯度一樣，AI 就走成階梯（DESIGN-AI-FUN 10.40）。
+   * 那一格永遠在視野邊緣、在各自的前方，每個方向的距離梯度一樣，AI 就走成階梯（docs/cards/C-4.md「探索的量測與修正」）。
    * 目標固定之後，同一個決定裡所有終點看的是同一格，直走才會比轉彎近。
    */
   readonly goal: number;
@@ -106,7 +106,7 @@ function isStale(last: number, tick: number): boolean {
 /**
  * 看某一格要站到哪裡：離牆 `FOG_RADIUS` 格以內的格子，站到離牆剛好 `FOG_RADIUS` 格的那一格就看得到（曼哈頓距離 ≤ 4）。
  * 為什麼不直接走到牆邊：搜尋型對「正前方 20 格內的牆」扣 danger（離牆 4 格 0.51），目標不在正前方直線上時沒有豁免，
- * AI 會在離牆五六格處繞圈、永遠不敢靠近牆邊的目標（DESIGN-AI-FUN 10.40）。
+ * AI 會在離牆五六格處繞圈、永遠不敢靠近牆邊的目標（docs/cards/C-4.md「探索的量測與修正」）。
  */
 export function viewingPoint(c: number): number {
   const x = Math.min(WIDTH - 1 - FOG_RADIUS, Math.max(FOG_RADIUS, cellX(c)));
@@ -411,7 +411,7 @@ function evaluateOf(state: C4State, side: Side): { gain: number; danger: number 
       return result;
     }
     // 吃到之後記憶裡的食物沒了，距離項改看遠處的探索目標，每格 `FOOD_GRADIENT` 分，離目標 40 格就是 −160，比吃到的 +100 還大，
-    // 「吃」會輸給「在食物旁邊不吃」，AI 繞著食物轉圈（DESIGN-AI-FUN 10.40）。吃到的那個終點把距離項加回來，吃的價值才是 +100。
+    // 「吃」會輸給「在食物旁邊不吃」，AI 繞著食物轉圈（docs/cards/C-4.md「探索的量測與修正」）。吃到的那個終點把距離項加回來，吃的價值才是 +100。
     const nx = cellX(head) + (turn === 1 ? 1 : turn === 3 ? -1 : 0);
     const ny = cellY(head) + (turn === 2 ? 1 : turn === 0 ? -1 : 0);
     let near = Number.POSITIVE_INFINITY;
@@ -428,7 +428,7 @@ function evaluateOf(state: C4State, side: Side): { gain: number; danger: number 
   }
   // 剛吃到食物（這一次走格），或蛇頭正站在探索目標上。搜尋型最多只看到這一次走格為止，看不到走完之後的那個轉向。
   // 共用的評估用「目前的行進方向」算前方有沒有牆：貼牆的食物吃完以後，終點的蛇頭正對著牆（下一格走出地圖，gain 扣 10000、danger 1），
-  // 或離牆只剩 3 格（danger 0.61），「吃」於是永遠輸給「不吃」，AI 繞著牆邊的食物轉上千個 tick 都不吃（DESIGN-AI-FUN 10.40）。
+  // 或離牆只剩 3 格（danger 0.61），「吃」於是永遠輸給「不吃」，AI 繞著牆邊的食物轉上千個 tick 都不吃（docs/cards/C-4.md「探索的量測與修正」）。
   // 走完之後下一個 tick 本來就可以轉向，所以這種終點取三個轉向（直走、順時針、逆時針）裡最好的。
   let best = evaluateTurn(me.turn);
   for (const turn of [((me.dir + 1) % 4) as Dir, ((me.dir + 3) % 4) as Dir]) {
