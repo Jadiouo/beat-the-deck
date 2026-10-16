@@ -3,7 +3,14 @@ import { describe, expect, it } from 'vitest';
 import { copyButtons } from '../../src/core/match';
 import type { Buttons, Game } from '../../src/core/types';
 import { MATCH_CONFIG } from '../../src/ai/evolution';
-import { BOLD_TICKS, STALL_TICKS, levelController, wrapPolicy } from '../../src/ai/level';
+import {
+  BOLD_TICKS,
+  STALL_STRIDE,
+  STALL_TICKS,
+  STALL_WINDOW,
+  levelController,
+  wrapPolicy,
+} from '../../src/ai/level';
 import type { WrappedController } from '../../src/ai/level';
 import type { Policy } from '../../src/ai/types';
 import { precise } from '../../src/ai/policies/precise';
@@ -162,5 +169,106 @@ describe('wrapPolicy 的僵局偵測', () => {
     recorded.length = 0;
     run(STALL_TICKS + 10, controller);
     expect(recorded).toEqual(first);
+  });
+});
+
+describe('僵局偵測的取樣：每 STALL_STRIDE 個 tick 才算一次世界指紋（10.15、10.41）', () => {
+  interface Probe {
+    readonly tick: number;
+    readonly x: number;
+    /** JSON.stringify 會呼叫它：世界指紋每算一次，就記下當時的 tick。 */
+    readonly toJSON?: () => unknown;
+  }
+  const NONE: Buttons = { up: false, down: false, left: false, right: false, a: false, b: false };
+  const everyTick = { reactionTicks: 0, decideEvery: 1, depth: 1, epsilon: 0 };
+
+  /** 世界在 `freezeAt` 之前每個 tick 都走到新的值，之後完全不動；每次被序列化就記下目前的 tick。 */
+  function makeWorld(freezeAt: number): {
+    readonly game: Game<Probe>;
+    readonly fingerprintedAt: number[];
+    readonly setNow: (tick: number) => void;
+  } {
+    const fingerprintedAt: number[] = [];
+    let now = 0;
+    const make = (tick: number, x: number): Probe => ({
+      tick,
+      x,
+      toJSON: () => {
+        fingerprintedAt.push(now);
+        return { x };
+      },
+    });
+    const game: Game<Probe> = {
+      id: 'probe',
+      init: () => make(0, 0),
+      step: (state) => make(state.tick + 1, state.tick < freezeAt ? state.x + 1 : state.x),
+      isOver: () => false,
+      score: () => [0, 0],
+      winner: () => null,
+      actions: () => [NONE],
+      evaluate: () => ({ gain: 0, danger: 0 }),
+    };
+    return { game, fingerprintedAt, setNow: (tick) => (now = tick) };
+  }
+
+  const stalledAt: number[] = [];
+  const spy: Policy = {
+    name: 'spy',
+    usesStall: true,
+    decide(_game, state, _side, tick, params): Buttons {
+      if (params.stalled === true) {
+        stalledAt.push(tick);
+      }
+      void state;
+      return NONE;
+    },
+  };
+
+  function drive(world: ReturnType<typeof makeWorld>, from: number, to: number): void {
+    const controller = wrapPolicy(world.game, spy, everyTick, 1);
+    let state = world.game.init(0, MATCH_CONFIG);
+    for (let tick = 0; tick < to; tick += 1) {
+      if (tick >= from) {
+        world.setNow(tick);
+        controller.decide(state, 0, tick);
+      }
+      state = world.game.step(state, [NONE, NONE]);
+    }
+  }
+
+  it('取樣間隔要整除 STALL_TICKS 與 STALL_WINDOW（否則觸發時間與回看範圍會被取樣吃掉）', () => {
+    expect(Number.isInteger(STALL_STRIDE)).toBe(true);
+    expect(STALL_STRIDE).toBeGreaterThanOrEqual(1);
+    expect(STALL_TICKS % STALL_STRIDE).toBe(0);
+    expect(STALL_WINDOW % STALL_STRIDE).toBe(0);
+  });
+
+  it('指紋只在 tick % STALL_STRIDE === 0 的 tick 算：相位綁 tick，不是綁呼叫次數', () => {
+    const world = makeWorld(0);
+    drive(world, 0, 100);
+    expect(world.fingerprintedAt.length).toBe(Math.ceil(100 / STALL_STRIDE));
+    expect(world.fingerprintedAt.every((tick) => tick % STALL_STRIDE === 0)).toBe(true);
+  });
+
+  it('從 tick 3 才開始被問（例如這一場前幾個 tick 沒呼叫）：一樣只在 STALL_STRIDE 的倍數 tick 算', () => {
+    const world = makeWorld(0);
+    drive(world, 3, 60);
+    expect(world.fingerprintedAt.length).toBeGreaterThan(0);
+    expect(world.fingerprintedAt.every((tick) => tick % STALL_STRIDE === 0)).toBe(true);
+  });
+
+  it('世界在 tick 37 之後凍結：通知的時間點最多比逐 tick 偵測晚 STALL_STRIDE 個 tick，且不會更早', () => {
+    stalledAt.length = 0;
+    drive(makeWorld(37), 0, 37 + STALL_TICKS + BOLD_TICKS);
+    // 逐 tick 的偵測：第 38 個 tick 是第一次重複，第 38 + STALL_TICKS − 1 個 tick 累積到 STALL_TICKS。
+    const perTick = 37 + STALL_TICKS;
+    expect(stalledAt[0]).toBeGreaterThanOrEqual(perTick);
+    expect(stalledAt[0]).toBeLessThanOrEqual(perTick + STALL_STRIDE);
+  });
+
+  it('世界一直在前進：取樣之後仍然永遠不通知', () => {
+    stalledAt.length = 0;
+    drive(makeWorld(1_000_000), 0, 400);
+    expect(stalledAt).toEqual([]);
   });
 });
