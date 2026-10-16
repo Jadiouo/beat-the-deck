@@ -1,6 +1,6 @@
 import type { Buttons, Controller, Game, Side } from '../../core/types';
 import { cell, cellX, cellY, HEIGHT, MOVE_EVERY, WIDTH } from '../_clubs/logic';
-import { fieldFor, isWall, partnerOf, facingOf, TRANSIT_MOVES, FAR } from './logic';
+import { evaluateC6, fieldFor, isWall, partnerOf, facingOf, TRANSIT_MOVES, FAR } from './logic';
 import type { C6State } from './logic';
 
 /**
@@ -203,7 +203,36 @@ export interface Tracked {
   readonly hitFrozen: number;
   /** 每邊進門時「出口 4 格內有對手蛇頭」的次數。 */
   readonly riskyUses: readonly [number, number];
+  /** 每邊每次「決定走進門口」那一刻的出口 danger（`evaluateC6`）；性格指紋的機制量（10.48）。 */
+  readonly entryDangers: readonly [readonly number[], readonly number[]];
+  /** 死因分類（每條死掉的蛇一筆）：edge 出界、midwall 中間的牆、self、other、frozen 撞上傳送中的蛇、exit 出口被佔用、head 頭對頭。 */
+  readonly causes: Readonly<Record<string, number>>;
   readonly reason: 'time' | 'crash' | 'exit';
+}
+
+function causeOf(before: C6State, after: C6State, i: 0 | 1): string {
+  if (after.exitDeaths[i] > before.exitDeaths[i]) {
+    return 'exit';
+  }
+  const sn = before.snakes[i];
+  const head = sn.body[0] as number;
+  const x = cellX(head) + (DX[sn.turn] as number);
+  const y = cellY(head) + (DY[sn.turn] as number);
+  if (!inside(x, y)) {
+    return 'edge';
+  }
+  const c = cell(x, y);
+  if (isWall(c)) {
+    return 'midwall';
+  }
+  const j = i === 0 ? 1 : 0;
+  if (sn.body.includes(c)) {
+    return 'self';
+  }
+  if (before.snakes[j].body.includes(c)) {
+    return before.transit[j] !== null ? 'frozen' : 'other';
+  }
+  return 'head';
 }
 
 export function playTracked(
@@ -221,10 +250,26 @@ export function playTracked(
   const lastEmerged: [number, number] = [-1000, -1000];
   const exitAccidents: [number, number] = [0, 0];
   const near: [boolean, boolean] = [false, false];
+  const entryDangers: [number[], number[]] = [[], []];
+  const causes: Record<string, number> = {};
   while (!game.isOver(state)) {
     const a = c0.decide(state, 0, tick);
     const b = c1.decide(state, 1, tick);
     const before = state;
+    if (before.tick % MOVE_EVERY === MOVE_EVERY - 1) {
+      for (const i of [0, 1] as const) {
+        const sn = before.snakes[i];
+        if (!sn.alive || before.transit[i] !== null) {
+          continue;
+        }
+        const head = sn.body[0] as number;
+        const x = cellX(head) + (DX[sn.turn] as number);
+        const y = cellY(head) + (DY[sn.turn] as number);
+        if (inside(x, y) && partnerOf(cell(x, y)) >= 0) {
+          entryDangers[i].push(evaluateC6(before, i).danger);
+        }
+      }
+    }
     state = game.step(state, [a, b]);
     tick += 1;
     for (const i of [0, 1] as const) {
@@ -242,6 +287,8 @@ export function playTracked(
         }
       }
       if (before.snakes[i].alive && !state.snakes[i].alive) {
+        const cause = causeOf(before, state, i);
+        causes[cause] = (causes[cause] ?? 0) + 1;
         if (
           state.exitDeaths[i] > before.exitDeaths[i] ||
           state.tick - lastEmerged[i] <= 2 * MOVE_EVERY
@@ -297,6 +344,8 @@ export function playTracked(
     exitAccidents,
     hitFrozen,
     riskyUses,
+    entryDangers,
+    causes,
     reason,
   };
 }

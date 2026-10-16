@@ -5,6 +5,11 @@ import {
   DEATH_GAIN_PENALTY,
   FOOD_GRADIENT,
   GAIN_PER_POINT,
+  RUN_DANGER,
+  RUN_EXPONENT,
+  RUN_LOOKAHEAD,
+  SIDE_PENALTY,
+  SIDE_PENALTY_FOOD_RANGE,
   HEIGHT,
   LEFT,
   MOVE_EVERY,
@@ -366,23 +371,6 @@ function nearestManhattan(foods: readonly number[], x: number, y: number): numbe
   return Number.isFinite(best) ? best : 0;
 }
 
-/** 給 `evaluateClubs` 的「對手身體」：蛇頭、蛇身（不含尾）、牆、最後才是尾巴（`evaluateClubs` 不把最後一格算障礙）。 */
-const viewBody: number[] = [];
-function otherViewBody(other: Snake): readonly number[] {
-  const body = other.body;
-  let n = 0;
-  viewBody[n++] = body[0] as number;
-  for (let i = 1; i < body.length - 1; i += 1) {
-    viewBody[n++] = body[i] as number;
-  }
-  for (const wall of WALL_CELLS) {
-    viewBody[n++] = wall;
-  }
-  viewBody[n++] = body.length > 1 ? (body[body.length - 1] as number) : (WALL_CELLS[0] as number);
-  viewBody.length = n;
-  return viewBody;
-}
-
 /** 出口前方幾格有牆或身體就算「出口前面是死路」。 */
 export const EXIT_FRONT_CELLS = 2;
 export const EXIT_FRONT_DANGER = 0.8;
@@ -411,6 +399,12 @@ export function evaluateC6(state: C6State, side: Side): { gain: number; danger: 
     const ny = cellY(head) + (DY[me.turn] as number);
     if (nx >= 0 && nx < WIDTH && ny >= 0 && ny < HEIGHT) {
       const next = cell(nx, ny);
+      if (IS_WALL[next] === 1) {
+        return {
+          gain: lead - FOOD_GRADIENT * nearestManhattan(state.foods, nx, ny) - DEATH_GAIN_PENALTY,
+          danger: 1,
+        };
+      }
       const partner = PARTNER[next] as number;
       if (partner >= 0) {
         if (bodyOccupied(state, next)) {
@@ -430,11 +424,8 @@ export function evaluateC6(state: C6State, side: Side): { gain: number; danger: 
     const behind = cell(cellX(exit) - (DX[facing] as number), cellY(exit) - (DY[facing] as number));
     viewMe = { ...me, body: [behind, ...me.body], dir: facing, turn: facing };
   }
-  const viewOther: Snake = { ...other, body: otherViewBody(other) };
-  const view: C6State = {
-    ...state,
-    snakes: side === 0 ? [viewMe, viewOther] : [viewOther, viewMe],
-  };
+  const view: C6State =
+    viewMe === me ? state : { ...state, snakes: side === 0 ? [viewMe, other] : [other, viewMe] };
   const base = evaluateClubs(view, side);
   if (base.danger >= 1) {
     return base;
@@ -452,7 +443,45 @@ export function evaluateC6(state: C6State, side: Side): { gain: number; danger: 
     gain += FOOD_GRADIENT * (nearestManhattan(state.foods, cellX(target), cellY(target)) - moves);
   }
 
+  // 兩側的牆：同 `evaluateClubs` 對蛇身與邊界的兩側扣分（離食物近時打折）。
+  {
+    const turnDir = exit >= 0 ? (FACING[exit] as number) : me.turn;
+    const near = nearestManhattan(state.foods, cellX(target), cellY(target));
+    for (const sideDir of [(turnDir + 1) % 4, (turnDir + 3) % 4]) {
+      for (let r = 1; r <= SIDE_PENALTY.length; r += 1) {
+        const x = cellX(target) + r * (DX[sideDir] as number);
+        const y = cellY(target) + r * (DY[sideDir] as number);
+        if (x < 0 || x >= WIDTH || y < 0 || y >= HEIGHT) {
+          break;
+        }
+        if (IS_WALL[cell(x, y)] === 1) {
+          gain -= (SIDE_PENALTY[r - 1] as number) * Math.min(1, near / SIDE_PENALTY_FOOD_RANGE);
+          break;
+        }
+      }
+    }
+  }
+  // 前方的牆：`evaluateClubs` 只認蛇身與地圖邊界，中間的牆自己算。規則同它對邊界的處理：
+  // 食物在牆前面（蛇會先吃到食物再轉彎）就不算前方障礙，否則牆邊的食物永遠沒人敢吃（10.31）。
   let danger = base.danger;
+  const ahead = exit >= 0 ? (FACING[exit] as number) : me.turn;
+  if (!state.foods.includes(target)) {
+    for (let r = 1; r < RUN_LOOKAHEAD; r += 1) {
+      const x = cellX(target) + r * (DX[ahead] as number);
+      const y = cellY(target) + r * (DY[ahead] as number);
+      if (x < 0 || x >= WIDTH || y < 0 || y >= HEIGHT) {
+        break;
+      }
+      const c = cell(x, y);
+      if (IS_WALL[c] === 1) {
+        danger = Math.max(danger, RUN_DANGER * Math.pow(1 - r / RUN_LOOKAHEAD, RUN_EXPONENT));
+        break;
+      }
+      if (state.foods.includes(c)) {
+        break;
+      }
+    }
+  }
   if (exit >= 0) {
     const facing = FACING[exit] as number;
     const ex = cellX(exit);
