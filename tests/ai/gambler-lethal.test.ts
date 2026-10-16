@@ -156,6 +156,7 @@ describe('賭徒型仍然是賭徒型：偏好「不確定」', () => {
       choose([
         { gain: 10, danger: 0 },
         { gain: 9.5, danger: 0.5 },
+        { gain: 0, danger: 0 },
         { gain: 99, danger: 1 },
       ]),
     ).toBe(1);
