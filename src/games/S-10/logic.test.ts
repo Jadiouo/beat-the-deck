@@ -9,6 +9,7 @@ import { deepFreeze } from '../../../tests/contract/freeze';
 import {
   CLEAR_CAP,
   CLEAR_FROM,
+  CLEAR_MIN,
   CLEARS,
   EXPOSURE_FAR,
   EXPOSURE_FULL,
@@ -270,6 +271,98 @@ describe('S-10 彈幕｜清場', () => {
     expect(canClear({ ...ok, tick: 299 })).toBe(false);
     expect(canClear({ ...ok, quiet: 1 })).toBe(false);
     expect(canClear({ ...ok, bullets: [] })).toBe(false);
+  });
+});
+
+describe('S-10 彈幕｜清場門檻（老闆裁定：清場要場上至少 N 顆子彈才有效）', () => {
+  const MIN = 8;
+  const free = (extra: Partial<Parameters<typeof makeState>[0]> = {}): S10State =>
+    makeState({ tick: 400, minBullets: MIN, ...extra });
+
+  it('1. init：minBullets 預設是 CLEAR_MIN，可以用 options 改；burn 預設是 false', () => {
+    expect(s10Game.init(0, CONFIG).minBullets).toBe(CLEAR_MIN);
+    expect(createS10Game({ minBullets: 12 }).init(0, CONFIG).minBullets).toBe(12);
+    expect(createS10Game({ minBullets: 12, burn: true }).init(0, CONFIG).burn).toBe(true);
+    expect(s10Game.init(0, CONFIG).burn).toBe(false);
+  });
+
+  it('2. 不足 N 顆按 b 沒有用：子彈、次數、分數、無彈期都不變；剛好 N 顆就有效', () => {
+    const short = s10Game.step(free({ bullets: bulletsFar(MIN - 1) }), CLEAR0);
+    expect([short.clears, short.cleared, short.quiet]).toEqual([3, [0, 0], 0]);
+    expect(short.bullets).toHaveLength(MIN - 1);
+    const edge = s10Game.step(free({ bullets: bulletsFar(MIN) }), CLEAR0);
+    expect([edge.clears, edge.cleared[0], edge.bullets.length]).toEqual([2, MIN, 0]);
+  });
+
+  it('3. 預設（不扣）：不足 N 顆的 b 不扣次數；之後子彈夠了照樣能清', () => {
+    let s = free({ bullets: bulletsFar(MIN - 3) });
+    for (let i = 0; i < 5; i += 1) {
+      s = { ...s10Game.step(s, CLEAR0), bullets: s.bullets };
+    }
+    expect(s.clears).toBe(3);
+    const ok = s10Game.step({ ...s, bullets: bulletsFar(MIN + 2) }, CLEAR0);
+    expect([ok.clears, ok.cleared[0]]).toEqual([2, MIN + 2]);
+  });
+
+  it('4. N 看的是場上全部的子彈（含超過 60 的），分數仍最多算 60', () => {
+    const s = s10Game.step(free({ minBullets: 70, bullets: bulletsFar(70) }), CLEAR0);
+    expect([s.clears, s.cleared[0]]).toEqual([2, CLEAR_CAP]);
+  });
+
+  it('5. 同一個 tick 兩邊都按且子彈夠：照舊各得 floor(N / 2)；不夠：兩邊都沒有用', () => {
+    const ok = s10Game.step(free({ bullets: bulletsFar(11) }), BOTH);
+    expect([ok.cleared, ok.clears]).toEqual([[5, 5], 2]);
+    const short = s10Game.step(free({ bullets: bulletsFar(MIN - 1) }), BOTH);
+    expect([short.cleared, short.clears]).toEqual([[0, 0], 3]);
+  });
+
+  it('6. canClear 與 actions：子彈少於 N 顆時不能清場、動作只有 17 個；達到 N 顆有 34 個', () => {
+    expect(canClear(free({ bullets: bulletsFar(MIN - 1) }))).toBe(false);
+    expect(canClear(free({ bullets: bulletsFar(MIN) }))).toBe(true);
+    expect(s10Game.actions(free({ bullets: bulletsFar(MIN - 1) }), 0)).toHaveLength(17);
+    expect(s10Game.actions(free({ bullets: bulletsFar(MIN) }), 0)).toHaveLength(34);
+  });
+
+  it('7. 門檻和其他條件是「而且」：次數用完、無彈期、第 300 tick 之前，子彈再多也不行', () => {
+    const many = bulletsFar(40);
+    expect(canClear(free({ bullets: many, clears: 0 }))).toBe(false);
+    expect(canClear(free({ bullets: many, quiet: 2 }))).toBe(false);
+    expect(canClear(free({ bullets: many, tick: 299 }))).toBe(false);
+    expect(canClear(free({ bullets: many, tick: 1199, clears: 1 }))).toBe(false);
+  });
+
+  it('8. 清場之後子彈從零長回來：無彈期過了之後要再等一陣子才到 N 顆', () => {
+    let s = s10Game.step(free({ bullets: bulletsFar(20) }), CLEAR0);
+    s = run(s, QUIET_TICKS + 6);
+    expect(s.bullets.length).toBeLessThan(MIN);
+    expect(canClear(s)).toBe(false);
+  });
+
+  it('9. 次數照扣的變體（burn）：不足 N 顆的 b 用掉一次共用的清場，沒有分數、子彈不消失、沒有無彈期', () => {
+    const burn = createS10Game({ minBullets: MIN, burn: true });
+    const base = free({ bullets: bulletsFar(MIN - 1), burn: true });
+    const s = burn.step(base, CLEAR0);
+    expect([s.clears, s.cleared, s.quiet, s.bullets.length]).toEqual([2, [0, 0], 0, MIN - 1]);
+    // 兩邊同時按，也只扣 1 次
+    expect(burn.step(base, BOTH).clears).toBe(2);
+    // 子彈夠就是正常的清場，不多扣
+    const ok = burn.step(free({ bullets: bulletsFar(MIN), burn: true }), CLEAR0);
+    expect([ok.clears, ok.cleared[0]]).toEqual([2, MIN]);
+  });
+
+  it('10. burn 只在「按得下去」的時候扣：第 300 tick 之前、無彈期、次數用完、最後一次的 1200 之前，按了都不扣', () => {
+    const burn = createS10Game({ minBullets: MIN, burn: true });
+    const few = bulletsFar(2);
+    expect(burn.step(free({ bullets: few, burn: true, tick: 299 }), CLEAR0).clears).toBe(3);
+    expect(burn.step(free({ bullets: few, burn: true, quiet: 5 }), CLEAR0).clears).toBe(3);
+    expect(burn.step(free({ bullets: few, burn: true, clears: 0 }), CLEAR0).clears).toBe(0);
+    expect(burn.step(free({ bullets: few, burn: true, clears: 1, tick: 1100 }), CLEAR0).clears).toBe(1);
+    expect(burn.step(free({ bullets: few, burn: true, clears: 1, tick: 1200 }), CLEAR0).clears).toBe(0);
+  });
+
+  it('11. 預設（不扣）時，狂按 b 不會把共用的次數按光', () => {
+    const s = run(free({ bullets: bulletsFar(MIN - 1) }), 30, CLEAR0);
+    expect(s.clears).toBe(3);
   });
 });
 
