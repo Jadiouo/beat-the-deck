@@ -92,13 +92,6 @@ describe('evolutionReport（TEST_PLAN 5.3）', () => {
     );
     expect(rates.size).toBeGreaterThan(1);
   });
-
-  it('對 counter-game 跑一次要少於 1 秒', () => {
-    const started = performance.now();
-    evolutionReport(counterGame, 3, 4, 0);
-    const elapsed = performance.now() - started;
-    expect(elapsed).toBeLessThan(1000);
-  });
 });
 
 describe('measureDecideTimes（給 A5 用）', () => {

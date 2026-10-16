@@ -100,10 +100,10 @@ describe('用臨時登記項（counter-game ＋ 預設性格 greedy）實際跑 
     expect(a3).toBeGreaterThanOrEqual(0.45);
     expect(a4).toBeLessThanOrEqual(0.35);
     expect(a5.samples).toBeGreaterThan(0);
-    expect(a5.meanMs).toBeLessThan(1);
-    expect(a5.p999Ms).toBeLessThan(8);
+    // A5 的門檻（平均 < 1、p99.9 < 8 毫秒）與 runCheck 的 A5 在 tests/timing/wallclock.test.ts 跑：
+    // 時間類的斷言只能在序列的 timing project 裡驗，這裡只確認它給的是有限的數字。
     expect(a5.maxMs).toBeGreaterThanOrEqual(a5.p999Ms);
-    for (const code of A_CODES) {
+    for (const code of A_CODES.filter((c) => c !== 'A5')) {
       const check = AI_CHECKS.find((c) => c.code === code);
       expect(check).toBeDefined();
       expect(runCheck(check as NonNullable<typeof check>, greedyEntry)).toBe('pass');
@@ -159,12 +159,10 @@ describe('K11、K12 用預設性格', () => {
     expect(pressed).toBeLessThan(80);
   });
 
-  it('K11、K12 在臨時登記項上照樣通過', () => {
+  it('K12 在臨時登記項上照樣通過（K11 在 tests/timing/wallclock.test.ts）', () => {
     const symmetric = withMeta({ defaultPolicy: 'greedy', symmetric: true });
-    for (const code of ['K11', 'K12'] as const) {
-      const check = CHECKS.find((c) => c.code === code);
-      expect(runCheck(check as NonNullable<typeof check>, symmetric)).toBe('pass');
-    }
+    const check = CHECKS.find((c) => c.code === 'K12');
+    expect(runCheck(check as NonNullable<typeof check>, symmetric)).toBe('pass');
   });
 });
 

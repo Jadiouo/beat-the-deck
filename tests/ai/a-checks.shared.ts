@@ -16,6 +16,14 @@ import { counterEntry } from '../fixtures/counter-entry';
  * 不是手寫清單。`check-buckets.test.ts` 證明每一筆登記項恰好落在一個檔案裡。
  */
 
+/**
+ * 量時間的檢查（K11 夠快、A5 決策夠快）。它們不在逐牌分檔（`slotNN`）裡跑，
+ * 而是由 `tests/timing/checks.test.ts` 對全部登記項跑，且該檔屬於 vitest 的 `timing` project：
+ * 序列執行、不與任何其他 project 並行（見 vitest.config.ts 與 TEST_PLAN 第 9 節）。
+ * 門檻在 `tests/contract/checks.ts`，沒有動；只是換了跑的地方，沒有跳過。
+ */
+export const TIMING_CODES: readonly string[] = ['K11', 'A5'];
+
 /** 真牌（登記表）加上替身牌（只存在於 tests/）。 */
 export const ALL_ENTRIES: readonly RegistryEntry[] = [...registry, counterEntry];
 
@@ -65,6 +73,9 @@ export function defineAChecks(bucket: Bucket): void {
 
   describe.each(entries)('$id', (entry) => {
     for (const check of AI_CHECKS) {
+      if (TIMING_CODES.includes(check.code)) {
+        continue; // 時間類的檢查改在 tests/timing/ 跑
+      }
       const title = `${check.code} ${check.title}`;
       const why = notApplicableReason(check, entry);
       if (why !== null) {

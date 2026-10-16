@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
 import type { RegistryEntry } from '../../src/games/types';
-import { bucketOf, entriesOfBucket, fileNameOf, type Bucket } from '../ai/a-checks.shared';
+import {
+  TIMING_CODES,
+  bucketOf,
+  entriesOfBucket,
+  fileNameOf,
+  type Bucket,
+} from '../ai/a-checks.shared';
 import {
   CHECKS,
   CONTRACT_CONFIG,
@@ -39,6 +45,9 @@ export function defineContractChecks(bucket: Bucket): void {
 
   describe.each(entries)('$id', (entry) => {
     for (const check of CHECKS) {
+      if (TIMING_CODES.includes(check.code)) {
+        continue; // 時間類的檢查（K11）改在 tests/timing/ 跑，序列、不與其他 project 並行
+      }
       const title = `${check.code} ${check.title}`;
       if (!check.applies(entry)) {
         it.skip(`${title}（這張牌不適用）`, () => undefined);

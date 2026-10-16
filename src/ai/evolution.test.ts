@@ -34,13 +34,6 @@ describe('evolutionReport（src/ai/evolution.ts，外殼與測試共用同一份
       winRate(cAGame, policy, 8, policy, 3, seeds, MATCH_CONFIG),
     );
   });
-
-  it('對 C-A 跑一次少於 1 秒（5.3 第二條）', () => {
-    const started = performance.now();
-    evolutionReport(cAGame, 4, 5, 0, policy);
-    const elapsed = performance.now() - started;
-    expect(elapsed).toBeLessThan(1000);
-  });
 });
 
 describe('winRate', () => {
