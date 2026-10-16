@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { levelController, policyByName } from '../../ai/level';
 import { pathfinder } from '../../ai/policies/pathfinder';
+import { lookOneStep } from '../../ai/policies/shared';
 import { copyButtons } from '../../core/match';
 import type { Buttons, Inputs } from '../../core/types';
 import {
@@ -571,9 +572,13 @@ describe('C-8 光軌｜actions 與 evaluate', () => {
     expect(gap).toBeLessThan(TURN_PENALTY * 2);
   });
 
-  it('28c. 性格的習慣：下一步就是牆時，搜尋型、精準型、貪心型都轉向；賭徒型（落後就偏好高 danger）會直接撞上去', () => {
-    // 人在 (31,12) 往右，下一步走出地圖：直走的 gain 是 −500、danger 是 1。賭徒型的效用是 gain 平移之後乘上 (1 + r·danger)，
-    // 落後（這個局面的 gain 是負的）時 r 大，danger 1 的動作效用最高。這是 SPEC 7.1 的賭徒型，不是這張牌的錯；它是性格可以辨認的地方。
+  it('28c. 下一步就是牆時，四個性格都轉向（賭徒型也是）', () => {
+    // 舊的是：搜尋型、精準型、貪心型轉向，賭徒型 `turns('gambler')` 為 false（直接撞牆），註解還寫「這是性格可以辨認的地方」。
+    // 為什麼它是化石：那是賭徒型的缺陷（DESIGN-AI-FUN 10.46、10.47）。danger 同時裝了「不確定」與「確定會死」，
+    // 舊賭徒型把 danger = 1 當成最大的加成；梅花的必死扣 10000 又撐大了 gain 範圍，所以走進牆的效用反而最高。
+    // 現在賭徒型只要還有 danger < 1 的動作就排除所有 danger = 1 的動作，所以它也轉向。
+    // 性格的差異換到下一條（28d）：兩個都不必死的動作之間，賭徒型仍偏好 danger 高的那個。
+    // 人在 (31,12) 往右，下一步走出地圖：直走的 gain 是 −500、danger 是 1。
     const state = makeState({ snakes: [{ body: body([31, 12]), dir: RIGHT }] });
     const turns = (name: 'pathfinder' | 'precise' | 'greedy' | 'gambler'): boolean => {
       const pressed = policyByName(name).decide(c8Game, state, 0, 0, { depth: 6, seed: 1 });
@@ -582,8 +587,52 @@ describe('C-8 光軌｜actions 與 evaluate', () => {
     expect(turns('pathfinder')).toBe(true);
     expect(turns('precise')).toBe(true);
     expect(turns('greedy')).toBe(true);
-    expect(turns('gambler')).toBe(false);
+    expect(turns('gambler')).toBe(true);
   });
+
+  it('28d. 性格指紋：賭徒型選的動作平均 danger 比搜尋型、精準型高得多（對搜尋型等級 10，10 場，每個決定都量）', () => {
+    // 舊的指紋是 28c 的「賭徒型直接撞牆」（見上一條，是缺陷的化石）。賭徒型真正保留的性格是：
+    // 兩個都不必死的動作之間，仍偏好 danger 高的那個（tests/ai/gambler-lethal.test.ts 擋著）。
+    // 量法：每個決定，把「實際送出的按鍵」對回 actions() 的哪一個，取該動作往前一步後的 danger（與政策看到的同一把尺）。
+    // 量到的（種子 0..29，對搜尋型等級 10）：
+    //   平均選到的 danger  精準 0.071／搜尋 0.087／貪心 0.185／賭徒 0.329
+    //   danger >= 0.8 的決定  精準 0.79%／搜尋 3.01%／貪心 8.00%／賭徒 15.98%
+    // 測試本身跑 10 場（種子 0..9）以省時間，量到：平均 danger 賭徒 0.325／精準 0.080／搜尋 0.089（比值 4.1 與 3.6 倍）；
+    // danger >= 0.8 的決定 賭徒 15.9%／精準 1.3%／搜尋 3.0%（比值 12 倍與 5.3 倍）。門檻是 2.5 倍、2 倍、3 倍，留了約 40% 以上的餘裕。
+    // 貪心型（0.185）夾在中間，不拿來比：它的 danger 偏高是因為不看遠，不是風險偏好。
+    const chosen = (name: 'pathfinder' | 'precise' | 'greedy' | 'gambler'): { mean: number; high: number } => {
+      let decisions = 0;
+      let sum = 0;
+      let high = 0;
+      for (let seed = 0; seed < 10; seed += 1) {
+        const side = seed % 2 === 0 ? 0 : 1;
+        const me = levelController(c8Game, policyByName(name), 10, seed);
+        const ai = levelController(c8Game, pathfinder, 10, seed + 1_000_003);
+        let state = c8Game.init(seed, { maxTicks: 3600, params: {} });
+        for (let tick = 0; !c8Game.isOver(state); tick += 1) {
+          const a = copyButtons(me.decide(state, side, tick));
+          const b = ai.decide(state, side === 0 ? 1 : 0, tick);
+          const actions = c8Game.actions(state, side);
+          const index = actions.findIndex((x) => JSON.stringify(x) === JSON.stringify(a));
+          if (index >= 0) {
+            const danger = (lookOneStep(c8Game, state, side)[index] as { danger: number }).danger;
+            decisions += 1;
+            sum += danger;
+            high += danger >= 0.8 ? 1 : 0;
+          }
+          state = c8Game.step(state, side === 0 ? [a, b] : [b, a]);
+        }
+      }
+      return { mean: sum / decisions, high: high / decisions };
+    };
+    const g = chosen('gambler');
+    const p = chosen('precise');
+    const f = chosen('pathfinder');
+    expect(g.mean).toBeGreaterThanOrEqual(2.5 * p.mean);
+    expect(g.mean).toBeGreaterThanOrEqual(2 * f.mean);
+    expect(g.high).toBeGreaterThanOrEqual(3 * Math.max(p.high, 0.005));
+    expect(g.high).toBeGreaterThanOrEqual(3 * f.high);
+  }, 300_000);
 
   it('29. gain：領地差。離牆越遠越高；對方的蛇頭離得越近（搶走越多格）越低', () => {
     const at = (x: number, y: number, other: [number, number]): number =>

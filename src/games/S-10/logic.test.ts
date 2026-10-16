@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { humanModel } from '../../ai/human-model';
 import { levelController, policyByName, wrapPolicy } from '../../ai/level';
 import { precise } from '../../ai/policies/precise';
+import { lookOneStep } from '../../ai/policies/shared';
 import { playMatch } from '../../core/match';
 import type { Buttons, Inputs } from '../../core/types';
 import { deepFreeze } from '../../../tests/contract/freeze';
@@ -984,10 +985,48 @@ describe('S-10 彈幕｜劇本玩家與消融（對精準型等級 10）', () =>
     expect(plenty).toBeLessThan(base - 30);
   }, 3_600_000);
 
-  it('四個性格的指紋：賭徒型被打中的次數是精準型的 5 倍以上（命中數是唯一拉得開的指標）', () => {
-    const hits = (name: 'precise' | 'gambler'): number =>
-      row(`pol-${name}`, (seed) => levelController(s10Game, policyByName(name), 10, seed)).hitsMe;
-    expect(hits('gambler')).toBeGreaterThanOrEqual(5 * Math.max(0.05, hits('precise')));
+  it('四個性格的指紋：賭徒型貼著子彈走的比例（選到 danger >= 0.5 的決定）遠高於精準型（對精準型等級 10，16 場，每個決定都量）', () => {
+    // 舊的是：賭徒型被打中的次數 >= 5 × max(0.05, 精準型被打中的次數)。為什麼它是化石：
+    // 那是舊賭徒型把 danger = 1（一定會被打中）當成最大加成、主動走進子彈的結果（DESIGN-AI-FUN 10.46、10.47）。
+    // 修好之後賭徒型只要有 danger < 1 的動作就排除 danger = 1 的，被打中數量到 0（種子 0..99：賭徒 0.00，精準 0.03，貪心 0.01），
+    // 舊斷言 0 >= 5 × 0.05 不成立。被打中數已經不能分辨性格（四個性格都接近 0），所以換軸。
+    // 新的軸：賭徒型保留的性格是「兩個都不必死的動作之間仍偏好 danger 高的」。量法：每個決定，把實際送出的按鍵對回 actions()
+    // 的哪一個，取該動作往前一步後的 danger（險度，與政策看到的同一把尺）。
+    // 量到的（種子 0..29，對精準型等級 10）：選到 danger >= 0.5 的決定占比 精準 0.11%／貪心 0.11%／賭徒 4.61%（約 42 倍）；
+    // danger >= 0.8 精準 0.02%／賭徒 0.76%（約 38 倍）；平均 danger 精準 0.005／賭徒 0.058（約 11 倍）。
+    // 搜尋型也貼近子彈（danger >= 0.5 占 8.16%），但它輸光（勝率 0）、不是這條要比的對象。
+    // 測試本身跑 16 場（種子 0..15）：賭徒 4.48%、精準 0.10%（約 45 倍），被打中兩邊都是 0。門檻：要 10 倍（餘裕 4.5 倍）、占比下限 1.5%（量到 4.48%，約 3 倍餘裕）。
+    const share = (name: 'precise' | 'gambler'): { high: number; hits: number } => {
+      let decisions = 0;
+      let high = 0;
+      let hits = 0;
+      for (let seed = 0; seed < 16; seed += 1) {
+        const side = seed % 2 === 0 ? 0 : 1;
+        const me = levelController(s10Game, policyByName(name), 10, seed);
+        const ai = levelController(s10Game, precise, 10, seed + 1_000_003);
+        let state = s10Game.init(seed, CONFIG);
+        for (let tick = 0; !s10Game.isOver(state); tick += 1) {
+          const a = me.decide(state, side, tick);
+          const b = ai.decide(state, side === 0 ? 1 : 0, tick);
+          const actions = s10Game.actions(state, side);
+          const index = actions.findIndex((x) => JSON.stringify(x) === JSON.stringify(a));
+          if (index >= 0) {
+            const danger = (lookOneStep(s10Game, state, side)[index] as { danger: number }).danger;
+            decisions += 1;
+            high += danger >= 0.5 ? 1 : 0;
+          }
+          state = s10Game.step(state, side === 0 ? [a, b] : [b, a]);
+        }
+        hits += state.players[side].hits;
+      }
+      return { high: high / decisions, hits: hits / 16 };
+    };
+    const g = share('gambler');
+    const p = share('precise');
+    expect(g.high).toBeGreaterThanOrEqual(0.015);
+    expect(g.high).toBeGreaterThanOrEqual(10 * Math.max(p.high, 0.001));
+    // 舊指紋的另一半：賭徒型不會比精準型更常被打中（修好之前是 >= 5 倍）。
+    expect(g.hits).toBeLessThanOrEqual(p.hits + 0.3);
   }, 3_600_000);
 
   it('局長：每一局都跑滿 2700 tick（45 秒），在 30 到 90 秒之間', () => {

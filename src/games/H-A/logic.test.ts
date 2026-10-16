@@ -550,12 +550,19 @@ describe('H-A 貪心骰｜actions 與 evaluate', () => {
     expect(hAGame.evaluate(afterA, 0).gain).toBe(hAGame.evaluate(afterB, 0).gain);
   });
 
-  it('賭徒型（領先或打平）：累積到 20 以前繼續擲，20 以上存分；等待與骰子在滾時不亂按', () => {
+  it('賭徒型（領先或打平）：累積到 18 以前繼續擲，18 以上存分；等待與骰子在滾時不亂按', () => {
+    // 舊的是 20（累積 19 還擲、20 才存）。改成 18 的原因（DESIGN-AI-FUN 10.46、10.47；老闆裁定接受 18）：
+    // H-A 的 danger = min(1, 累積 / 18)，累積 >= 18 飽和成 1，但那只是「放大過的風險」，不是必死（再擲只有 1/6 歸零）。
+    // 賭徒型修好之後（只要還有 danger < 1 的動作就排除所有 danger === 1 的動作），累積到 18 時「繼續擲」
+    // 的 danger 已是 1，被當成必死排除，只剩「存分」。這是 danger 介面的缺口（同時承載「出事的機率」與
+    // 「確定出事」），不是 H-A 的 bug。實測（gambler.decide，depth 1）：累積 10 到 17 按 a、18 到 24 按 b，
+    // 邊界剛好在 18；賭徒型仍比搜尋型（約 9）晚存很多，保守程度的排序沒變。
     const decide = (s: HAState, side: Side = 0): Buttons =>
       gambler.decide(hAGame, s, side, 0, { depth: 1, seed: 0 });
     expect(decide(makeState({ acc: 0 })).a).toBe(true);
     expect(decide(makeState({ acc: 12 })).a).toBe(true);
-    expect(decide(makeState({ acc: 19 })).a).toBe(true);
+    expect(decide(makeState({ acc: 17 })).a).toBe(true);
+    expect(decide(makeState({ acc: 18 })).b).toBe(true);
     expect(decide(makeState({ acc: 22 })).b).toBe(true);
     expect(decide(makeState({ acc: 31 })).b).toBe(true);
     expect(decide(makeState({ turn: 1, wait: 20, acc: 8 }), 1)).toEqual(IDLE);
@@ -573,7 +580,7 @@ describe('H-A 貪心骰｜actions 與 evaluate', () => {
     expect(decide(chase, 1).a).toBe(true);
   });
 
-  it('搜尋型（人類模型的底層）比賭徒型保守：累積到 9 左右就存分；賭徒型還是 20（A4 在保留種子區塊上要有餘裕）', () => {
+  it('搜尋型（人類模型的底層）比賭徒型保守：累積到 9 左右就存分；賭徒型是 18（舊的是 20，原因見上一條；A4 在保留種子區塊上要有餘裕）', () => {
     const decide = (policy: typeof pathfinder, s: HAState): Buttons =>
       policy.decide(hAGame, s, 0, 0, { depth: 1, seed: 0 });
     expect(decide(pathfinder, makeState({ acc: 0 })).a).toBe(true);
@@ -626,8 +633,10 @@ describe('H-A 貪心骰｜AI 在邊緣觸發下也能玩', () => {
     }
     expect(s.rolls).toBeGreaterThanOrEqual(2);
     expect(s.lastEvent).not.toBe('timeout');
-    expect(s.turn).toBe(0); // 累積到 20 以上就存了，回合結束
-    expect(s.totals[1]).toBeGreaterThanOrEqual(20);
+    expect(s.turn).toBe(0); // 累積到 18 以上就存了，回合結束
+    // 舊的門檻是 20（賭徒型的存分點）。改 18 的原因同上一組「賭徒型（領先或打平）」那條：H-A 的 danger 在累積 18
+    // 飽和成 1 但不是必死，修好的賭徒型把它排除（10.47）。實測失敗時的值正是 18。
+    expect(s.totals[1]).toBeGreaterThanOrEqual(18);
   });
 
   it('等級 5 的賭徒型坐 0 號邊（沒有 45 tick 等待）：要先放開再按，也能連續擲、不靠超時', () => {
@@ -641,7 +650,8 @@ describe('H-A 貪心骰｜AI 在邊緣觸發下也能玩', () => {
     }
     expect(s.rolls).toBeGreaterThanOrEqual(2);
     expect(s.lastEvent).not.toBe('timeout');
-    expect(s.totals[0]).toBeGreaterThanOrEqual(20);
+    // 舊的是 >= 20，新的 >= 18：理由同上（danger 飽和到 1 不是必死，賭徒型在累積 18 就存分；實測值 18）。
+    expect(s.totals[0]).toBeGreaterThanOrEqual(18);
   });
 
   it('兩個等級 5 的賭徒型打完一整場：在 maxTicks 之內結束，並且在時間上限之前通常就分出勝負', () => {

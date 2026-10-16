@@ -5,6 +5,7 @@ import { gambler } from '../../ai/policies/gambler';
 import { greedy } from '../../ai/policies/greedy';
 import { pathfinder } from '../../ai/policies/pathfinder';
 import { precise } from '../../ai/policies/precise';
+import { lookOneStep } from '../../ai/policies/shared';
 import type { Policy } from '../../ai/types';
 import { playMatch } from '../../core/match';
 import type { Buttons, Controller, Game, Inputs, Side } from '../../core/types';
@@ -973,9 +974,20 @@ describe('D-4 電池｜劇本玩家（技術有報酬）', () => {
 });
 
 describe('D-4 電池｜四性格指紋', () => {
-  it('每人每場「電量是 0」的 tick 數（stuck）：貪心／精準 ≥ 1.5、賭徒／貪心 ≥ 1.5（各性格等級 10 對貪心型等級 10，40 場）', () => {
-    const stuckOf = (policy: Policy): number => {
+  it('電量是 0 的 tick 數（stuck）：貪心 / 精準 >= 1.5；賭徒型選到的 danger 遠高於貪心型與精準型（各性格等級 10 對貪心型等級 10，40 場）', () => {
+    // 舊的是兩條 stuck 比：貪心 / 精準 >= 1.5（這條不變，實測 2.3），以及 賭徒 / 貪心 >= 1.5。第二條是化石：
+    // 舊賭徒型把 danger = 1 當最大加成，主動衝進電量 0 的格子，stuck 因此是貪心型的 1.5 倍以上（DESIGN-AI-FUN 10.46、10.47）；
+    // 修好之後它排除必死動作，stuck 賭徒 / 貪心 = 111.47 / 347.25 = 0.32，而且 111 也介於精準（150）與搜尋（90）之間，
+    // stuck 已經不能分辨賭徒型。換軸：賭徒型保留的性格是「兩個都不必死的動作之間仍偏好 danger 高的」。
+    // 量法：每個決定，把實際送出的按鍵對回 actions() 的哪一個，取該動作往前一步後的 danger。
+    // 量到的（種子 0..29，對貪心型等級 10）：平均選到的 danger 精準 0.107／貪心 0.169／搜尋 0.135／賭徒 0.436（賭徒是貪心的 2.6 倍）；
+    // danger >= 0.5 的決定占比 精準 9.47%／貪心 16.88%／搜尋 11.73%／賭徒 52.32%（賭徒是貪心的 3.1 倍）。
+    // 測試本身的 40 場（種子 0..39）：賭徒 0.434／貪心 0.160／精準 0.098（2.7 倍與 4.4 倍）；stuck 貪心 347.3／精準 150.1（2.3 倍）。
+    // 門檻：賭徒的平均 danger >= 1.8 × 貪心與精準（對貪心約 50% 餘裕）。
+    const measure = (policy: Policy): { stuck: number; danger: number } => {
       let total = 0;
+      let decisions = 0;
+      let dangerSum = 0;
       for (let seed = 0; seed < 40; seed += 1) {
         const side: Side = seed % 2 === 0 ? 0 : 1;
         const me = levelController(d4Game, policy, 10, seed);
@@ -984,16 +996,23 @@ describe('D-4 電池｜四性格指紋', () => {
         for (let tick = 0; !d4Game.isOver(state); tick += 1) {
           const a = me.decide(state, side, tick);
           const b = ai.decide(state, side === 0 ? 1 : 0, tick);
+          const actions = d4Game.actions(state, side);
+          const index = actions.findIndex((x) => JSON.stringify(x) === JSON.stringify(a));
+          if (index >= 0) {
+            dangerSum += (lookOneStep(d4Game, state, side)[index] as { danger: number }).danger;
+            decisions += 1;
+          }
           state = d4Game.step(state, side === 0 ? [a, b] : [b, a]);
         }
         total += state.stuck[side] as number;
       }
-      return total / 40;
+      return { stuck: total / 40, danger: dangerSum / decisions };
     };
-    const g = stuckOf(greedy);
-    const p = stuckOf(precise);
-    const b = stuckOf(gambler);
-    expect(g / Math.max(p, 1)).toBeGreaterThanOrEqual(1.5);
-    expect(b / Math.max(g, 1)).toBeGreaterThanOrEqual(1.5);
-  }, 600_000);
+    const g = measure(greedy);
+    const p = measure(precise);
+    const b = measure(gambler);
+    expect(g.stuck / Math.max(p.stuck, 1)).toBeGreaterThanOrEqual(1.5);
+    expect(b.danger).toBeGreaterThanOrEqual(1.8 * g.danger);
+    expect(b.danger).toBeGreaterThanOrEqual(1.8 * p.danger);
+  }, 900_000);
 });
