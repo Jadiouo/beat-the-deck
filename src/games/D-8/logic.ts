@@ -36,7 +36,7 @@ export const POCKET_MAX = 40;
 export const PROTECT_TICKS = 60;
 /** 沒有被保護的舊顏色用的時間戳（比任何 tick 都早）。 */
 const LONG_AGO = -1_000_000;
-/** AI：對手塗過的格子，距離算近這麼多步（切進對手的地盤一步就是 +1/−1，比擴張值錢）。 */
+/** AI：對手塗過的格子的距離要減掉這個數（負數 = 算遠，目前 -6 = 算遠 6 步；已量過改成正數 A4 更差，見小規格決定 14）。 */
 export const OPP_BONUS = -6;
 /** AI 的 `gain` 裡，對手少一格算多少格（1 是照實；小於 1 時，塗回對手的格子不比塗沒人塗過的格子值錢太多，AI 不會整場都在互相塗來塗去）。 */
 export const OPP_WEIGHT = 0.5;
