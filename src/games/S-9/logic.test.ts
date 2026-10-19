@@ -51,10 +51,20 @@ function run(state: S9State, count: number, inputs: Inputs = IDLE): S9State {
 const at = (col: number, row: number): { x: number; y: number } => tileCenter(tileIndex(col, row));
 
 /** 人站在 (欄, 列) 的中心、AI 站在轉 180 度的格子的中心。 */
-function placed(col: number, row: number, overrides: Parameters<typeof makeState>[0] = {}): S9State {
+function placed(
+  col: number,
+  row: number,
+  overrides: Parameters<typeof makeState>[0] = {},
+): S9State {
   const a = at(col, row);
   const b = at(COLS - 1 - col, ROWS - 1 - row);
-  return makeState({ ...overrides, players: [{ x: a.x, y: a.y }, { x: b.x, y: b.y }] });
+  return makeState({
+    ...overrides,
+    players: [
+      { x: a.x, y: a.y },
+      { x: b.x, y: b.y },
+    ],
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -180,14 +190,24 @@ describe('S-9 縮小的場地｜移動', () => {
   });
 
   it('（邊界）夾在場地內：半徑 3，所以 x 在 [3, 147]、y 在 [3, 207]', () => {
-    const s = makeState({ players: [{ x: 4, y: 4 }, { x: 146, y: 206 }] });
+    const s = makeState({
+      players: [
+        { x: 4, y: 4 },
+        { x: 146, y: 206 },
+      ],
+    });
     const moved = run(s, 5, [press({ left: true, up: true }), press({ right: true, down: true })]);
     expect([moved.players[0].x, moved.players[0].y]).toEqual([3, 3]);
     expect([moved.players[1].x, moved.players[1].y]).toEqual([147, 207]);
   });
 
   it('兩人可以重疊（沒有碰撞）；對手的按鍵不會移動我', () => {
-    const s = makeState({ players: [{ x: 60, y: 100 }, { x: 62, y: 100 }] });
+    const s = makeState({
+      players: [
+        { x: 60, y: 100 },
+        { x: 62, y: 100 },
+      ],
+    });
     const moved = run(s, 3, [press({ right: true }), NONE]);
     expect(moved.players[0].x).toBeCloseTo(64.5, 10);
     expect(moved.players[1].x).toBe(62);
@@ -252,25 +272,45 @@ describe('S-9 縮小的場地｜格子崩落', () => {
   });
 
   it('（邊界）往右走到 x = 15.0 剛好踩進第 1 欄；往左走到 x = 13.5 回到第 0 欄', () => {
-    const s = makeState({ players: [{ x: 13.5, y: 7.5 }, { x: 140, y: 200 }] });
+    const s = makeState({
+      players: [
+        { x: 13.5, y: 7.5 },
+        { x: 140, y: 200 },
+      ],
+    });
     const right = s9Game.step(s, [press({ right: true }), NONE]);
     expect(right.players[0].x).toBe(15);
     expect(right.tiles[1]).toBe(CRUMBLE_TICKS);
     expect(right.tiles[0]).toBe(0);
-    const back = makeState({ players: [{ x: 15, y: 7.5 }, { x: 140, y: 200 }] });
+    const back = makeState({
+      players: [
+        { x: 15, y: 7.5 },
+        { x: 140, y: 200 },
+      ],
+    });
     const left = s9Game.step(back, [press({ left: true }), NONE]);
     expect(left.players[0].x).toBe(13.5);
     expect(left.tiles[0]).toBe(CRUMBLE_TICKS);
     expect(left.tiles[1]).toBe(0);
     const down = s9Game.step(
-      makeState({ players: [{ x: 7.5, y: 13.5 }, { x: 140, y: 200 }] }),
+      makeState({
+        players: [
+          { x: 7.5, y: 13.5 },
+          { x: 140, y: 200 },
+        ],
+      }),
       [press({ down: true }), NONE],
     );
     expect(down.tiles[tileIndex(0, 1)]).toBe(CRUMBLE_TICKS);
   });
 
   it('慢走（按住 a）一格要 25 個 tick，所以在同一格待更久', () => {
-    let s = makeState({ players: [{ x: 0.1 + 3, y: 7.5 }, { x: 140, y: 200 }] });
+    let s = makeState({
+      players: [
+        { x: 0.1 + 3, y: 7.5 },
+        { x: 140, y: 200 },
+      ],
+    });
     let ticks = 0;
     while (tileAt(s.players[0].x, s.players[0].y) === 0) {
       s = s9Game.step(s, [press({ right: true, a: true }), NONE]);
@@ -319,7 +359,10 @@ describe('S-9 縮小的場地｜掉下去', () => {
     const b = at(7, 10);
     const s = makeState({
       tiles: { [tileIndex(2, 3)]: 1, [tileIndex(7, 10)]: 1 },
-      players: [{ x: a.x, y: a.y }, { x: b.x, y: b.y }],
+      players: [
+        { x: a.x, y: a.y },
+        { x: b.x, y: b.y },
+      ],
     });
     const after = s9Game.step(s, IDLE);
     expect(after.fell).toEqual([true, true]);
@@ -333,7 +376,10 @@ describe('S-9 縮小的場地｜掉下去', () => {
     const b = at(7, 10);
     const s = makeState({
       tiles: { [hole]: GONE, [tileIndex(7, 10)]: 1 },
-      players: [{ x: 44.9, y: 52.5 }, { x: b.x, y: b.y }],
+      players: [
+        { x: 44.9, y: 52.5 },
+        { x: b.x, y: b.y },
+      ],
     });
     const after = s9Game.step(s, [press({ right: true }), NONE]);
     expect(after.fell).toEqual([true, true]);
@@ -367,7 +413,10 @@ function aiFallsNext(overrides: Parameters<typeof makeState>[0] = {}): S9State {
   return makeState({
     ...overrides,
     tiles: { [tileIndex(7, 10)]: 1, ...(overrides.tiles ?? {}) },
-    players: [{ x: a.x, y: a.y }, { x: b.x, y: b.y }],
+    players: [
+      { x: a.x, y: a.y },
+      { x: b.x, y: b.y },
+    ],
   });
 }
 
@@ -377,7 +426,10 @@ function humanFallsNext(overrides: Parameters<typeof makeState>[0] = {}): S9Stat
   return makeState({
     ...overrides,
     tiles: { [tileIndex(2, 3)]: 1, ...(overrides.tiles ?? {}) },
-    players: [{ x: a.x, y: a.y }, { x: b.x, y: b.y }],
+    players: [
+      { x: a.x, y: a.y },
+      { x: b.x, y: b.y },
+    ],
   });
 }
 
@@ -414,7 +466,10 @@ describe('S-9 縮小的場地｜三戰兩勝、最多 4 回合、停頓', () => 
       round: 3,
       wins: [1, 0],
       tiles: { [tileIndex(2, 3)]: 1, [tileIndex(7, 10)]: 1 },
-      players: [{ x: a.x, y: a.y }, { x: b.x, y: b.y }],
+      players: [
+        { x: a.x, y: a.y },
+        { x: b.x, y: b.y },
+      ],
     });
     const drawn = s9Game.step(bothFall, IDLE);
     expect(drawn.phase).toBe('over');
@@ -460,7 +515,10 @@ describe('S-9 縮小的場地｜三戰兩勝、最多 4 回合、停頓', () => 
       const first = s9Game.init(seed, CONFIG);
       const home = tileAt(first.players[0].x, first.players[0].y);
       // 讓人腳下的格子下一步就掉：第 0 回合結束，停頓 60 tick 後第 1 回合開始
-      const ended = s9Game.step({ ...first, tiles: first.tiles.map((t, i) => (i === home ? 1 : t)) }, IDLE);
+      const ended = s9Game.step(
+        { ...first, tiles: first.tiles.map((t, i) => (i === home ? 1 : t)) },
+        IDLE,
+      );
       const next = run(ended, REST_TICKS);
       expect(next.round).toBe(1);
       if (tileAt(next.players[0].x, next.players[0].y) !== home) {
@@ -629,7 +687,9 @@ describe('S-9 縮小的場地｜時間感知的廣度優先搜尋', () => {
   });
 
   it('兩個人搶一條走廊：離誰近歸誰，同時到的不算；格子總數對得起來', () => {
-    const tiles = onlyThese(Object.fromEntries(Array.from({ length: 10 }, (_, c) => [tileIndex(c, row), 0])));
+    const tiles = onlyThese(
+      Object.fromEntries(Array.from({ length: 10 }, (_, c) => [tileIndex(c, row), 0])),
+    );
     const s = makeState({ tiles, players: [at(0, row), at(9, row)] });
     const t = territory(s.tiles, s.players[0], s.players[1]);
     expect(t.reach).toEqual([10, 10]);
@@ -676,7 +736,10 @@ describe('S-9 縮小的場地｜評估', () => {
   it('腳下的格子快掉了而且來不及離開：這個局面比站在新鮮格子差很多（gain 少一大截）', () => {
     const c = at(2, 3);
     const fresh = makeState({ players: [{ x: c.x, y: c.y }, at(8, 10)] });
-    const doomed = makeState({ tiles: { [tileIndex(2, 3)]: 3 }, players: [{ x: c.x, y: c.y }, at(8, 10)] });
+    const doomed = makeState({
+      tiles: { [tileIndex(2, 3)]: 3 },
+      players: [{ x: c.x, y: c.y }, at(8, 10)],
+    });
     expect(evaluateS9(doomed, 0).gain).toBeLessThan(evaluateS9(fresh, 0).gain - 100);
     expect(evaluateS9(doomed, 0).danger).toBe(1);
   });
@@ -701,7 +764,10 @@ describe('S-9 縮小的場地｜評估', () => {
     const draw = s9Game.step(
       makeState({
         tiles: { [tileIndex(2, 3)]: 1, [tileIndex(7, 10)]: 1 },
-        players: [{ x: a.x, y: a.y }, { x: b.x, y: b.y }],
+        players: [
+          { x: a.x, y: a.y },
+          { x: b.x, y: b.y },
+        ],
       }),
       IDLE,
     );
@@ -754,14 +820,27 @@ function rotate(state: S9State): S9State {
     players: [flip(state.players[1]), flip(state.players[0])],
     wins: [state.wins[1], state.wins[0]],
     fell: [state.fell[1], state.fell[0]],
-    outcome: state.outcome === null ? null : state.outcome === 'draw' ? 'draw' : state.outcome === 'side0' ? 'side1' : 'side0',
+    outcome:
+      state.outcome === null
+        ? null
+        : state.outcome === 'draw'
+          ? 'draw'
+          : state.outcome === 'side0'
+            ? 'side1'
+            : 'side0',
   };
 }
 
 describe('S-9 縮小的場地｜對稱', () => {
   it('地板轉 180 度、兩邊互換之後，同樣的規則得到轉過去的同一個結果（步長、邊界、崩落都對稱）', () => {
     const s = s9Game.init(11, CONFIG);
-    const mirrorKey = (b: Buttons): Buttons => ({ ...b, up: b.down, down: b.up, left: b.right, right: b.left });
+    const mirrorKey = (b: Buttons): Buttons => ({
+      ...b,
+      up: b.down,
+      down: b.up,
+      left: b.right,
+      right: b.left,
+    });
     const moves: Inputs[] = [
       [press({ right: true }), press({ left: true })],
       [press({ down: true }), press({ up: true })],
@@ -786,7 +865,10 @@ describe('S-9 縮小的場地｜對稱', () => {
 
   it('評估也對稱：局面轉 180 度、兩邊互換，同一個人看到的 gain 與 danger 相同', () => {
     for (let seed = 0; seed < 5; seed += 1) {
-      const s = run(s9Game.init(seed, CONFIG), 25, [press({ right: true, down: true }), press({ left: true })]);
+      const s = run(s9Game.init(seed, CONFIG), 25, [
+        press({ right: true, down: true }),
+        press({ left: true }),
+      ]);
       const r = rotate(s);
       expect(evaluateS9(r, 1).gain).toBeCloseTo(evaluateS9(s, 0).gain, 8);
       expect(evaluateS9(r, 1).danger).toBeCloseTo(evaluateS9(s, 0).danger, 8);
@@ -818,6 +900,8 @@ describe('S-9 縮小的場地｜step 是純的', () => {
 
   it('同樣的種子與輸入得到同樣的 state（亂數只在每回合開始時抽起點）', () => {
     const inputs: Inputs = [press({ right: true }), press({ left: true })];
-    expect(run(s9Game.init(9, CONFIG), 60, inputs)).toEqual(run(s9Game.init(9, CONFIG), 60, inputs));
+    expect(run(s9Game.init(9, CONFIG), 60, inputs)).toEqual(
+      run(s9Game.init(9, CONFIG), 60, inputs),
+    );
   });
 });
