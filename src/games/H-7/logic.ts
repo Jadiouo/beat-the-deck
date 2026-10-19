@@ -33,7 +33,7 @@ export const RED_TABLE: readonly (readonly [number, number])[] = [
 /** 兩邊都選好之後，鎖定幾個 tick 才揭示（選 1、鎖定 2、揭示 3：深度 3 以上走得到揭示）。 */
 export const LOCK_TICKS = 2;
 /** 揭示之後停幾個 tick 才入帳、進下一回合（讓人看清楚誰搶了什麼）。 */
-export const RESULT_TICKS = 110;
+export const RESULT_TICKS = 125;
 
 /** 出手：0 不搶、1 白球、2 綠球、3 紅球。`actions()` 的第一個是「不搶」。 */
 export const NONE = 0;

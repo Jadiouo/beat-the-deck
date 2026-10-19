@@ -13,5 +13,4 @@ export const h7Meta: CardMeta = {
   defaultPolicy: 'pathfinder',
   baseLevel: 3,
   symmetric: true,
-  luckHeavy: true,
 };
