@@ -1,6 +1,6 @@
 import { nextFrom, rngStateFor } from '../../core/rng';
 import type { RngState } from '../../core/rng';
-import type { Buttons, Game, GameConfig, Inputs, Side } from '../../core/types';
+import type { Buttons, GameConfig, Inputs, Side } from '../../core/types';
 import {
   FIELD_H,
   FIELD_W,
@@ -9,6 +9,7 @@ import {
   SPEED,
   actionsSpades,
 } from '../_spades/logic';
+import type { GameWithSelfFromPresent } from '../types';
 
 /**
  * S-8 掃射（小規格 `docs/cards/S-8.md`）。
@@ -256,6 +257,40 @@ export const LAT_PENALTY = 0.02;
 /** 對手的 `hold`（在縫裡的比例）到這個值，才當它占著縫的一段。 */
 export const OPP_PRESENT = 0.5;
 
+/**
+ * 站得住的半徑（DESIGN-AI-FUN 末節）。
+ *
+ * 跟縫要用掉切向速度 ω·r；剩下的速度（√(最大速度² − (ω·r)²)）才拿得去抵抗別人推你。
+ * 一個貼身擠壓的人把距離壓到 `BODY_DIST` 的 `PRESS_FRAC`（0.8，即 7.2）時，重疊平分，每 tick 把你推開 `PRESS_PUSH` ＝
+ * (9 − 7.2) ÷ 2 ＝ 0.9。要站得住，剩下的速度至少要等於這個推量：√(1.5² − 0.9²) ＝ 1.2 ＝ `HOLD_SPEED`，
+ * 所以 ω·r ≤ 1.2，半徑 ≤ 1.2 ÷ ω(t)（起始 60，結束 37.5；整局都在縫的範圍 [10, 90] 之內）。
+ * 站得比這更外面的人（原本的精準型貼著 ω·r ≈ 1.5 的極限）被貼上來就沒有餘力頂回去，被推到跟不上縫、掉出縫；
+ * 這是擠的劇本玩家 100.0% 的原因（`docs/cards/S-8.md`）。
+ * `PRESS_FRAC` 是掃出來的：0.8 的前後各一格（站得住的速度 1.15 與 1.3）分別輸給「同一個半徑的不讓路者」與「擠的人」，
+ * 窗口大約是 1.2 到 1.25（40 場掃描，小規格）。
+ */
+export const PRESS_FRAC = 0.8;
+export const PRESS_PUSH = (BODY_DIST * (1 - PRESS_FRAC)) / 2;
+export const HOLD_SPEED = Math.sqrt(SPEED * SPEED - PRESS_PUSH * PRESS_PUSH);
+/** 平均半徑每偏離站得住的半徑 1 像素，扣的分數（單位：分，乘 `POINT` 變 gain）。 */
+export const HOLD_WEIGHT = 0.4;
+/** 預測的最大偏離每多 1 像素，扣的分數：站得穩比站得準重要一點點（只是同樣站得住時的偏好，安全由 danger 管）。 */
+export const MARGIN_WEIGHT = 0.05;
+
+/**
+ * 讓路：兩個人不能並排（`BODY_DIST` 9 大於縫寬 8），所以兩個站同一個半徑的人會一直互撞（10 對 10 試過：每場兩人合計被打中 50 次）。
+ * 我在對手（公開的 lane）內側時，目標改成 `lane − YIELD_GAP`（比 `BODY_DIST` 多 1 像素，剛好不碰）；我在外側時不讓。
+ * 讓路的人少拿一點分，但先來的占外側、後來的在內側，兩個人都在縫裡（10 對 10 試過：兩人合計被打中 4 次）。
+ */
+export const YIELD_GAP = BODY_DIST + 1;
+/** 目標半徑的下限（讓路讓到最內側也不低於它）。 */
+export const HOLD_FLOOR = 20;
+
+/** 這個 tick 站得住的半徑：`HOLD_SPEED` ÷ ω(tick)。 */
+export function holdRadius(tick: number, maxTicks: number): number {
+  return HOLD_SPEED / omegaAt(tick, maxTicks);
+}
+
 export function evaluate(state: S8State, side: Side): { gain: number; danger: number } {
   const [s0, s1] = score(state);
   const lead = side === 0 ? s0 - s1 : s1 - s0;
@@ -264,15 +299,20 @@ export function evaluate(state: S8State, side: Side): { gain: number; danger: nu
   }
   const me = state.players[side];
   const opp = state.players[other(side)];
-  // 對手：不看它「現在」的位置（AI 看到的是舊的），看它公開的 lane 與 hold。
+  // 對手：不看它「現在」的位置（AI 看到的是舊的），看它公開的 lane 與 hold；只用在搶位的誘因。
+  // danger 與「站得住的半徑」都不隨對手改變（試過讓預測的軌跡被虛擬的對手推開：擠的劇本玩家贏回 92.5–100%）。
   const oppPresent = opp.hold >= OPP_PRESENT;
   const lane = opp.lane;
 
+  const here = slitCoords(me.x, me.y, state.slit.angle);
+  // 我在對手內側（而且它占著縫）：讓路。
+  const yielding = oppPresent && here.along < lane;
+
   let angle = state.slit.angle;
   let maxDev = 0;
-  let predicted = 0;
   let outer = 0;
   let counted = 0;
+  let offTarget = 0;
   const last = Math.min(me.invuln + HORIZON, state.maxTicks - state.tick);
   for (let t = 1; t <= last; t += 1) {
     angle += omegaAt(state.tick + t - 1, state.maxTicks);
@@ -281,37 +321,25 @@ export function evaluate(state: S8State, side: Side): { gain: number; danger: nu
     }
     const px = clamp(me.x + me.vx * t, PLAYER_R, FIELD_W - PLAYER_R);
     const py = clamp(me.y + me.vy * t, PLAYER_R, FIELD_H - PLAYER_R);
-    let { along, lat } = slitCoords(px, py, angle);
-    if (oppPresent) {
-      const da = along - lane;
-      const d = Math.sqrt(da * da + lat * lat);
-      if (d < BODY_DIST) {
-        const shift = (BODY_DIST - d) / 2;
-        const nx = d > 0 ? da / d : 1;
-        const ny = d > 0 ? lat / d : 0;
-        along += nx * shift;
-        lat += ny * shift;
-      }
-    }
+    const { along, lat } = slitCoords(px, py, angle);
     // 偏離縫的程度：橫向距離；超出沿縫的範圍 [10, 90] 時，超出多少就算在縫邊 (4) 之外多少。
     const radialOut = Math.max(0, R_MIN - along, along - R_MAX);
     const dev = radialOut > 0 ? Math.max(Math.abs(lat), SLIT_HALF + radialOut) : Math.abs(lat);
     counted += 1;
+    const hold = holdRadius(state.tick + t - 1, state.maxTicks);
+    offTarget += along - (yielding ? Math.max(HOLD_FLOOR, Math.min(hold, lane - YIELD_GAP)) : hold);
     if (dev > maxDev) {
       maxDev = dev;
     }
-    if (dev <= SLIT_HALF) {
-      predicted += along / SCORE_DIV;
-      if (oppPresent && along > lane) {
-        outer += 1;
-      }
+    if (dev <= SLIT_HALF && oppPresent && along > lane) {
+      outer += 1;
     }
   }
   const danger = counted === 0 ? 0 : clamp((maxDev - D_OK) / D_SPAN, 0, 1);
-  const here = slitCoords(me.x, me.y, state.slit.angle);
+  const holdCost =
+    counted === 0 ? 0 : HOLD_WEIGHT * Math.abs(offTarget / counted) + MARGIN_WEIGHT * maxDev;
   const gain =
-    POINT * lead +
-    predicted +
+    POINT * (lead - holdCost) +
     (counted === 0 ? 0 : (OUTER_BONUS * outer) / counted) -
     LAT_PENALTY * Math.abs(here.lat);
   return { gain, danger };
@@ -321,7 +349,7 @@ export function evaluate(state: S8State, side: Side): { gain: number; danger: nu
 // Game
 // ---------------------------------------------------------------------------
 
-export const s8Game: Game<S8State> = {
+export const s8Game: GameWithSelfFromPresent<S8State> = {
   id: 'S-8',
   init: initState,
   step,
@@ -330,6 +358,16 @@ export const s8Game: Game<S8State> = {
   winner,
   actions,
   evaluate,
+  /**
+   * 外力造成的自身位移無法用重播重現：對手把我推開，`wrapPolicy` 用我自己的輸入重播出來的位置就是錯的
+   * （它不知道我被推了）。S-8 的兩個人互相是實心的，推開是常態，所以宣告這個 hook：自己（side）整個欄位
+   * 取真實的現在（位置、速度、無敵、命中、分數、lane／hold／bumpAt 都是我自己的），對手與縫維持重播的樣子。
+   */
+  selfFromPresent(replayed: S8State, present: S8State, side: Side): S8State {
+    const players: [S8Player, S8Player] = [replayed.players[0], replayed.players[1]];
+    players[side] = present.players[side];
+    return { ...replayed, players };
+  },
 };
 
 // ---------------------------------------------------------------------------
