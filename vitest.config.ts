@@ -38,6 +38,8 @@ const HEAVY_FILES = [
   'tests/ai/clubs-s4.test.ts',
   // C-4 霧的探索行為與 A4 兩個種子區塊（10.38 第 7 節）：數十場對打 + 400 場 A4，慢。
   'tests/ai/c4-fog.test.ts',
+  // A4 豁免的前提（10.14）：簡單策略對等級 10 的勝率 ≥ 40%（H-5 兩百場、S-10 一百場 × 2），慢。
+  'tests/ai/simple-strategy-premise.*.test.ts',
 ];
 
 const common = {

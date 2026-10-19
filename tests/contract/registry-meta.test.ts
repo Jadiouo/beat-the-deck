@@ -116,8 +116,12 @@ describe('equilibriumCapped（A2、A4 不適用旗標：零和均衡）', () => 
 });
 
 describe('simpleStrategyViable（A4 不適用旗標：簡單策略就能打到 40% 上下）', () => {
-  /** 老闆核准的牌（H-6，2026-10-08 裁定）。要加第二張，先去問老闆，並照 DESIGN-AI-FUN 10.14 的判準量過（TEST_PLAN 5.1）。 */
-  const APPROVED = ['H-6'];
+  /**
+   * 老闆核准的牌：H-6（2026-10-08 裁定）、H-5 與 S-10（2026-10-19 裁示）。
+   * 要加第四張，先去問老闆，並照 DESIGN-AI-FUN 10.14 的判準量過（TEST_PLAN 5.1）；
+   * 豁免擴散到第四張，代表判準本身要重新檢討（DESIGN-AI-FUN 末節）。
+   */
+  const APPROVED = ['H-5', 'H-6', 'S-10'];
 
   it('只有核准的牌掛旗標', () => {
     const flagged = registry
