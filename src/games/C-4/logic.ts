@@ -2,8 +2,11 @@ import type { Buttons, Game, GameConfig, Inputs, Side } from '../../core/types';
 import {
   CELLS,
   FOOD_GRADIENT,
+  HEAD_ON_DANGER,
   HEIGHT,
   MOVE_EVERY,
+  ROOM_MARGIN,
+  TRAP_DANGER,
   WIDTH,
   cell,
   cellX,
@@ -36,8 +39,14 @@ import type { ClubsState, Dir, Snake, StateOverrides } from '../_clubs/logic';
 
 /** 看得到的範圍：離蛇頭的曼哈頓距離不超過這麼多格。 */
 export const FOG_RADIUS = 4;
-/** 一格超過這麼多個 tick 沒被看見，就算「很久沒看過」（探索的目標）。 */
-export const STALE_TICKS = 600;
+/**
+ * 一格超過這麼多個 tick 沒被看見，就算「很久沒看過」（探索的目標）。
+ * 為什麼是 300：場上永遠 2 個食物，兩邊合起來每 138 tick 左右吃掉一個（量到 200 場、每場 26 個），所以一個食物平均活 2 × 138 ≈ 280 tick；
+ * 看過超過這麼久的格子，現在裡面有食物的機率和從沒看過的一樣大，沒有理由當成「剛看過」。
+ * 原本 600：對 S4 腳本的勝率（400 場，延遲 0）150／200／250／300／350／400／600／1000 依序是 51.5／51.0／44.9／49.4／49.0／51.4／51.8／61.8，
+ * 200 到 400 之間差異在雜訊內（一個標準誤約 2.5），600 以上才明顯變差。
+ */
+export const STALE_TICKS = 300;
 /** 有人死了之後，畫面停這麼多個 tick 才宣布結果。 */
 export const DEATH_FREEZE_TICKS = 60;
 /** 雷達每幾個 tick 亮一次、每次亮幾個 tick（只給人，畫面層）。 */
@@ -48,10 +57,20 @@ export const RADAR_NEAR = 8;
 export const RADAR_MID = 16;
 /** 探索目標：在蛇頭背後的格子多算這麼多格。 */
 export const BEHIND_PENALTY = 4;
-/** 探索目標：偏離蛇頭行進方向（橫向）的每一格多算這麼多格，讓目標落在正前方、AI 直走而不是走階梯。 */
-export const LATERAL_PENALTY = 2;
+/**
+ * 探索目標：偏離蛇頭行進方向（橫向）的每一格多算這麼多格，讓目標偏向正前方。
+ * 原本 2（為了讓 AI 直走而不是走階梯）；現在「直走優先」由 `STRAIGHT_BONUS` 負責，這個值只剩「目標不要離正前方太遠」。
+ * 對 S4 腳本的勝率（400 場，延遲 0，`STALE_TICKS` 300）橫向成本 0／0.5／1／1.5／2／4 依序是 71.8／45.1／44.3／45.8／49.4／48.8：
+ * 0 時目標在各方向一樣近，AI 走階梯；多算 2 格以上目標被拉得太直，繞過身邊的沒看過的格子。
+ */
+export const LATERAL_PENALTY = 1;
 /** 吃完之後挑轉向時，danger 換算成 gain 的權重（與搜尋型的 `PATHFINDER_W` 同量級）。 */
 const AFTER_EAT_W = 200;
+/**
+ * 直走優先的 gain 加成（一個食物梯度）。見 `evaluateOf`：沒有它，目標在斜前方時「先直走」與「走階梯」的終點一樣近，
+ * 搜尋型的束搜尋在平手時留下排在前面的轉向、丟掉排在最後的「全放開」，於是每走一格就轉一次彎（docs/cards/C-4.md「對簡單腳本 S4 的修正」）。
+ */
+export const STRAIGHT_BONUS = FOOD_GRADIENT;
 /** 自己死了的 gain（有限，比任何正常局面都低）。 */
 export const DEAD_GAIN = -1_000_000;
 
@@ -79,6 +98,8 @@ export interface Memory {
 export interface C4State extends ClubsState {
   /** 兩邊各自的記憶。 */
   readonly memory: readonly [Memory, Memory];
+  /** 兩邊各自「走格之前」的行進方向（最近一次走格時 `dir` 的舊值）。只有 `evaluate` 讀自己那一邊的（直走優先，見 `evaluateOf`）。 */
+  readonly prevDir: readonly [Dir, Dir];
   /** 兩邊各自最近一次吃到食物的 tick（走格的那個 tick）；沒吃過是 -1。只有 `evaluate` 讀（見 `evaluateOf`）。 */
   readonly ateAt: readonly [number, number];
   /** 有人死了之後，畫面停到哪個 tick；沒有人死是 -1。 */
@@ -321,19 +342,23 @@ export function stepC4(state: C4State, inputs: Inputs): C4State {
     memory = [forget(0), forget(1)];
   }
 
+  const prevDir: readonly [Dir, Dir] = sweeping
+    ? [state.snakes[0].dir, state.snakes[1].dir]
+    : state.prevDir;
   const someoneDied = !next.snakes[0].alive || !next.snakes[1].alive;
   if (next.over && someoneDied && tick < state.maxTicks) {
     return {
       ...next,
       memory,
       ateAt,
+      prevDir,
       over: false,
       winner: null,
       endAt: tick + DEATH_FREEZE_TICKS,
       pendingWinner: next.winner,
     };
   }
-  return { ...next, memory, ateAt };
+  return { ...next, memory, ateAt, prevDir };
 }
 
 // ---------------------------------------------------------------------------
@@ -406,7 +431,23 @@ function evaluateOf(state: C4State, side: Side): { gain: number; danger: number 
       over: false,
       winner: null,
     };
-    const result = evaluateClubs(world, side);
+    const shared = evaluateClubs(world, side);
+    // 共用評估的 danger 是「前方 20 格內的牆或蛇身、頭對頭、被困住」取最大。C-4 只留後兩項（見 `spaceDanger`）：
+    // 前方的牆離 4 格就有 0.51、5 格 0.42，搜尋型把 danger 乘上這一層 gain 範圍的 2 倍再扣，
+    // 範圍只有十幾（兩個方向差幾格食物距離）時，這個「遠處的牆」就蓋過朝食物靠近的 4 分一格，
+    // 蛇不敢朝牆邊的食物（離牆 4 格以內、不在正前方直線上）走過去，繞著它轉圈直到對手把它吃掉。
+    // 下一格就是牆或蛇身（danger 1、gain 扣 10000）照舊：蛇隨時能轉彎，遠處的牆不是危險。
+    const safe =
+      shared.danger >= 1 ? shared : { gain: shared.gain, danger: spaceDanger(world, side) };
+    // 直走優先：沒轉向（`turn` 就是現在的行進方向）加一個食物梯度；終點（已經走過一格）再加一次，
+    // 如果這一格的方向和上一格一樣。
+    const result =
+      turn === me.dir
+        ? {
+            gain: safe.gain + STRAIGHT_BONUS * (me.dir === state.prevDir[side] ? 2 : 1),
+            danger: safe.danger,
+          }
+        : safe;
     if (!justAte) {
       return result;
     }
@@ -440,6 +481,72 @@ function evaluateOf(state: C4State, side: Side): { gain: number; danger: number 
   return best;
 }
 
+const blockedStamp = new Uint32Array(CELLS);
+const reachedStamp = new Uint32Array(CELLS);
+const roomQueue = new Int16Array(CELLS);
+let spaceGeneration = 0;
+const STEP_X: readonly number[] = [0, 1, 0, -1];
+const STEP_Y: readonly number[] = [-1, 0, 1, 0];
+
+/**
+ * 蛇頭下一格（`turn` 方向，已確定在地圖內、不是蛇身）的 danger：頭對頭 `HEAD_ON_DANGER`、空間太小被困住
+ * `TRAP_DANGER × (1 − 空間 / (長度 + ROOM_MARGIN))`，取最大。公式與共用的 `evaluateClubs` 的這兩項相同
+ * （C-4 不要它的第三項「前方的牆」，見 `evaluateOf`）。
+ */
+function spaceDanger(world: ClubsState, side: Side): number {
+  const me = world.snakes[side];
+  const other = world.snakes[side === 0 ? 1 : 0];
+  const head = me.body[0] as number;
+  const nx = cellX(head) + (STEP_X[me.turn] as number);
+  const ny = cellY(head) + (STEP_Y[me.turn] as number);
+  let danger = 0;
+  if (other.alive) {
+    const otherHead = other.body[0] as number;
+    if (
+      cellX(otherHead) + (STEP_X[other.turn] as number) === nx &&
+      cellY(otherHead) + (STEP_Y[other.turn] as number) === ny
+    ) {
+      danger = HEAD_ON_DANGER;
+    }
+  }
+  spaceGeneration += 1;
+  const generation = spaceGeneration;
+  for (const snake of world.snakes) {
+    for (let i = 0; i < snake.body.length - 1; i += 1) {
+      blockedStamp[snake.body[i] as number] = generation;
+    }
+  }
+  const cap = me.body.length + ROOM_MARGIN;
+  const start = cell(nx, ny);
+  let readIndex = 0;
+  let writeIndex = 0;
+  roomQueue[writeIndex] = start;
+  writeIndex += 1;
+  reachedStamp[start] = generation;
+  while (readIndex < writeIndex && writeIndex < cap) {
+    const current = roomQueue[readIndex] as number;
+    readIndex += 1;
+    for (let d = 0; d < 4; d += 1) {
+      const x = cellX(current) + (STEP_X[d] as number);
+      const y = cellY(current) + (STEP_Y[d] as number);
+      if (x < 0 || x >= WIDTH || y < 0 || y >= HEIGHT) {
+        continue;
+      }
+      const next = cell(x, y);
+      if (reachedStamp[next] !== generation && blockedStamp[next] !== generation) {
+        reachedStamp[next] = generation;
+        roomQueue[writeIndex] = next;
+        writeIndex += 1;
+      }
+    }
+  }
+  const room = Math.min(writeIndex, cap);
+  if (room < cap) {
+    danger = Math.max(danger, TRAP_DANGER * (1 - room / cap));
+  }
+  return danger;
+}
+
 export const c4Game: Game<C4State> = {
   id: 'C-4',
 
@@ -450,6 +557,7 @@ export const c4Game: Game<C4State> = {
       ...base,
       memory: [sweep(base, 0, 0, blank), sweep(base, 1, 0, blank)],
       ateAt: [-1, -1],
+      prevDir: [base.snakes[0].dir, base.snakes[1].dir],
       endAt: -1,
       pendingWinner: null,
     };
@@ -488,6 +596,7 @@ export interface C4Overrides extends StateOverrides {
   /** 兩邊的記憶要覆蓋的欄位；沒給的欄位是「在這個局面掃視一次」的結果。 */
   readonly memory?: readonly [Partial<Memory>?, Partial<Memory>?];
   readonly ateAt?: readonly [number, number];
+  readonly prevDir?: readonly [Dir, Dir];
   readonly endAt?: number;
   readonly pendingWinner?: Side | null;
 }
@@ -507,6 +616,7 @@ export function makeState(overrides: C4Overrides = {}): C4State {
     ...base,
     memory: [patch(0), patch(1)],
     ateAt: overrides.ateAt ?? [-1, -1],
+    prevDir: overrides.prevDir ?? [base.snakes[0].dir, base.snakes[1].dir],
     endAt: overrides.endAt ?? -1,
     pendingWinner: overrides.pendingWinner ?? null,
   };
