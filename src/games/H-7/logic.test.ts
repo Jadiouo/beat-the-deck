@@ -220,10 +220,27 @@ describe('H-7 血換分｜規則', () => {
     expect(s.hp).toEqual([HP_START - 2, HP_START]);
   });
 
-  it('5. 搶同一顆誰都拿不到、也不扣血：紅球撞球', () => {
+  it('5. 搶同一顆誰都拿不到分；紅球撞球各掉一個血價（撞球要付代價，見小規格），其他球撞球什麼都沒有', () => {
     const s = playRound(choosing({ orbs: { red: [6, 2] }, score: [4, 4] }), RED, RED);
     expect(s.score).toEqual([4, 4]);
+    expect(s.hp).toEqual([HP_START - 2, HP_START - 2]);
+    const cheap = playRound(choosing({ orbs: { red: [3, 1] }, score: [4, 4] }), RED, RED);
+    expect(cheap.hp).toEqual([HP_START - 1, HP_START - 1]);
+  });
+
+  it('5a. 紅球撞球只傷不昏（邊界）：血最多掉到 1，分數不歸零；各自掉的血只看自己的血', () => {
+    const s = playRound(choosing({ orbs: { red: [5, 2] }, hp: [2, 6], score: [9, 9] }), RED, RED);
+    expect(s.hp).toEqual([1, 4]);
+    expect(s.score).toEqual([9, 9]);
+    const low = playRound(choosing({ orbs: { red: [5, 2] }, hp: [1, 1], score: [9, 9] }), RED, RED);
+    expect(low.hp).toEqual([1, 1]);
+  });
+
+  it('5c. 消融 clash=false（小規格原本的規則）：紅球撞球什麼都沒有', () => {
+    const s = playRound(choosing({ clash: false, orbs: { red: [6, 2] }, score: [4, 4] }), RED, RED);
     expect(s.hp).toEqual([HP_START, HP_START]);
+    expect(h7Game.init(0, { maxTicks: 3600, params: { clash: 0 } }).clash).toBe(false);
+    expect(h7Game.init(0, CONFIG).clash).toBe(true);
   });
 
   it('5b. 搶同一顆誰都拿不到：白球、綠球撞球', () => {
@@ -273,7 +290,7 @@ describe('H-7 血換分｜規則', () => {
     expect(one.hp[0]).toBe(0);
   });
 
-  it('8b. 昏倒的是搶紅球而沒撞球的人：撞球時不扣血、不昏倒', () => {
+  it('8b. 昏倒的是搶紅球而沒撞球的人：撞球時不昏倒（血 1 的撞球不掉血）', () => {
     const s = playRound(choosing({ hp: [1, 1], score: [7, 7], orbs: { red: [3, 1] } }), RED, RED);
     expect(s.score).toEqual([7, 7]);
     expect(s.hp).toEqual([1, 1]);
@@ -865,7 +882,7 @@ describe('H-7 血換分｜不偷看（同時出手：evaluate 與 actions 不可
 
   it('結算在 AI 的模擬範圍之外：從 choose 出手走 6 步（最深的搜尋）仍在 resolve，分數與 history 都沒動', () => {
     const s = choosing({ hp: [3, 3], score: [5, 6] });
-    let t = h7Game.step(s, press(1, MOVE_BUTTONS[RED] as Buttons));
+    let t = h7Game.step(s, [h7Game.actions(s, 0)[0] as Buttons, MOVE_BUTTONS[RED] as Buttons]);
     for (let i = 1; i < 6; i += 1) {
       t = h7Game.step(t, idle());
     }
