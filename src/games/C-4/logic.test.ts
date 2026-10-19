@@ -794,4 +794,15 @@ describe('C-4 霧｜牆的遠距離 danger 不擋路、直走優先、不繞圈'
     older[cell(24, 12)] = 999;
     expect(explorationTarget(older, cell(16, 12), RIGHT, 1000 + STALE_TICKS)).toBe(cell(24, 12));
   });
+
+  it('35. 探索目標：離蛇頭 4 格、偏 2 列的沒看過的格子，贏過正前方 7 格的（偏離行進方向每一格只多算 1 格；多算 2 格時目標被拉到正前方那一列，量到對 S4 腳本的勝率差 5 個百分點）', () => {
+    const seen = Array.from({ length: 32 * 24 }, () => 5000);
+    seen[cell(23, 12)] = -1;
+    seen[cell(18, 14)] = -1;
+    expect(explorationTarget(seen, cell(16, 12), RIGHT, 5000)).toBe(cell(18, 14));
+    // 偏 3 列（花費 5 + 3 = 8）就輸給正前方（7）：橫向仍然有成本
+    seen[cell(18, 14)] = 5000;
+    seen[cell(18, 15)] = -1;
+    expect(explorationTarget(seen, cell(16, 12), RIGHT, 5000)).toBe(cell(23, 12));
+  });
 });
