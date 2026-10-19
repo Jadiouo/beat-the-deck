@@ -6,6 +6,7 @@ import {
   HEIGHT,
   MOVE_EVERY,
   ROOM_MARGIN,
+  RUN_EXPONENT,
   TRAP_DANGER,
   WIDTH,
   cell,
@@ -64,6 +65,15 @@ export const BEHIND_PENALTY = 4;
  * 0 時目標在各方向一樣近，AI 走階梯；多算 2 格以上目標被拉得太直，繞過身邊的沒看過的格子。
  */
 export const LATERAL_PENALTY = 1;
+/**
+ * 往行進方向看幾格有沒有牆或蛇身（共用評估是 20 格，C-4 只看 5 格，見 `spaceDanger`）。
+ * 為什麼不是 0：等級 5 以下每 7 個 tick 才決定一次（比走格的 6 個 tick 慢），每 7 次走格就有一次錯過轉彎的時機，
+ * 要靠「牆在前方 4 格以內就扣 danger」提早轉；完全拿掉時 A1（等級 5 對亂按）從 77.0／79.5／83.5 掉到 74.5／74.8／80.8，低於門檻 75。
+ * 為什麼不是 20：離牆 4 格就有 0.51、5 格 0.42，等級 10 蛇不敢朝牆邊的食物走過去（見 `evaluateOf`）。
+ * 看 3／4／5／6／8 格時 A1（官方 100／200..399／400..599）是 76.5／76.3／78.5（3 格）、85.0／84.3／86.3（5 格）、86.0／82.0／82.0（8 格），
+ * 對 S4 腳本的勝率（400 場，延遲 0）48.3／45.6／42.3／51.3（3／4／5／6 格）。
+ */
+export const WALL_LOOKAHEAD = 5;
 /** 吃完之後挑轉向時，danger 換算成 gain 的權重（與搜尋型的 `PATHFINDER_W` 同量級）。 */
 const AFTER_EAT_W = 200;
 /**
@@ -432,11 +442,11 @@ function evaluateOf(state: C4State, side: Side): { gain: number; danger: number 
       winner: null,
     };
     const shared = evaluateClubs(world, side);
-    // 共用評估的 danger 是「前方 20 格內的牆或蛇身、頭對頭、被困住」取最大。C-4 只留後兩項（見 `spaceDanger`）：
-    // 前方的牆離 4 格就有 0.51、5 格 0.42，搜尋型把 danger 乘上這一層 gain 範圍的 2 倍再扣，
+    // 共用評估的 danger 是「前方 20 格內的牆或蛇身、頭對頭、被困住」取最大。C-4 的前方只看 `WALL_LOOKAHEAD` 格（見 `spaceDanger`）：
+    // 20 格的版本，前方的牆離 4 格就有 0.51、5 格 0.42，搜尋型把 danger 乘上這一層 gain 範圍的 2 倍再扣，
     // 範圍只有十幾（兩個方向差幾格食物距離）時，這個「遠處的牆」就蓋過朝食物靠近的 4 分一格，
     // 蛇不敢朝牆邊的食物（離牆 4 格以內、不在正前方直線上）走過去，繞著它轉圈直到對手把它吃掉。
-    // 下一格就是牆或蛇身（danger 1、gain 扣 10000）照舊：蛇隨時能轉彎，遠處的牆不是危險。
+    // 下一格就是牆或蛇身（danger 1、gain 扣 10000）照舊：蛇隨時能轉彎，5 格以外的牆不是危險。
     const safe =
       shared.danger >= 1 ? shared : { gain: shared.gain, danger: spaceDanger(world, side) };
     // 直走優先：沒轉向（`turn` 就是現在的行進方向）加一個食物梯度；終點（已經走過一格）再加一次，
@@ -490,8 +500,8 @@ const STEP_Y: readonly number[] = [-1, 0, 1, 0];
 
 /**
  * 蛇頭下一格（`turn` 方向，已確定在地圖內、不是蛇身）的 danger：頭對頭 `HEAD_ON_DANGER`、空間太小被困住
- * `TRAP_DANGER × (1 − 空間 / (長度 + ROOM_MARGIN))`，取最大。公式與共用的 `evaluateClubs` 的這兩項相同
- * （C-4 不要它的第三項「前方的牆」，見 `evaluateOf`）。
+ * `TRAP_DANGER × (1 − 空間 / (長度 + ROOM_MARGIN))`、前方 `WALL_LOOKAHEAD` 格內有牆或蛇身 `(1 − 格數 / WALL_LOOKAHEAD) ^ RUN_EXPONENT`，
+ * 取最大。三項的公式與共用的 `evaluateClubs` 相同，只有第三項看的距離從 20 格縮到 `WALL_LOOKAHEAD` 格（見 `evaluateOf`）。
  */
 function spaceDanger(world: ClubsState, side: Side): number {
   const me = world.snakes[side];
@@ -516,8 +526,33 @@ function spaceDanger(world: ClubsState, side: Side): number {
       blockedStamp[snake.body[i] as number] = generation;
     }
   }
-  const cap = me.body.length + ROOM_MARGIN;
   const start = cell(nx, ny);
+  const sx = STEP_X[me.turn] as number;
+  const sy = STEP_Y[me.turn] as number;
+  // 前方 `WALL_LOOKAHEAD` 格內的牆或蛇身：和共用評估同一個公式與食物豁免，只是看得比較近。
+  let run = 1;
+  let foodAhead = world.foods.includes(start);
+  while (run < WALL_LOOKAHEAD) {
+    const rx = nx + run * sx;
+    const ry = ny + run * sy;
+    if (rx < 0 || rx >= WIDTH || ry < 0 || ry >= HEIGHT) {
+      if (foodAhead) {
+        run = WALL_LOOKAHEAD;
+      }
+      break;
+    }
+    if (blockedStamp[cell(rx, ry)] === generation) {
+      break;
+    }
+    if (world.foods.includes(cell(rx, ry))) {
+      foodAhead = true;
+    }
+    run += 1;
+  }
+  if (run < WALL_LOOKAHEAD) {
+    danger = Math.max(danger, Math.pow(1 - run / WALL_LOOKAHEAD, RUN_EXPONENT));
+  }
+  const cap = me.body.length + ROOM_MARGIN;
   let readIndex = 0;
   let writeIndex = 0;
   roomQueue[writeIndex] = start;
