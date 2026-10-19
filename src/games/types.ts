@@ -1,4 +1,4 @@
-import type { Game } from '../core/types';
+import type { Game, Side } from '../core/types';
 
 /** 花色：梅花、黑桃、方塊、紅心，與鬼牌。 */
 export type Suit = 'C' | 'S' | 'D' | 'H' | 'JK';
@@ -99,4 +99,20 @@ export interface RegistryEntry<S = unknown> {
  */
 export function defineEntry<S>(entry: RegistryEntry<S>): RegistryEntry {
   return entry as unknown as RegistryEntry;
+}
+
+/**
+ * 選配 hook：外力造成的自身位移無法用重播重現（SPEC 7.2 反應延遲；DESIGN-AI-FUN 10.55）。
+ *
+ * `wrapPolicy` 讓性格看到「reactionTicks 以前的世界，加上自己的輸入用 `step` 重播到現在」。
+ * 重播只含自己的輸入，所以對手把你推開、把你拉走、把你擋下來這類**外力**造成的自身位移重現不出來，
+ * 性格會用錯的位置做決定。牌宣告這個 hook，就能指定「重播結果裡『自己』的哪些欄位改取真實的現在」。
+ *
+ * 契約：純函式、不改動兩個傳入的 state；只准把 `side` 這一邊自己的欄位從 `present` 複製進 `replayed`
+ * （對手、場上的東西、隨機狀態維持重播的樣子，否則就破壞了反應延遲）。回傳新的 state。
+ * 什麼時候該宣告：對手的動作會物理地改變你的位置或速度（推開、擠壓、牽引），而且你的位置在決策裡是關鍵。
+ * 只有自己的輸入決定自己的位置的牌不要宣告。
+ */
+export interface GameWithSelfFromPresent<S> extends Game<S> {
+  selfFromPresent(replayed: S, present: S, side: Side): S;
 }
