@@ -62,7 +62,7 @@ function playerCells(players: readonly [Walker, Walker]): number[] {
 /**
  * 這個角色現在該去的那一枚金幣（只用來排 `actions` 的順序）：和 `evaluate` 同一個標準，
  * 「我的最短步數（繞過牆），對手比我近的話再加 CONTEST_PENALTY」最小的那一枚；同分取我比較近的，再同分取先出現的。
- * 沒有金幣就是 null。為什麼不是單純最近的：搜尋型平手時取排最前面的動作，單純最近的會把牠領去搶不到的金幣（DESIGN-AI-FUN 10.58）。
+ * 沒有金幣就是 null。為什麼不是單純最近的：搜尋型平手時取排最前面的動作，單純最近的會把牠領去搶不到的金幣（見 docs/cards/D-A.md 第 15 條）。
  */
 function focusCoin(state: DAState, side: Side): number | null {
   const me = state.players[side];
