@@ -39,6 +39,41 @@ function recordingPolicy(): { policy: Policy; seen: number[]; calls: () => numbe
   return { policy, seen, calls: () => seen.length };
 }
 
+describe('levelParams：每 tick 失誤率必須隨等級單調下降（DESIGN-AI-FUN 10.52）', () => {
+  /** 每 tick 失誤事件的機率：每次決定擲一次骰（epsilon），每 decideEvery 個 tick 決定一次。 */
+  const perTick = (level: number): number => {
+    const p = levelParams(level);
+    return p.epsilon / p.decideEvery;
+  };
+
+  it('等級 1 到 10 嚴格遞減到 0（等級 10 之前不可以有任何一級持平或回升）', () => {
+    for (let level = 1; level < 10; level += 1) {
+      expect(
+        perTick(level + 1),
+        `等級 ${level + 1} 的每 tick 失誤率應低於等級 ${level}`,
+      ).toBeLessThan(perTick(level));
+    }
+    expect(perTick(10)).toBe(0);
+  });
+
+  it('不是近似常數：等級 8 的每 tick 失誤率至多是等級 1 的一半（舊對應是 0.89 倍，兩個維度剛好互相抵消）', () => {
+    expect(perTick(8)).toBeLessThanOrEqual(perTick(1) * 0.5);
+  });
+
+  it('端點不變：等級 1 的 epsilon 是 0.25、等級 10 是 0', () => {
+    expect(levelParams(1).epsilon).toBe(0.25);
+    expect(levelParams(10).epsilon).toBe(0);
+  });
+
+  it('每一級的 epsilon 都是合法機率（0 到 1）', () => {
+    for (let level = 1; level <= 10; level += 1) {
+      const { epsilon } = levelParams(level);
+      expect(epsilon).toBeGreaterThanOrEqual(0);
+      expect(epsilon).toBeLessThanOrEqual(1);
+    }
+  });
+});
+
 describe('levelParams：等級表（反應延遲固定在人類水準，差別來自決定頻率、失誤率與搜尋深度）', () => {
   it('等級 1 的四個參數', () => {
     expect(levelParams(1)).toEqual({ reactionTicks: 12, decideEvery: 12, depth: 1, epsilon: 0.25 });
