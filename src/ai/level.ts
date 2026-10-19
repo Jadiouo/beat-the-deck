@@ -47,17 +47,28 @@ function lerpRound(from: number, to: number, level: number): number {
 
 /**
  * 等級 → 四個參數。reactionTicks 對所有等級都一樣；decideEvery、depth 線性內插後四捨五入成整數。
- * epsilon 是機率，不是整數，不取整：直接線性內插（等級 1 是 0.25、等級 10 是 0，每級少 0.25/9）。
+ *
+ * epsilon 不是直接內插，而是讓「每 tick 失誤率」線性降到 0（DESIGN-AI-FUN 10.52）：
+ * 失誤是「每次決定擲一次骰」，而決定每 decideEvery 個 tick 才一次，所以每 tick 的失誤事件機率是
+ * epsilon ÷ decideEvery。舊做法把 epsilon 與 decideEvery 各自線性內插，這個比值從等級 1 到 8 幾乎是常數
+ * （.0208、.0202、.0194、.0208、.0198、.0185、.0167、.0185），等級升高時「決定得更頻繁」恰好抵消
+ * 「每次決定更少失誤」，等級軸在這個範圍內不控制強度。現在：
+ * 每 tick 失誤率(L) ＝ (等級 1 的 epsilon ÷ 等級 1 的 decideEvery) × (10 − L) ÷ 9，
+ * epsilon(L) ＝ 每 tick 失誤率(L) × decideEvery(L)（decideEvery 是取整後實際用的那個整數）。
+ * 兩端不變：等級 1 是 0.25，等級 10 是 0（所以等級 10 的行為與舊版逐位元相同）。
  */
 export function levelParams(level: number): LevelParams {
   if (!Number.isInteger(level) || level < MIN_LEVEL || level > MAX_LEVEL) {
     throw new RangeError(`等級必須是 1 到 10 的整數，收到 ${String(level)}`);
   }
+  const decideEvery = lerpRound(AT_LEVEL_1.decideEvery, AT_LEVEL_10.decideEvery, level);
+  const mistakesPerTick =
+    ((AT_LEVEL_1.epsilon / AT_LEVEL_1.decideEvery) * (MAX_LEVEL - level)) / (MAX_LEVEL - MIN_LEVEL);
   return {
     reactionTicks: lerpRound(AT_LEVEL_1.reactionTicks, AT_LEVEL_10.reactionTicks, level),
-    decideEvery: lerpRound(AT_LEVEL_1.decideEvery, AT_LEVEL_10.decideEvery, level),
+    decideEvery,
     depth: lerpRound(AT_LEVEL_1.depth, AT_LEVEL_10.depth, level),
-    epsilon: (AT_LEVEL_1.epsilon * (MAX_LEVEL - level)) / (MAX_LEVEL - MIN_LEVEL),
+    epsilon: mistakesPerTick * decideEvery,
   };
 }
 

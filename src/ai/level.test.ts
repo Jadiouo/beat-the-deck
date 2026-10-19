@@ -100,13 +100,13 @@ describe('levelParams：等級表（反應延遲固定在人類水準，差別�
     }
   });
 
-  it('中間等級是線性內插後取整（epsilon 不取整）', () => {
+  it('中間等級：reactionTicks、decideEvery、depth 線性內插後取整；epsilon 不取整（每 tick 失誤率線性、再乘 decideEvery）', () => {
     // 等級 5：反應延遲固定 12；12 − 11·4/9 = 7.11 → 7；1 + 5·4/9 = 3.22 → 3
     const five = levelParams(5);
     expect(five.reactionTicks).toBe(12);
     expect(five.decideEvery).toBe(7);
     expect(five.depth).toBe(3);
-    expect(five.epsilon).toBeCloseTo((0.25 * 5) / 9, 10);
+    expect(five.epsilon).toBeCloseTo(((0.25 / 12) * 5 * 7) / 9, 10);
     for (let level = 1; level <= 10; level += 1) {
       const p = levelParams(level);
       expect(Number.isInteger(p.reactionTicks)).toBe(true);
