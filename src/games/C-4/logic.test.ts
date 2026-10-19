@@ -783,4 +783,15 @@ describe('C-4 霧｜牆的遠距離 danger 不擋路、直走優先、不繞圈'
     expect(state.snakes[0].alive).toBe(true);
     expect(turns).toBeLessThanOrEqual(3);
   });
+
+  it('34. 「很久沒看過」的門檻不超過食物的平均壽命：場上永遠 2 個食物，兩邊合起來每 138 tick 左右吃掉一個，一個食物平均活 2 × 138 ≈ 280 tick；看過超過這麼久的格子，裡面有食物的機率和從沒看過的一樣大', () => {
+    expect(STALE_TICKS).toBeLessThanOrEqual(300);
+    expect(STALE_TICKS).toBeGreaterThanOrEqual(150);
+    // 邊界：剛好 STALE_TICKS 前看過 → 不算；多 1 個 tick → 算（門檻改了也成立）
+    const seen = Array.from({ length: 32 * 24 }, () => 1000);
+    expect(explorationTarget(seen, cell(5, 12), RIGHT, 1000 + STALE_TICKS)).toBe(cell(16, 12));
+    const older = [...seen];
+    older[cell(24, 12)] = 999;
+    expect(explorationTarget(older, cell(16, 12), RIGHT, 1000 + STALE_TICKS)).toBe(cell(24, 12));
+  });
 });
