@@ -378,6 +378,17 @@ export const EXIT_FRONT_DANGER = 0.8;
 export const EXIT_AMBUSH_RANGE = 4;
 export const EXIT_AMBUSH_DANGER = 0.6;
 
+/**
+ * 中間牆的兩側扣分相對於共用層（`SIDE_PENALTY`，邊界與蛇身用的）的比例。
+ *
+ * 為什麼不是 1：這張牌的牆很長（20 格），房間只有 15 格寬，幾乎每一格都貼著牆或邊界。貼牆一格扣 50 =
+ * 12.5 格食物梯度，AI 因此寧可繞圈也不走近牆邊的食物：兩個等級 10 對打 60 秒，中位數每條蛇只吃到 1 顆，
+ * 離牆 2 格以內的食物 50% 活過 10 秒（離牆 3 格以上的只有 9%）。人類模型的 8% 誤按會偶然打破僵局，
+ * 所以人在這些局面上贏（A4 41.0%，門檻 35%）。0 會讓 A1 掉到 71%（門檻 75），因為兩側的牆
+ * 確實保護了不會繞路的弱 AI；0.5 讓 A4 降到 26–30%、A1 維持 80%。數字見小規格「A4 回歸」一節。
+ */
+export const WALL_SIDE_WEIGHT = 0.5;
+
 export function evaluateC6(state: C6State, side: Side): { gain: number; danger: number } {
   if (state.over) {
     return evaluateClubs(state, side);
@@ -443,7 +454,7 @@ export function evaluateC6(state: C6State, side: Side): { gain: number; danger: 
     gain += FOOD_GRADIENT * (nearestManhattan(state.foods, cellX(target), cellY(target)) - moves);
   }
 
-  // 兩側的牆：同 `evaluateClubs` 對蛇身與邊界的兩側扣分（離食物近時打折）。
+  // 兩側的牆：形狀同 `evaluateClubs` 對蛇身與邊界的兩側扣分（離食物近時打折），但整個乘上 `WALL_SIDE_WEIGHT`。
   {
     const turnDir = exit >= 0 ? (FACING[exit] as number) : me.turn;
     const near = nearestManhattan(state.foods, cellX(target), cellY(target));
@@ -455,7 +466,10 @@ export function evaluateC6(state: C6State, side: Side): { gain: number; danger: 
           break;
         }
         if (IS_WALL[cell(x, y)] === 1) {
-          gain -= (SIDE_PENALTY[r - 1] as number) * Math.min(1, near / SIDE_PENALTY_FOOD_RANGE);
+          gain -=
+            WALL_SIDE_WEIGHT *
+            (SIDE_PENALTY[r - 1] as number) *
+            Math.min(1, near / SIDE_PENALTY_FOOD_RANGE);
           break;
         }
       }
