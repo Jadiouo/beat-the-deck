@@ -8,7 +8,9 @@ import { greedy } from '../../ai/policies/greedy';
 import { precise } from '../../ai/policies/precise';
 import { winRate } from '../../ai/evolution';
 import { playMatch } from '../../core/match';
-import type { Buttons, Controller, Inputs } from '../../core/types';
+import type { Buttons, Controller, Game, Inputs } from '../../core/types';
+import type { Policy } from '../../ai/types';
+import type { GameWithSelfFromPresent } from '../types';
 import { FIELD_H, FIELD_W } from '../_spades/logic';
 import {
   BODY_DIST,
@@ -18,15 +20,18 @@ import {
   HIT_PENALTY,
   HORIZON,
   INVULN_TICKS,
+  HOLD_SPEED,
   LANE_TAU,
   MIN_TICKS,
   OMEGA_GAIN,
   OMEGA_START,
+  PRESS_PUSH,
   R_MAX,
   R_MIN,
   SCORE_DIV,
   SLIT_HALF,
   START_R,
+  holdRadius,
   inSlitAt,
   makeState,
   omegaAt,
@@ -562,11 +567,10 @@ describe('S-8 掃射｜evaluate', () => {
     expect(s8Game.evaluate(moved, 0)).toEqual(s8Game.evaluate(near, 0));
   });
 
-  it('對手貼上來，danger 上升：同樣的位置與速度，對手占著離我 5 像素的外側時，預測會被擠出縫，danger 比沒有對手時高', () => {
+  it('danger 只管自己跟不跟得上縫，不隨對手貼上來而升高（「預測被擠出縫」的 danger 實測有害：只留這一項時擠的劇本玩家對 AI 仍是 92.5%–100%，docs/cards/S-8.md）；被擠的後果由「站得住的半徑」的 gain 處理', () => {
     const alone = s8Game.evaluate(scene({ along: 45, lat: 2.4 }, ABSENT), 0);
     const squeezed = s8Game.evaluate(scene({ along: 45, lat: 2.4 }, { lane: 50, hold: 1 }), 0);
-    expect(alone.danger).toBeLessThanOrEqual(0.3);
-    expect(squeezed.danger).toBeGreaterThan(alone.danger + 0.1);
+    expect(squeezed.danger).toBe(alone.danger);
   });
 
   it('對手離得遠（超過 9 像素的外側或內側）不影響 danger', () => {
@@ -587,6 +591,57 @@ describe('S-8 掃射｜evaluate', () => {
     expect(inner - noneIn).toBeCloseTo(0, 9);
   });
 
+  it('站得住的半徑：用最大速度裡扣掉「貼身擠壓每 tick 推你的量」之後剩下的速度跟縫。推量 ＝ (9 − 7.2) ÷ 2 ＝ 0.9，站得住的速度 √(1.5² − 0.9²) ＝ 1.2，半徑 ＝ 1.2 ÷ ω(t)', () => {
+    expect(PRESS_PUSH).toBeCloseTo(0.9, 12);
+    expect(HOLD_SPEED).toBeCloseTo(1.2, 12);
+    for (const tick of [0, 500, 1350, 2699]) {
+      expect(holdRadius(tick, 2700) * omegaAt(tick, 2700)).toBeCloseTo(HOLD_SPEED, 12);
+    }
+    expect(holdRadius(0, 2700)).toBeCloseTo(60, 9); // 起始 ω = 0.020
+    expect(holdRadius(2700, 2700)).toBeCloseTo(1.2 / 0.032, 9); // 結束 ω = 0.032
+    // 整局都落在縫的範圍裡，不需要夾
+    for (let tick = 0; tick <= 2700; tick += 90) {
+      expect(holdRadius(tick, 2700)).toBeGreaterThan(R_MIN);
+      expect(holdRadius(tick, 2700)).toBeLessThan(R_MAX);
+    }
+  });
+
+  it('gain 偏好站得住的半徑：同樣在縫中線上、跟著縫走，站在 hold 的 gain 比 hold + 10（站不住）與 hold − 10（白白少拿分）都高', () => {
+    const r = holdRadius(500, 2700);
+    const at = (along: number): number => s8Game.evaluate(scene({ along, lat: 0 }, ABSENT), 0).gain;
+    expect(at(r)).toBeGreaterThan(at(r + 10) + 1000);
+    expect(at(r)).toBeGreaterThan(at(r - 10) + 1000);
+  });
+
+  it('被貼近之後，後果出在 gain：被推到 hold 之外 10 像素的人 gain 低、danger 不變；沒有「對手貼過來就給固定反向加分」這種固定習慣（對手的 lane 從 20 到 80 掃過去，gain 的變動不超過搶位誘因的 6）', () => {
+    const r = holdRadius(500, 2700);
+    const pushed = s8Game.evaluate(scene({ along: r + 10, lat: 0 }, { lane: r, hold: 1 }), 0);
+    const home = s8Game.evaluate(scene({ along: r, lat: 0 }, { lane: r - 7, hold: 1 }), 0);
+    expect(home.gain).toBeGreaterThan(pushed.gain + 1000);
+    const gains = [20, 35, 50, 65, 80].map((lane) => s8Game.evaluate(scene({ along: r, lat: 0 }, { lane, hold: 1 }), 0).gain);
+    expect(Math.max(...gains) - Math.min(...gains)).toBeLessThanOrEqual(6 + 1e-9);
+  });
+
+  it('單人時被推到 hold 外 12 像素的精準型 10，會自己走回 hold 附近（不是停在站不住的半徑）', () => {
+    const r0 = holdRadius(500, 2700);
+    const w = omegaAt(500, 2700);
+    const start = makeState({
+      tick: 500,
+      angle: 0,
+      players: [{ ...at(0, r0 + 12, 0), vx: 0, vy: w * (r0 + 12), hold: 1, lane: r0 + 12 }, { x: 140, y: 20, invuln: 0 }],
+    });
+    const controller = levelController(s8Game, precise, 10, 5);
+    let s = start;
+    const alongs: number[] = [];
+    for (let i = 0; i < 240; i += 1) {
+      s = s8Game.step(s, [controller.decide(s, 0, s.tick), NONE]);
+      alongs.push(slitCoords(s.players[0].x, s.players[0].y, s.slit.angle).along - holdRadius(s.tick, 2700));
+    }
+    const settled = mean(alongs.slice(120));
+    expect(Math.abs(settled)).toBeLessThanOrEqual(5);
+    expect(s.players[0].hits).toBeLessThanOrEqual(1);
+  });
+
   it('預測的窗口是「無敵結束之後的 HORIZON 個 tick」：無敵 30 個 tick（比 HORIZON 長）、站在縫外的人，danger 仍然是 1（不是因為無敵就當作安全）', () => {
     const shielded = makeState({ tick: 500, angle: 0, players: [{ x: 20, y: 200, invuln: 30 }, { x: 140, y: 20 }] });
     expect(s8Game.evaluate(shielded, 0).danger).toBe(1);
@@ -605,6 +660,76 @@ describe('S-8 掃射｜evaluate', () => {
 // 這一段是實作之後、量到數字才寫的（規則測試在前面、先紅過）；每格場數小（標準誤 10 個百分點上下），
 // 所以斷言只放很寬的界線，更大的樣本（200 場以上、多個種子區塊）在小規格裡。對手是精準型等級 10；偶數種子坐 0 號邊。
 // ---------------------------------------------------------------------------
+
+describe('S-8 掃射｜selfFromPresent（外力造成的自身位移無法用重播重現）', () => {
+  const hook = (s8Game as unknown as GameWithSelfFromPresent<S8State>).selfFromPresent;
+  // 重播的結果：自己（side）還在重播的位置；真實的現在：自己被對手推到別處，對手也在別處。
+  const replayed = makeState({
+    tick: 300,
+    angle: 1,
+    players: [
+      { x: 60, y: 100, vx: 1.5, vy: 0, hits: 0, pts: 3, lane: 40, hold: 1, bumpAt: -1 },
+      { x: 90, y: 120, vx: 0, vy: 1.5, hits: 1, pts: 4, lane: 50, hold: 0.9, bumpAt: 10 },
+    ],
+  });
+  const present = makeState({
+    tick: 300,
+    angle: 1,
+    players: [
+      { x: 66, y: 104, vx: 0, vy: 0, hits: 1, pts: 3.5, lane: 42, hold: 0.8, bumpAt: 290 },
+      { x: 70, y: 110, vx: 1.5, vy: 1.5, hits: 2, pts: 9, lane: 55, hold: 1, bumpAt: 290 },
+    ],
+  });
+
+  it('S-8 宣告了這個 hook', () => {
+    expect(typeof hook).toBe('function');
+  });
+
+  it('自己（side）的整個欄位取真實的現在，對手與縫、tick、rng 維持重播的樣子；兩邊 side 都成立', () => {
+    for (const side of [0, 1] as const) {
+      const out = hook.call(s8Game, replayed, present, side);
+      expect(out.players[side]).toEqual(present.players[side]);
+      expect(out.players[1 - side]).toEqual(replayed.players[1 - side]);
+      expect(out.tick).toBe(replayed.tick);
+      expect(out.slit).toEqual(replayed.slit);
+      expect(out.rng).toEqual(replayed.rng);
+      expect(out.maxTicks).toBe(replayed.maxTicks);
+    }
+  });
+
+  it('純函式：不改動傳入的兩個 state（深度凍結後呼叫不丟錯），回傳新物件', () => {
+    const a = deepFreeze(structuredClone(replayed));
+    const b = deepFreeze(structuredClone(present));
+    const out = hook.call(s8Game, a, b, 0);
+    expect(out).not.toBe(a);
+    expect(out).not.toBe(b);
+    expect(a).toEqual(replayed);
+  });
+
+  it('接進 wrapPolicy：被對手推開的位移，AI 看得到（性格看到的自己等於真實的現在），對手仍是舊的', () => {
+    const seen: S8State[] = [];
+    const spy: Policy = {
+      name: 'spy',
+      decide<S>(_game: Game<S>, state: S): Buttons {
+        seen.push(state as unknown as S8State);
+        return NONE;
+      },
+    };
+    const controller = wrapPolicy(s8Game, spy, { reactionTicks: 12, decideEvery: 1, depth: 1, epsilon: 0 }, 1);
+    // 1 號邊（被測）站著不動；0 號邊每個 tick 往 1 號邊衝，把它推著走
+    let s = makeState({ tick: 0, angle: 0, players: [{ x: 50, y: 110 }, { x: 62, y: 110 }] });
+    const presents: S8State[] = [];
+    for (let t = 0; t < 30; t += 1) {
+      presents.push(s);
+      s = s8Game.step(s, [press({ right: true }), controller.decide(s, 1, t)]);
+    }
+    expect(Math.abs((presents[29] as S8State).players[1].x - 62)).toBeGreaterThan(3);
+    for (let t = 12; t < 30; t += 1) {
+      expect((seen[t] as S8State).players[1].x).toBe((presents[t] as S8State).players[1].x);
+      expect((seen[t] as S8State).players[0].x).toBe((presents[t - 12] as S8State).players[0].x);
+    }
+  });
+});
 
 describe('S-8 掃射｜量測', () => {
   const N = 16;
@@ -664,27 +789,27 @@ describe('S-8 掃射｜量測', () => {
     expect(one).toBeLessThanOrEqual(0.55);
   }, 3_600_000);
 
-  it('探針 A 的三列與劇本玩家（對精準型等級 10，每格 16 場；標準誤約 10 個百分點，更大的樣本在小規格）：擠它的人 > 不看對手的人 > 只守內側的人', () => {
+  it('探針 A 的三列與劇本玩家（對精準型等級 10，每格 16 場；標準誤約 10 個百分點，更大的樣本在小規格）：不再有人支配 AI —— 擠它的人、不看對手的人、只守內側的人都贏不了；擠它不比不擠它划算', () => {
+    // 這條與修之前方向相反（修之前：squeeze ≥ 75、a ≤ 65、inner ≤ 25、squeeze > a + 30，且擠的人讓 AI 多被打中、多互相推開）。
+    // 理由不是為了讓測試過：修之前的 AI 站在跟得上縫的極限（ω·r 約 1.5），被貼上來就被推出縫，擠的人 100.0%；
+    // 修之後 AI 站在「站得住的半徑」（ω·r = 1.2），擠的人推不動它，擠只是白白少拿分。a ≤ 65 與 inner ≤ 25 兩條上界原封不動。
     const row = (kind: ScriptKind): MatchRecord[] => rows(() => scripted(kind), (seed) => ai(10, seed));
     const squeeze = row('squeeze');
     const a = row('a');
     const inner = row('inner');
-    expect(win(squeeze)).toBeGreaterThanOrEqual(75);
+    expect(win(squeeze)).toBeLessThanOrEqual(50);
     expect(win(a)).toBeLessThanOrEqual(65);
     expect(win(inner)).toBeLessThanOrEqual(25);
-    expect(win(squeeze)).toBeGreaterThan(win(a) + 30);
-    // 擠的人把 AI 擠出縫：AI 被打中的次數比不擠的人（a）多
-    expect(mean(squeeze.map((r) => r.hitsOpp))).toBeGreaterThan(mean(a.map((r) => r.hitsOpp)) + 1);
-    // 互相推開的 tick 也多一倍以上
-    expect(mean(squeeze.map((r) => r.bumped))).toBeGreaterThan(2 * mean(a.map((r) => r.bumped)));
+    // 擠它不比不擠它划算
+    expect(win(squeeze)).toBeLessThanOrEqual(win(a) + 30);
+    // AI 被擠時被打中的次數，不比被不擠的人碰到時多太多
+    expect(mean(squeeze.map((r) => r.hitsOpp))).toBeLessThanOrEqual(mean(a.map((r) => r.hitsOpp)) + 1);
   }, 3_600_000);
 
   // 支配策略守門（協調者交辦，DESIGN-AI-FUN 10.40）：「讀 AI 的 lane／hold、貼上去擠它」的劇本玩家對精準型等級 10 的勝率不得太高。
-  // 門檻 90、40 場（種子 0..39）：目前量到 100.0（200 場也是 100.0），不擠的劇本 38–53，擠對擠 53。
-  // 40 場時真實勝率若是 90%，全勝的機率只有 1.5%，所以 100.0 不是雜訊；門檻留了十個點的餘裕給「修了但沒修乾淨」。
-  // 目前是紅的（已確認），修法尚未找到（docs/cards/S-8.md「反擠的嘗試」），所以標 it.fails：它現在通過代表「支配策略還在」，
-  // 一旦修好這條會變紅，提醒把 .fails 拿掉。不要改門檻。
-  it.fails('擠的劇本玩家對精準型等級 10 不得達到支配（勝率 ≤ 90%，40 場）', () => {
+  // 門檻 90、40 場（種子 0..39）：修之前量到 100.0（200 場也是 100.0）。40 場時真實勝率若是 90%，全勝的機率只有 1.5%，所以 100.0 不是雜訊。
+  // 修之前這條是紅的（已確認），標過 it.fails；修好（selfFromPresent ＋ 站得住的半徑）之後拿掉 .fails。不要改門檻。
+  it('擠的劇本玩家對精準型等級 10 不得達到支配（勝率 ≤ 90%，40 場）', () => {
     expect(win(rows(() => scripted('squeeze'), (seed) => ai(10, seed), 40))).toBeLessThanOrEqual(90);
   }, 3_600_000);
 

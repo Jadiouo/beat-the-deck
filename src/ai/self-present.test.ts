@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { deepFreeze } from '../../tests/contract/freeze';
 import type { Buttons, Game, Inputs, Side } from '../core/types';
+import { registry } from '../games/registry';
 import type { GameWithSelfFromPresent } from '../games/types';
 import { wrapPolicy } from './level';
 import type { Policy } from './types';
@@ -160,5 +161,14 @@ describe('selfFromPresent：沒宣告的牌一個 tick 都不變', () => {
       }
       expect(seen[t], `tick ${t}`).toEqual(replay);
     }
+  });
+});
+
+describe('selfFromPresent：只有 S-8 宣告', () => {
+  it('登記表裡宣告 selfFromPresent 的牌只有 S-8（其他牌一行都不改，行為一個 tick 都不能變）', () => {
+    const declared = registry
+      .filter((entry) => typeof (entry.game as Partial<GameWithSelfFromPresent<unknown>>).selfFromPresent === 'function')
+      .map((entry) => entry.id);
+    expect(declared).toEqual(['S-8']);
   });
 });
