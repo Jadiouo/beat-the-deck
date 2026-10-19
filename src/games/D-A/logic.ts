@@ -59,16 +59,27 @@ function playerCells(players: readonly [Walker, Walker]): number[] {
   return [players[0].cell, players[1].cell];
 }
 
-/** 離 `from` 最近（繞過牆的最短步數）的金幣；沒有就是 null。只用來排 `actions` 的順序。 */
-function nearestCoin(state: DAState, from: number): number | null {
-  const dist = bfsDistances(state.walls, from);
+/**
+ * 這個角色現在該去的那一枚金幣（只用來排 `actions` 的順序）：和 `evaluate` 同一個標準，
+ * 「我的最短步數（繞過牆），對手比我近的話再加 CONTEST_PENALTY」最小的那一枚；同分取我比較近的，再同分取先出現的。
+ * 沒有金幣就是 null。為什麼不是單純最近的：搜尋型平手時取排最前面的動作，單純最近的會把牠領去搶不到的金幣（DESIGN-AI-FUN 10.58）。
+ */
+function focusCoin(state: DAState, side: Side): number | null {
+  const me = state.players[side];
+  const opponent = state.players[side === 0 ? 1 : 0];
+  const mineDistance = bfsDistances(state.walls, me.cell);
+  const theirDistance = bfsDistances(state.walls, opponent.cell);
   let best: number | null = null;
-  let bestDistance = UNREACHABLE;
+  let bestEffective = Number.POSITIVE_INFINITY;
+  let bestMine = UNREACHABLE;
   for (const coin of state.coins) {
-    const d = dist[coin] as number;
-    if (d < bestDistance) {
-      bestDistance = d;
+    const mine = mineDistance[coin] as number;
+    const theirs = theirDistance[coin] as number;
+    const effective = mine + (theirs < mine ? CONTEST_PENALTY : 0);
+    if (effective < bestEffective || (effective === bestEffective && mine < bestMine)) {
       best = coin;
+      bestEffective = effective;
+      bestMine = mine;
     }
   }
   return best;
@@ -169,7 +180,7 @@ export const dAGame: Game<DAState> = {
 
   actions(state: DAState, side: Side): readonly Buttons[] {
     const me = state.players[side];
-    return actionsToward(state.walls, me, side, nearestCoin(state, me.cell));
+    return actionsToward(state.walls, me, side, focusCoin(state, side));
   },
 
   evaluate(state: DAState, side: Side): { gain: number; danger: number } {
