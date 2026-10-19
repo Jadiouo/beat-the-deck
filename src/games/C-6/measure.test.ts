@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
+import { winRate } from '../../ai/evolution';
+import { HUMAN_PARAMS, humanPolicy } from '../../ai/human-model';
 import { levelController, wrapPolicy } from '../../ai/level';
 import { greedy } from '../../ai/policies/greedy';
 import { pathfinder } from '../../ai/policies/pathfinder';
@@ -100,6 +102,16 @@ describe('C-6 傳送門｜互動強度與反應速度', () => {
     }
     expect(points / seeds).toBeLessThan(0.9);
   }, 300_000);
+
+  it('A4 回歸：人類模型對等級 10，官方 A4 的前 60 個種子，勝率不超過 35%（門檻是 A4 的 35%，沒有動）', () => {
+    // 官方 A4 是種子 0..99；這裡只取前 60 個（約 90 秒），為了讓 light 專案裡就看得到這個回歸。
+    // 量法：`winRate(c6Game, humanPolicy, HUMAN_PARAMS, pathfinder, 10, 種子 0..59)`，奇偶換邊、平手算半場，確定性。
+    // 回歸前（HEAD b9547ac，中間牆兩側扣分 50）：43.3%；官方 100 場 41.0%。二分法找不到任何 commit 把它「弄壞」：
+    // C-6 交付時的 25.5% 重現不出來（見 DESIGN-AI-FUN 10.57）。
+    const seeds = Array.from({ length: 60 }, (_, i) => i);
+    const rate = winRate(c6Game, humanPolicy, HUMAN_PARAMS, pathfinder, 10, seeds);
+    expect(rate, `C-6 A4（前 60 個種子）${(100 * rate).toFixed(1)}%`).toBeLessThanOrEqual(0.35);
+  }, 600_000);
 
   it('堵門事件：兩個搜尋型等級 10 對打 12 場，記下每場平均（機制存不存在由小規格的數字說話）', () => {
     let blocks = 0;

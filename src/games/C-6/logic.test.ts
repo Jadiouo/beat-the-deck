@@ -418,6 +418,25 @@ describe('C-6 傳送門｜evaluate 與 actions', () => {
     expect(level.gain - behind.gain).toBeCloseTo(300, 5);
   });
 
+  it('貼著中間牆的扣分（A4 回歸的機制）：食物在 8 格以外時，貼牆一格比離牆 6 格以上的 gain 低 10 到 30（共用層邊界的做法是 50，會讓牆邊的食物沒人敢吃）', () => {
+    // 同一個局面平移：蛇頭往上、食物在正前方 11 格（直線上，前方不算障礙）、對手在遠處。
+    // 差別只有右手邊有沒有牆：x = 14 的右邊一格 (15, y) 是中間牆，x = 8 的兩側 6 格內都沒有東西。
+    const at = (x: number): C6State =>
+      makeState({
+        snakes: [
+          { body: col(x, 14, 1, 3), dir: UP },
+          { body: row(28, 20, 1, 3), dir: LEFT },
+        ],
+        foods: [cell(x, 3), cell(28, 3)],
+      });
+    const nearWall = evaluateC6(at(14), 0);
+    const open = evaluateC6(at(8), 0);
+    expect(nearWall.danger).toBe(open.danger);
+    const penalty = open.gain - nearWall.gain;
+    expect(penalty).toBeGreaterThan(10);
+    expect(penalty).toBeLessThanOrEqual(30);
+  });
+
   it('下一步踩進門口、出口被身體佔著：danger 1；出口空著：小於 1', () => {
     const blocked = makeState({
       tick: 5,
