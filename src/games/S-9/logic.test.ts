@@ -16,6 +16,7 @@ import {
   TILES,
   evaluateS9,
   headingBlocked,
+  holeNeighbors,
   makeState,
   roundLimit,
   rotated,
@@ -773,6 +774,32 @@ describe('S-9 縮小的場地｜評估', () => {
     );
     expect(evaluateS9(draw, 0).gain).toBe(0);
     expect(evaluateS9(draw, 1).gain).toBe(0);
+  });
+
+  it('站在洞的邊上也是風險：腳下格子的上下左右每有一格已經掉了，danger 至少加 0.2（場地邊緣不算洞）', () => {
+    const c = at(4, 6);
+    const stand = { x: c.x, y: c.y };
+    const none = makeState({ players: [stand, at(8, 10)] });
+    expect(holeNeighbors(none.tiles, none.players[0])).toBe(0);
+    expect(evaluateS9(none, 0).danger).toBe(0);
+    const two = makeState({
+      tiles: { [tileIndex(3, 6)]: GONE, [tileIndex(4, 5)]: GONE },
+      players: [stand, at(8, 10)],
+    });
+    expect(holeNeighbors(two.tiles, two.players[0])).toBe(2);
+    expect(evaluateS9(two, 0).danger).toBeCloseTo(0.4, 10);
+    const three = makeState({
+      tiles: { [tileIndex(3, 6)]: GONE, [tileIndex(4, 5)]: GONE, [tileIndex(5, 6)]: GONE },
+      players: [stand, at(8, 10)],
+    });
+    expect(evaluateS9(three, 0).danger).toBeCloseTo(0.6, 10);
+    // 場地邊緣不是洞：站在角落、四周都新鮮，danger 還是 0
+    const corner = makeState({ players: [at(0, 0), at(8, 10)] });
+    expect(holeNeighbors(corner.tiles, corner.players[0])).toBe(0);
+    expect(evaluateS9(corner, 0).danger).toBe(0);
+    // 崩落中但還沒掉的鄰格不算洞
+    const crumbling = makeState({ tiles: { [tileIndex(3, 6)]: 30 }, players: [stand, at(8, 10)] });
+    expect(holeNeighbors(crumbling.tiles, crumbling.players[0])).toBe(0);
   });
 
   it('照目前的速度再走一陣子會走進洞：danger 是 1；站著不動不算', () => {
