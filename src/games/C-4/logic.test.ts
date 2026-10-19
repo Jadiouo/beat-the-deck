@@ -805,4 +805,27 @@ describe('C-4 霧｜牆的遠距離 danger 不擋路、直走優先、不繞圈'
     seen[cell(18, 15)] = -1;
     expect(explorationTarget(seen, cell(16, 12), RIGHT, 5000)).toBe(cell(23, 12));
   });
+
+  it('36. 牆在前方 4 格以內還是要扣 danger（等級 5 以下每 7 個 tick 才決定一次，比走格慢，要提早轉）；5 格以外不扣；食物在直線盡頭貼牆時不算', () => {
+    const at = (x: number, foods: number[] = body([30, 6])): number =>
+      c4Game.evaluate(
+        makeState({
+          tick: 1,
+          snakes: [{ body: body([x, 12], [x - 1, 12], [x - 2, 12]), dir: RIGHT }, {}],
+          memory: [{ foods }, {}],
+        }),
+        0,
+      ).danger;
+    // 蛇頭 x，下一格 x+1，之後還有 30 − x 格空著：x = 30 時只剩 0 格（下一格 31 是最後一格）
+    expect(at(30)).toBeGreaterThan(0.4); // 前方只剩 1 格就是牆
+    expect(at(29)).toBeGreaterThan(0.15);
+    expect(at(28)).toBeGreaterThan(0.03);
+    expect(at(27)).toBeLessThan(0.05); // 剛好 5 格
+    expect(at(26)).toBe(0);
+    // 越近越高
+    expect(at(30)).toBeGreaterThan(at(29));
+    expect(at(29)).toBeGreaterThan(at(28));
+    // 食物在這一列盡頭貼牆：蛇會先吃到再轉彎，不算前方障礙
+    expect(at(29, body([31, 12]))).toBe(0);
+  });
 });
