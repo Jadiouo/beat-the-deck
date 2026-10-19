@@ -119,11 +119,100 @@ export function ranksFrom<T>(items: readonly T[], compare: (a: T, b: T) => numbe
 }
 
 /**
+ * 束搜尋的截斷：從 `nodes`（依生成順序排列，同一個第一步的後代在生成順序上是連在一起的）留下分數最高的 `width` 個。
+ *
+ * 分數嚴格比邊界高的全留。邊界上（與第 `width` 名同分）的節點如果放不下，不能再用「同分留生成順序」：
+ * 生成順序把同一個第一步的後代排在一起，同分時前面幾個第一步的後代會佔滿所有位子，其他第一步整個消失，
+ * 最後選出的動作與搜尋無關（DESIGN-AI-FUN 10.55）。改成：邊界上的位子一個一個分，每次給「目前保留的節點
+ * 最少的第一步」（保留數一樣就給第一步索引小的），該第一步裡先生成的先留。
+ *
+ * - 沒有同分要拆開的時候（邊界上的節點全放得下，或第 `width` 名分數比下一名高），結果與舊做法逐一相同。
+ * - 只動「同分」之間的取捨；分數不同的節點，高的永遠比低的優先。
+ * - 同分是精確相等（`===`）。全牌量測裡拆不開的同分都是整數或同一個算式算出的相同浮點數，沒有需要容差的情況。
+ * - 保留下來的節點仍照「分數高到低、同分照生成順序」排列，所以下一層的生成順序與舊做法的約定一致。
+ * - 成本：一次排序，加上 O(位子數 × 第一步數) 的分配；不多做任何 `step`，也不加寬束。
+ */
+function truncate<S>(
+  nodes: readonly Leaf<S>[],
+  scores: readonly number[],
+  width: number,
+): Leaf<S>[] {
+  // 穩定排序：分數相同時保留生成順序（第一步索引小的在前）。
+  const order = nodes.map((_node, i) => i);
+  order.sort((a, b) => (scores[b] as number) - (scores[a] as number) || a - b);
+
+  const boundary = scores[order[width - 1] as number] as number;
+  let end = width;
+  while (end < order.length && scores[order[end] as number] === boundary) {
+    end += 1;
+  }
+  if (end === width || boundary !== boundary) {
+    // 第 width 名與下一名分數不同（或分數不是數字）：沒有同分要拆。
+    return order.slice(0, width).map((i) => nodes[i] as Leaf<S>);
+  }
+  let start = width - 1;
+  while (start > 0 && scores[order[start - 1] as number] === boundary) {
+    start -= 1;
+  }
+
+  // order[0 .. start) 分數嚴格較高，全留；order[start .. end) 與邊界同分，只放得下 width - start 個。
+  const kept = new Array<number>(nodes.length).fill(0);
+  const count = new Map<number, number>();
+  for (let position = 0; position < start; position += 1) {
+    const node = nodes[order[position] as number] as Leaf<S>;
+    kept[order[position] as number] = 1;
+    count.set(node.first, (count.get(node.first) ?? 0) + 1);
+  }
+  const queues = new Map<number, number[]>();
+  for (let position = start; position < end; position += 1) {
+    const index = order[position] as number;
+    const first = (nodes[index] as Leaf<S>).first;
+    const queue = queues.get(first);
+    if (queue === undefined) {
+      queues.set(first, [index]);
+    } else {
+      queue.push(index);
+    }
+  }
+  const firsts = [...queues.keys()].sort((a, b) => a - b);
+  const cursor = new Map<number, number>(firsts.map((first) => [first, 0]));
+  for (let slot = start; slot < width; slot += 1) {
+    let pick = -1;
+    let fewest = Number.POSITIVE_INFINITY;
+    for (const first of firsts) {
+      const queue = queues.get(first) as number[];
+      if ((cursor.get(first) as number) >= queue.length) {
+        continue;
+      }
+      const have = count.get(first) ?? 0;
+      if (have < fewest) {
+        fewest = have;
+        pick = first;
+      }
+    }
+    const queue = queues.get(pick) as number[];
+    const next = cursor.get(pick) as number;
+    kept[queue[next] as number] = 1;
+    cursor.set(pick, next + 1);
+    count.set(pick, (count.get(pick) ?? 0) + 1);
+  }
+  const result: Leaf<S>[] = [];
+  for (const index of order) {
+    if (kept[index] === 1) {
+      result.push(nodes[index] as Leaf<S>);
+    }
+  }
+  return result;
+}
+
+/**
  * 前瞻（束搜尋）：我方每一步從 `actions()` 選、對手維持不動，往前走 depth 個 tick，
  * 用 `score` 給每一層的節點打分，回傳終點分數最高的那條路的第一步。
  *
  * - 每一層只留分數最高的 max(b, beam) 個節點；第一層一定保留所有第一步。
  *   總成本約 b · max(b, beam) · depth 次 `step`。
+ * - 截斷時分數相同的節點不是照生成順序留，而是平均分給各個第一步（見 `truncate`）：
+ *   否則一層的分數全平時，保留下來的節點會全是同一個第一步的後代。
  * - 模擬到一半遊戲結束（`isOver`），那個節點就不再展開，直接當終點。
  * - 平手取第一步索引最小的；排序是穩定的，所以整個過程是決定性的。
  * - depth 1 就是「每個動作走一步、看下一個 tick」。
@@ -166,15 +255,7 @@ export function lookAhead<S>(
       layer = expanded;
       break;
     }
-    if (expanded.length > width) {
-      const scores = score(expanded);
-      const order = expanded.map((_node, i) => i);
-      // 穩定排序：分數相同時保留生成順序（第一步索引小的在前）。
-      order.sort((a, b) => (scores[b] as number) - (scores[a] as number) || a - b);
-      layer = order.slice(0, width).map((i) => expanded[i] as Leaf<S>);
-    } else {
-      layer = expanded;
-    }
+    layer = expanded.length > width ? truncate(expanded, score(expanded), width) : expanded;
   }
 
   const scores = score(layer);
