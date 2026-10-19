@@ -122,13 +122,17 @@ describe('豁免要寫進文件，不只是旗標', () => {
     expect(text).toContain('不好玩');
   });
 
-  it('DESIGN-AI-FUN 末尾有豁免清單與「擴散就要重新檢討判準」的警語', () => {
-    const text = readFileSync(resolve(__dirname, '../../docs/DESIGN-AI-FUN.md'), 'utf8');
+  it('DESIGN-AI-FUN 的 10.52 節有豁免清單與「擴散就要重新檢討判準」的警語', () => {
+    const all = readFileSync(resolve(__dirname, '../../docs/DESIGN-AI-FUN.md'), 'utf8');
+    // 按章節編號定位：從 `### 10.52 ` 開頭讀到下一個 `### ` 為止（不依賴它是不是最後一節）
+    const start = all.search(/^### 10\.52 /m);
+    expect(start).toBeGreaterThanOrEqual(0);
+    const rest = all.slice(start + 4);
+    const next = rest.search(/^### /m);
+    const text = next === -1 ? all.slice(start) : all.slice(start, start + 4 + next);
+    expect(text.split('\n')[0]).toMatch(/豁免/);
     expect(text).toContain('目前用 10.14 豁免 A4 的牌共有三張：H-6、H-5、S-10');
     expect(text).toMatch(/第四張/);
     expect(text).toMatch(/判準本身有問題/);
-    // 這一節是最後一節
-    const headings = text.match(/^### 10\.\d+ .*$/gm) ?? [];
-    expect(headings[headings.length - 1]).toMatch(/豁免/);
   });
 });
