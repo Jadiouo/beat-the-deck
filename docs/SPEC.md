@@ -246,6 +246,19 @@ export function playMatch<S>(
 
 進度規則：每翻開 3 張牌，全域 AI 等級加 1，上限 10。每張牌另有基礎等級（A 到 3 是 1，4 到 6 是 2，7 到 10 是 3，J、Q、K 是 4），實際等級是「全域等級＋基礎等級−1」再夾在 1 到 10。
 
+#### 7.2.1 外力造成的自身位移（選配 hook `selfFromPresent`）
+
+`wrapPolicy` 的延遲模型是「世界是 `reactionTicks` 個 tick 以前的，自己用 `game.step` 把自己這段時間的輸入重播到現在」。**重播只含自己的輸入**，所以對手把你推開、把你拉走、把你擋下來這類**外力**造成的位移重現不出來：性格會用一個「如果沒被推」的位置做決定。
+
+牌若有這個問題，可以在 `Game` 物件上宣告選配的 `selfFromPresent(replayed, present, side)`（型別 `GameWithSelfFromPresent<S>`，在 `src/games/types.ts`）：
+
+- `replayed`：重播到現在的 state；`present`：真實的現在的 state；`side`：被測的那一邊。
+- 回傳新的 state：把 `replayed` 裡「`side` 這一邊自己」的欄位換成 `present` 的。**只准換自己的欄位**——對手、場上的東西、隨機狀態維持重播的樣子，否則就破壞了反應延遲（AI 會知道對手現在在哪）。
+- 純函式，不改動兩個傳入的 state。`reactionTicks` 為 0 時性格直接看真實的 state，hook 不會被呼叫。
+- **沒宣告的牌一個 tick 都不變**：`wrapPolicy` 只在 `game.selfFromPresent` 存在時才走那一行（驗證：改前改後逐 tick 的 state 雜湊，見 DESIGN-AI-FUN 最後一節）。
+
+什麼時候該宣告：對手的動作會**物理地**改變你的位置或速度（推開、擠壓、牽引、擋路），而且你的位置在決策裡是關鍵。只有自己的輸入決定自己位置的牌不要宣告（宣告了也只是多一次複製）。目前只有 S-8 宣告。
+
 ### 7.3 人類模型
 
 `ai/human-model.ts`：一個有 0.2 秒反應延遲、每 6 個 tick 才能換動作、8% 機率按錯（每次決定有 8% 觸發一次「按錯」，觸發後從 `actions()` 均勻亂選一個，所以可能剛好選回本來要按的）、只看一步的控制器。它不出現在遊戲裡，只在測試裡代替真人，用來檢查「這張牌人打得贏嗎」（見 TEST_PLAN 第 5 節）。
