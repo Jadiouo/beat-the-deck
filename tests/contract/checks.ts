@@ -1404,6 +1404,24 @@ export interface PursuitState {
 const clubFoods = (state: PursuitState): readonly number[] => state.foods;
 const colourFoods = (state: PursuitState): readonly number[] =>
   state.foods.filter((_cell, i) => state.foodColors?.[i] === state.correct);
+/**
+ * C-9：鑰匙在地上時目標是鑰匙；有人叼著鑰匙時目標是門。只在局進行中才算（停頓的 40 tick 與局結束後不算，
+ * 否則站在門格上的贏家會每個 tick 取得一次）。state 欄位是 `src/games/C-9/logic.ts` 的 `C9State`。
+ */
+const keyThenDoor = (state: PursuitState): readonly number[] => {
+  const c9 = state as unknown as {
+    readonly key: number;
+    readonly keyHolder: number | null;
+    readonly pause: number;
+    readonly outcome: string | null;
+    readonly round: number;
+    readonly layouts: readonly { readonly door: number }[];
+  };
+  if (c9.pause > 0 || c9.outcome !== null) {
+    return [];
+  }
+  return c9.keyHolder === null ? [c9.key] : [(c9.layouts[c9.round >> 1] as { door: number }).door];
+};
 const foodsAndBait = (state: PursuitState): readonly number[] =>
   state.bait === null || state.bait === undefined ? state.foods : [...state.foods, state.bait.cell];
 
@@ -1420,6 +1438,8 @@ export const PURSUIT: Readonly<Record<string, PursuitDeclaration | PursuitNotApp
   'C-7': { targets: clubFoods, minTakesPerMinute: 20, minMedianSeconds: 20 },
   // C-6 的下限刻意訂得低：AI 吃得少是已知問題（docs/cards/C-6.md「追目標」、DESIGN-AI-FUN 10.57）。
   'C-6': { targets: clubFoods, minTakesPerMinute: 5, minMedianSeconds: 20 },
+  // C-9 的目標是鑰匙與門（一局最多取得 2 次：拿鑰匙、進門）。下限的量測與理由見 docs/cards/C-9.md「追目標」。
+  'C-9': { targets: keyThenDoor, minTakesPerMinute: 5, minMedianSeconds: 30 },
   'C-8': { notApplicable: '光軌沒有可追的目標：先撞到牆的輸，贏的是活得久，不是拿到東西' },
   'C-10': {
     notApplicable: '追與逃：目標是對手的蛇頭，不是場上的東西；普查 60 個回合全部由追的抓到逃的',
