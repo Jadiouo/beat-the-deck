@@ -1418,6 +1418,8 @@ export const PURSUIT: Readonly<Record<string, PursuitDeclaration | PursuitNotApp
   'C-4': { targets: clubFoods, minTakesPerMinute: 4, minMedianSeconds: 20 },
   'C-5': { targets: foodsAndBait, minTakesPerMinute: 10, minMedianSeconds: 20 },
   'C-7': { targets: clubFoods, minTakesPerMinute: 20, minMedianSeconds: 20 },
+  // C-6 的下限刻意訂得低：AI 吃得少是已知問題（docs/cards/C-6.md「追目標」、DESIGN-AI-FUN 10.57）。
+  'C-6': { targets: clubFoods, minTakesPerMinute: 5, minMedianSeconds: 20 },
   'C-8': { notApplicable: '光軌沒有可追的目標：先撞到牆的輸，贏的是活得久，不是拿到東西' },
   'C-10': {
     notApplicable: '追與逃：目標是對手的蛇頭，不是場上的東西；普查 60 個回合全部由追的抓到逃的',
