@@ -662,7 +662,7 @@ describe('D-Q 唯一的礦｜互動強度（DESIGN-AI-FUN 2.5）', () => {
 });
 
 describe('D-Q 唯一的礦｜走格週期內問幾次都一樣（10.49 群一：每 tick 決定在 5 tick 走一格的牌上不該變弱）', () => {
-  it('danger：開挖那一拍剛挖到的礦石不算進「身上的庫存」（走格與開挖同一個 tick，這筆是留下來的獎勵，不是風險）', () => {
+  it('danger：開挖那一拍的評估與開挖前幾拍同一把尺（剛挖到的礦石不算庫存、下一次開挖的次數不多算一次）', () => {
     // 站在礦上、身上 6 塊、礦已挖 10 次。找一個這一次開挖不會塌的亂數。
     let found: DQState | null = null;
     for (let seed = 0; seed < 50 && found === null; seed += 1) {
@@ -681,8 +681,10 @@ describe('D-Q 唯一的礦｜走格週期內問幾次都一樣（10.49 群一：
     expect(found).not.toBeNull();
     const dug = found as DQState;
     expect(dug.carried[0]).toBe(6 + SOLO_YIELD);
-    const withoutFresh: DQState = { ...dug, carried: [6, 0] };
-    expect(dQGame.evaluate(dug, 0).danger).toBeCloseTo(dQGame.evaluate(withoutFresh, 0).danger, 10);
+    // 對照：開挖前一拍的世界（還沒挖：age 少 1、身上 6 塊），走完同樣一格之後、已經不是開挖的 tick。
+    // 兩者問的是同一件事（留下來，下一次開挖會不會塌），danger 要一樣：開挖當拍的決定與前幾拍的決定用同一把尺。
+    const reference: DQState = { ...dug, tick: dug.tick + 1, age: dug.age - 1, carried: [6, 0] };
+    expect(dQGame.evaluate(dug, 0).danger).toBeCloseTo(dQGame.evaluate(reference, 0).danger, 10);
     // 下一拍（不是開挖的 tick）這 2 塊就是庫存了：同樣的比較，身上多 2 塊 danger 更高。
     const later: DQState = { ...dug, tick: dug.tick + 1 };
     const laterLess: DQState = { ...later, carried: [6, 0] };
