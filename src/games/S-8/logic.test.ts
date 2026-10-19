@@ -642,6 +642,23 @@ describe('S-8 掃射｜evaluate', () => {
     expect(s.players[0].hits).toBeLessThanOrEqual(1);
   });
 
+  it('讓路：我在對手的內側（擠在一起）時，gain 偏好退到它內側 10 像素；我在它外側時不讓（只多一個搶位誘因，最多 6）', () => {
+    const r = holdRadius(500, 2700);
+    const lane = r - 2.5; // 對手站在站得住的半徑稍內側
+    const gainAt = (along: number, opp: { lane: number; hold: number }): number =>
+      s8Game.evaluate(scene({ along, lat: 0 }, opp), 0).gain;
+    // 我在它內側 4 像素（距離不到 9）：退到 lane − 10 比留在原地好（雖然半徑更低、站得住的半徑也不再是目標）
+    expect(gainAt(lane - 10, { lane, hold: 1 })).toBeGreaterThan(gainAt(lane - 4, { lane, hold: 1 }) + 1000);
+    // 沒有對手時，同樣的兩個位置是反過來的（外側那個更接近站得住的半徑）
+    expect(gainAt(lane - 4, ABSENT)).toBeGreaterThan(gainAt(lane - 10, ABSENT));
+    // 我在它外側：不讓。有沒有這個對手，gain 只差搶位誘因（最多 6）
+    const outer = r + 0.5;
+    const withOpp = gainAt(outer, { lane: outer - 6, hold: 1 });
+    const without = gainAt(outer, ABSENT);
+    expect(withOpp - without).toBeGreaterThanOrEqual(0);
+    expect(withOpp - without).toBeLessThanOrEqual(6 + 1e-9);
+  });
+
   it('預測的窗口是「無敵結束之後的 HORIZON 個 tick」：無敵 30 個 tick（比 HORIZON 長）、站在縫外的人，danger 仍然是 1（不是因為無敵就當作安全）', () => {
     const shielded = makeState({ tick: 500, angle: 0, players: [{ x: 20, y: 200, invuln: 30 }, { x: 140, y: 20 }] });
     expect(s8Game.evaluate(shielded, 0).danger).toBe(1);
