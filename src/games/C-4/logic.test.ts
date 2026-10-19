@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import { policyByName } from '../../ai/level';
+import { levelController, policyByName } from '../../ai/level';
+import { pathfinder } from '../../ai/policies/pathfinder';
 import type { Game } from '../../core/types';
 import type { Buttons, Inputs, Side } from '../../core/types';
 import {
@@ -682,5 +683,104 @@ describe('C-4 吃牆邊的食物與探索目標', () => {
     }
     const corner = explorationTarget(never, cell(1, 1), LEFT, 100);
     expect(corner).not.toBe(cell(0, 0));
+  });
+});
+
+describe('C-4 霧｜牆的遠距離 danger 不擋路、直走優先、不繞圈', () => {
+  const DOWN = 2;
+
+  /** 左邊那條蛇（0 號）由等級 10 的搜尋型控制，右邊那條往上走、一直在遠處，不影響結果。 */
+  function playAlone(start: C4State, ticks: number): C4State {
+    const controller = levelController(c4Game, pathfinder, 10, 7);
+    let state = start;
+    for (let i = 0; i < ticks && !c4Game.isOver(state); i += 1) {
+      state = c4Game.step(state, [controller.decide(state, 0, state.tick), NONE]);
+    }
+    return state;
+  }
+  const FAR_RIVAL = { body: body([16, 18], [16, 19], [16, 20]), dir: UP } as const;
+
+  it('30. 牆離 4 到 5 格的前方不再扣 danger（蛇隨時能轉彎）；下一格就是牆、或走進死胡同，仍然是 danger', () => {
+    // 蛇頭 (26,12) 往右，下一格 (27,12) 空著，前方 (28..31,12) 之後是牆。食物在別列（不是直線上的食物，沒有豁免）。
+    const open = makeState({
+      tick: 1,
+      snakes: [{ body: body([26, 12], [25, 12], [24, 12]), dir: RIGHT }, {}],
+      memory: [{ foods: body([30, 6]) }, {}],
+    });
+    expect(c4Game.evaluate(open, 0).danger).toBeLessThan(0.05);
+    // 下一格就是牆：danger 1，gain 比同樣局面往空格走的低好幾千
+    const wall = makeState({
+      tick: 1,
+      snakes: [{ body: body([31, 12], [30, 12], [29, 12]), dir: RIGHT }, {}],
+      memory: [{ foods: body([30, 6]) }, {}],
+    });
+    expect(c4Game.evaluate(wall, 0).danger).toBe(1);
+    expect(c4Game.evaluate(wall, 0).gain).toBeLessThan(c4Game.evaluate(open, 0).gain - 5000);
+    // 死胡同（下一格進去只剩 2 格空間，蛇長 3）：danger 仍然高（被困住的判斷沒有拿掉）
+    const pocket = makeState({
+      tick: 1,
+      snakes: [{ body: body([2, 0], [1, 0], [0, 0]), dir: RIGHT }, {}],
+      foods: body([15, 20], [25, 20]),
+      memory: [
+        {
+          foods: body([30, 6]),
+          rival: body([4, 0], [4, 1], [3, 2], [2, 2], [2, 1], [10, 10]),
+          rivalHead: cell(4, 0),
+          rivalTurn: DOWN,
+        },
+        {},
+      ],
+    });
+    expect(c4Game.evaluate(pocket, 0).danger).toBeGreaterThan(0.3);
+  });
+
+  it('31. prevDir：走格的那個 tick 記下「走格之前的行進方向」，其他 tick 不變', () => {
+    const start = makeState({
+      tick: BEFORE_MOVE,
+      snakes: [{ body: body([5, 12], [4, 12], [3, 12]), dir: RIGHT }, {}],
+    });
+    expect(start.prevDir).toEqual([RIGHT, LEFT]);
+    const turned = c4Game.step(start, [PRESS_UP, NONE]);
+    expect(turned.snakes[0].dir).toBe(UP);
+    expect(turned.prevDir[0]).toBe(RIGHT);
+    // 下一次走格，上一格的方向（UP）變成 prevDir；中間的 tick 不動它
+    const mid = run(turned, MOVE_EVERY - 1);
+    expect(mid.prevDir[0]).toBe(RIGHT);
+    expect(run(mid, 1).prevDir[0]).toBe(UP);
+  });
+
+  it('32. 記得的食物在牆邊、離牆 4 格以內：蛇不會繞著它轉圈，150 個 tick 內吃到（舊版在 (5,4) 附近繞 2×2 的圈上千個 tick）', () => {
+    const start = makeState({
+      tick: 0,
+      snakes: [{ body: body([5, 4], [5, 5], [5, 6]), dir: UP }, FAR_RIVAL],
+      foods: body([1, 3], [25, 20]),
+      memory: [{ foods: body([1, 3]) }, {}],
+    });
+    const end = playAlone(start, 150);
+    expect(end.snakes[0].score).toBeGreaterThanOrEqual(1);
+    expect(end.snakes[0].alive).toBe(true);
+  });
+
+  it('33. 直走優先：目標在斜前方、走階梯與先直走一樣近的時候，蛇先直走（12 次走格裡轉彎不超過 3 次）', () => {
+    const seen = Array.from({ length: 32 * 24 }, (_zero, c) => (cellX(c) >= 12 ? -1 : 0));
+    const start = makeState({
+      tick: 0,
+      snakes: [{ body: body([8, 8], [7, 8], [6, 8]), dir: RIGHT }, FAR_RIVAL],
+      foods: body([15, 20], [25, 21]),
+      memory: [{ foods: [], seen, goal: cell(24, 14) }, {}],
+    });
+    const controller = levelController(c4Game, pathfinder, 10, 7);
+    let state = start;
+    let turns = 0;
+    let last: number = state.snakes[0].dir;
+    for (let i = 0; i < 12 * MOVE_EVERY; i += 1) {
+      state = c4Game.step(state, [controller.decide(state, 0, state.tick), NONE]);
+      if (state.snakes[0].dir !== last) {
+        turns += 1;
+        last = state.snakes[0].dir;
+      }
+    }
+    expect(state.snakes[0].alive).toBe(true);
+    expect(turns).toBeLessThanOrEqual(3);
   });
 });
