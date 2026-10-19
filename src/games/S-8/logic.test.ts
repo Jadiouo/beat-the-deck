@@ -679,6 +679,15 @@ describe('S-8 掃射｜量測', () => {
     expect(mean(squeeze.map((r) => r.bumped))).toBeGreaterThan(2 * mean(a.map((r) => r.bumped)));
   }, 3_600_000);
 
+  // 支配策略守門（協調者交辦，DESIGN-AI-FUN 10.40）：「讀 AI 的 lane／hold、貼上去擠它」的劇本玩家對精準型等級 10 的勝率不得太高。
+  // 門檻 90、40 場（種子 0..39）：目前量到 100.0（200 場也是 100.0），不擠的劇本 38–53，擠對擠 53。
+  // 40 場時真實勝率若是 90%，全勝的機率只有 1.5%，所以 100.0 不是雜訊；門檻留了十個點的餘裕給「修了但沒修乾淨」。
+  // 目前是紅的（已確認），修法尚未找到（docs/cards/S-8.md「反擠的嘗試」），所以標 it.fails：它現在通過代表「支配策略還在」，
+  // 一旦修好這條會變紅，提醒把 .fails 拿掉。不要改門檻。
+  it.fails('擠的劇本玩家對精準型等級 10 不得達到支配（勝率 ≤ 90%，40 場）', () => {
+    expect(win(rows(() => scripted('squeeze'), (seed) => ai(10, seed), 40))).toBeLessThanOrEqual(90);
+  }, 3_600_000);
+
   it('A4（人類模型對精準型等級 10，16 場）：贏不了（勝率 ≤ 10%）；對照上一條，會擠人的劇本玩家贏得了', () => {
     expect(win(rows(human, (seed) => ai(10, seed)))).toBeLessThanOrEqual(10);
   }, 3_600_000);
