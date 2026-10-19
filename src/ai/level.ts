@@ -48,7 +48,7 @@ function lerpRound(from: number, to: number, level: number): number {
 /**
  * 等級 → 四個參數。reactionTicks 對所有等級都一樣；decideEvery、depth 線性內插後四捨五入成整數。
  *
- * epsilon 不是直接內插，而是讓「每 tick 失誤率」線性降到 0（DESIGN-AI-FUN 10.52）：
+ * epsilon 不是直接內插，而是讓「每 tick 失誤率」線性降到 0（DESIGN-AI-FUN 10.53）：
  * 失誤是「每次決定擲一次骰」，而決定每 decideEvery 個 tick 才一次，所以每 tick 的失誤事件機率是
  * epsilon ÷ decideEvery。舊做法把 epsilon 與 decideEvery 各自線性內插，這個比值從等級 1 到 8 幾乎是常數
  * （.0208、.0202、.0194、.0208、.0198、.0185、.0167、.0185），等級升高時「決定得更頻繁」恰好抵消

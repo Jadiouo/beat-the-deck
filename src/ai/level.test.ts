@@ -39,7 +39,7 @@ function recordingPolicy(): { policy: Policy; seen: number[]; calls: () => numbe
   return { policy, seen, calls: () => seen.length };
 }
 
-describe('levelParams：每 tick 失誤率必須隨等級單調下降（DESIGN-AI-FUN 10.52）', () => {
+describe('levelParams：每 tick 失誤率必須隨等級單調下降（DESIGN-AI-FUN 10.53）', () => {
   /** 每 tick 失誤事件的機率：每次決定擲一次骰（epsilon），每 decideEvery 個 tick 決定一次。 */
   const perTick = (level: number): number => {
     const p = levelParams(level);
