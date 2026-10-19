@@ -1,6 +1,7 @@
 import { intFrom, nextFrom, rngStateFor } from '../core/rng';
 import type { RngState } from '../core/rng';
 import type { Buttons, Controller, Game, Side } from '../core/types';
+import type { GameWithSelfFromPresent } from '../games/types';
 import { gambler } from './policies/gambler';
 import { greedy } from './policies/greedy';
 import { pathfinder } from './policies/pathfinder';
@@ -196,6 +197,8 @@ function checkParams(params: LevelParams): void {
  *   格子世界裡自己的位置也是舊的，延遲一旦跨過一個移動週期，就會從已經離開的格子算方向，導航失能。
  *   試過「性格看現在、決定延後生效」：回饋迴圈仍然會過衝震盪，同樣的斷崖，所以不用。
  *   不需要知道 state 的結構，也不動 core 的契約。
+ *   例外（選配）：重播重現不出外力造成的自身位移（被對手推開），牌可以宣告 `selfFromPresent`，
+ *   見上面的 `believe` 與 `GameWithSelfFromPresent`；只有宣告的牌受影響。
  *   t 還小於 reactionTicks 時，世界是起始 state，自己重播到現在。
  * - **僵局**：世界（不算 tick 計數器）連續 `STALL_TICKS` 個 tick 都只是重複最近 `STALL_WINDOW` 個 tick 內出現過的樣子，就在接下來 `BOLD_TICKS` 個 tick
  *   通知性格 `stalled`。這是從 state 的歷史算出來的，所以決定性與重播一致性都不變。
@@ -229,15 +232,25 @@ export function wrapPolicy<S>(
   let frozenFor = 0;
   let boldUntil = -1;
 
-  /** 把最舊那筆 state 用自己輸出過的按鍵（對手放開）重播到現在。 */
-  const believe = (side: Side): S => {
+  /**
+   * 牌有沒有宣告 `selfFromPresent`（外力造成的自身位移無法用重播重現）。沒宣告就是 undefined，
+   * 下面的 `believe` 不會走到 hook 那一行，行為與沒有這個機制時逐位元相同。
+   */
+  const selfFromPresent = (game as Partial<GameWithSelfFromPresent<S>>).selfFromPresent;
+
+  /**
+   * 把最舊那筆 state 用自己輸出過的按鍵（對手放開）重播到現在。
+   * 重播只含自己的輸入，被對手推開之類的外力位移重現不出來；牌若宣告了 `selfFromPresent`，
+   * 重播結果裡「自己」的欄位改取真實的現在 `present`（對手與世界仍然是舊的）。
+   */
+  const believe = (side: Side, present: S): S => {
     const first = history[0] as Remembered<S>;
     let state = first.state;
     for (let i = 0; i < history.length - 1 && !game.isOver(state); i += 1) {
       const mine = (history[i] as Remembered<S>).output;
       state = game.step(state, side === 0 ? [mine, NEUTRAL] : [NEUTRAL, mine]);
     }
-    return state;
+    return selfFromPresent === undefined ? state : selfFromPresent.call(game, state, present, side);
   };
 
   const decideFrom = (seen: S, side: Side, tick: number): Buttons => {
@@ -308,7 +321,7 @@ export function wrapPolicy<S>(
       }
 
       if (held === null || tick - lastDecision >= params.decideEvery) {
-        const seen = params.reactionTicks === 0 ? state : believe(side);
+        const seen = params.reactionTicks === 0 ? state : believe(side, state);
         held = decideFrom(seen, side, tick);
         lastDecision = tick;
       }
