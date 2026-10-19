@@ -182,8 +182,12 @@ describe('S-8 掃射｜縫內／縫外判定', () => {
     expect(after(outside).players[0].hits).toBe(1);
     const inner = makeState({ angle: PRE, players: [at(0, R_MIN, 0), at(0, 70, 0)] });
     expect(after(inner).players[0].hits).toBe(0);
-    const tooFar = makeState({ angle: PRE, players: [at(0, 40, 0), at(0, R_MAX + 0.01, 0)] });
+    // 縫朝下（角度 π / 2）才放得下 r = 90：往右最遠只到 x = 147
+    const down = Math.PI / 2;
+    const tooFar = makeState({ angle: down - OMEGA_START, players: [at(down, 40, 0), at(down, R_MAX + 0.01, 0)] });
     expect(after(tooFar).players[1].hits).toBe(1);
+    const farthest = makeState({ angle: down - OMEGA_START, players: [at(down, 40, 0), at(down, R_MAX - 0.01, 0)] });
+    expect(after(farthest).players[1].hits).toBe(0);
   });
 });
 
@@ -574,10 +578,10 @@ describe('S-8 掃射｜evaluate', () => {
     expect(inner - noneIn).toBeCloseTo(0, 9);
   });
 
-  it('預測的窗口是「無敵結束之後的 24 個 tick」：無敵 30 個 tick、站在縫外的人，danger 仍然是 1（不是因為無敵就當作安全）', () => {
+  it('預測的窗口是「無敵結束之後的 HORIZON 個 tick」：無敵 30 個 tick（比 HORIZON 長）、站在縫外的人，danger 仍然是 1（不是因為無敵就當作安全）', () => {
     const shielded = makeState({ tick: 500, angle: 0, players: [{ x: 20, y: 200, invuln: 30 }, { x: 140, y: 20 }] });
     expect(s8Game.evaluate(shielded, 0).danger).toBe(1);
-    expect(HORIZON).toBe(24);
+    expect(HORIZON).toBe(10); // 小規格的起始值是 24；實測改成 10（docs/cards/S-8.md「HORIZON」）
   });
 
   it('結束的局：gain 是分差 × 1000、danger 是 0', () => {
