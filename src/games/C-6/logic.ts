@@ -104,6 +104,39 @@ export function facingOf(index: number): number {
   return FACING[index] as number;
 }
 
+/**
+ * 每一格往四個方向看，第一道中間牆在幾格之外（`evaluate` 的前方與兩側判斷用；牆是固定的，所以開機時算一次）。
+ * `AHEAD_WALL[dir × CELLS + c]`：往 dir 走 1 到 `RUN_LOOKAHEAD − 1` 格內遇到牆的距離，先遇到地圖邊界或根本沒有是 0。
+ * `SIDE_WALL` 同理，只看 `SIDE_PENALTY.length` 格。
+ */
+const AHEAD_WALL = new Uint8Array(4 * CELLS);
+const SIDE_WALL = new Uint8Array(4 * CELLS);
+for (let dir = 0; dir < 4; dir += 1) {
+  for (let c = 0; c < CELLS; c += 1) {
+    for (const [table, limit] of [
+      [AHEAD_WALL, RUN_LOOKAHEAD - 1],
+      [SIDE_WALL, SIDE_PENALTY.length],
+    ] as const) {
+      for (let r = 1; r <= limit; r += 1) {
+        const x = cellX(c) + r * (DX[dir] as number);
+        const y = cellY(c) + r * (DY[dir] as number);
+        if (x < 0 || x >= WIDTH || y < 0 || y >= HEIGHT) {
+          break;
+        }
+        if (IS_WALL[cell(x, y)] === 1) {
+          table[dir * CELLS + c] = r;
+          break;
+        }
+      }
+    }
+  }
+}
+/** 前方 r 格有牆的 danger（和 `evaluateClubs` 對邊界的算法同一條曲線）。 */
+const RUN_COST: readonly number[] = Array.from(
+  { length: RUN_LOOKAHEAD },
+  (_, r) => RUN_DANGER * Math.pow(1 - r / RUN_LOOKAHEAD, RUN_EXPONENT),
+);
+
 /** 食物、`evaluate` 的障礙判斷用：牆與門口都不可以放食物。 */
 const FOOD_BLOCKERS: readonly number[] = [...WALL_CELLS, ...PORTALS.map((p) => p.cell)];
 
@@ -173,7 +206,28 @@ const fieldCache = new Map<number, Uint8Array>();
 const FIELD_CACHE_LIMIT = 256;
 
 /** 到最近的 `targets` 的距離場（以食物配置為鍵記起來；同樣輸入永遠同樣答案；回傳的陣列不可以改）。 */
+/** 上一次的輸入與答案：搜尋時同一組食物會連續問上千次，內容一樣就不用重排序、重算鍵。 */
+let lastIn: readonly number[] = [];
+let lastOut: Uint8Array | null = null;
 export function fieldFor(targets: readonly number[]): Uint8Array {
+  if (lastOut !== null && targets.length === lastIn.length) {
+    let same = true;
+    for (let i = 0; i < targets.length; i += 1) {
+      if (targets[i] !== lastIn[i]) {
+        same = false;
+        break;
+      }
+    }
+    if (same) {
+      return lastOut;
+    }
+  }
+  const field = fieldForSorted(targets);
+  lastIn = targets.slice();
+  lastOut = field;
+  return field;
+}
+function fieldForSorted(targets: readonly number[]): Uint8Array {
   if (targets.length > 5) {
     return buildField(targets);
   }
@@ -447,53 +501,49 @@ export function evaluateC6(state: C6State, side: Side): { gain: number; danger: 
     exit >= 0
       ? exit
       : cell(cellX(head) + (DX[me.turn] as number), cellY(head) + (DY[me.turn] as number));
+  const foods = state.foods;
+  const tx = cellX(target);
+  const ty = cellY(target);
+  const near = nearestManhattan(foods, tx, ty);
   let gain = base.gain;
-  if (state.foods.length > 0) {
-    const field = fieldFor(state.foods);
-    const moves = Math.min(FAR, (exit >= 0 ? wait : 0) + (field[target] as number));
-    gain += FOOD_GRADIENT * (nearestManhattan(state.foods, cellX(target), cellY(target)) - moves);
+  if (foods.length > 0) {
+    const moves = Math.min(FAR, (exit >= 0 ? wait : 0) + (fieldFor(foods)[target] as number));
+    gain += FOOD_GRADIENT * (near - moves);
   }
 
   // 兩側的牆：形狀同 `evaluateClubs` 對蛇身與邊界的兩側扣分（離食物近時打折），但整個乘上 `WALL_SIDE_WEIGHT`。
-  {
-    const turnDir = exit >= 0 ? (FACING[exit] as number) : me.turn;
-    const near = nearestManhattan(state.foods, cellX(target), cellY(target));
-    for (const sideDir of [(turnDir + 1) % 4, (turnDir + 3) % 4]) {
-      for (let r = 1; r <= SIDE_PENALTY.length; r += 1) {
-        const x = cellX(target) + r * (DX[sideDir] as number);
-        const y = cellY(target) + r * (DY[sideDir] as number);
-        if (x < 0 || x >= WIDTH || y < 0 || y >= HEIGHT) {
-          break;
-        }
-        if (IS_WALL[cell(x, y)] === 1) {
-          gain -=
-            WALL_SIDE_WEIGHT *
-            (SIDE_PENALTY[r - 1] as number) *
-            Math.min(1, near / SIDE_PENALTY_FOOD_RANGE);
-          break;
-        }
-      }
+  const ahead = exit >= 0 ? (FACING[exit] as number) : me.turn;
+  for (const sideDir of [(ahead + 1) % 4, (ahead + 3) % 4]) {
+    const r = SIDE_WALL[sideDir * CELLS + target] as number;
+    if (r > 0) {
+      gain -=
+        WALL_SIDE_WEIGHT *
+        (SIDE_PENALTY[r - 1] as number) *
+        Math.min(1, near / SIDE_PENALTY_FOOD_RANGE);
     }
   }
   // 前方的牆：`evaluateClubs` 只認蛇身與地圖邊界，中間的牆自己算。規則同它對邊界的處理：
   // 食物在牆前面（蛇會先吃到食物再轉彎）就不算前方障礙，否則牆邊的食物永遠沒人敢吃（10.31）。
   let danger = base.danger;
-  const ahead = exit >= 0 ? (FACING[exit] as number) : me.turn;
-  if (!state.foods.includes(target)) {
-    for (let r = 1; r < RUN_LOOKAHEAD; r += 1) {
-      const x = cellX(target) + r * (DX[ahead] as number);
-      const y = cellY(target) + r * (DY[ahead] as number);
-      if (x < 0 || x >= WIDTH || y < 0 || y >= HEIGHT) {
+  const wallAt = AHEAD_WALL[ahead * CELLS + target] as number;
+  if (wallAt > 0 && !foods.includes(target)) {
+    let foodFirst = false;
+    for (const f of foods) {
+      const dx = cellX(f) - tx;
+      const dy = cellY(f) - ty;
+      const along = dx * (DX[ahead] as number) + dy * (DY[ahead] as number);
+      if (
+        along >= 1 &&
+        along < wallAt &&
+        dx * (DY[ahead] as number) === 0 &&
+        dy * (DX[ahead] as number) === 0
+      ) {
+        foodFirst = true;
         break;
       }
-      const c = cell(x, y);
-      if (IS_WALL[c] === 1) {
-        danger = Math.max(danger, RUN_DANGER * Math.pow(1 - r / RUN_LOOKAHEAD, RUN_EXPONENT));
-        break;
-      }
-      if (state.foods.includes(c)) {
-        break;
-      }
+    }
+    if (!foodFirst) {
+      danger = Math.max(danger, RUN_COST[wallAt] as number);
     }
   }
   if (exit >= 0) {
