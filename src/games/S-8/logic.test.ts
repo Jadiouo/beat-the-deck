@@ -1,7 +1,14 @@
 import { describe, expect, it } from 'vitest';
 
 import { deepFreeze } from '../../../tests/contract/freeze';
-import type { Buttons, Inputs } from '../../core/types';
+import { HUMAN_PARAMS } from '../../ai/human-model';
+import { levelController, policyByName, wrapPolicy } from '../../ai/level';
+import { lookOneStep } from '../../ai/policies/shared';
+import { greedy } from '../../ai/policies/greedy';
+import { precise } from '../../ai/policies/precise';
+import { winRate } from '../../ai/evolution';
+import { playMatch } from '../../core/match';
+import type { Buttons, Controller, Inputs } from '../../core/types';
 import { FIELD_H, FIELD_W } from '../_spades/logic';
 import {
   BODY_DIST,
@@ -27,6 +34,8 @@ import {
   slitCoords,
 } from './logic';
 import type { S8State } from './logic';
+import { mean, playRecord, scripted } from './players.test-helpers';
+import type { MatchRecord, ScriptKind } from './players.test-helpers';
 
 /**
  * S-8 掃射的規則測試（小規格 `docs/cards/S-8.md`）。全部用 `makeState` 直接構造局面，不靠跑很多 tick 碰運氣。
@@ -589,4 +598,150 @@ describe('S-8 掃射｜evaluate', () => {
     expect(s8Game.evaluate(done, 0)).toEqual({ gain: 6000, danger: 0 });
     expect(s8Game.evaluate(done, 1)).toEqual({ gain: -6000, danger: 0 });
   });
+});
+
+// ---------------------------------------------------------------------------
+// 量測（DESIGN-AI-FUN 3.1、10.3、10.24、10.35、10.48；數字與解讀在 docs/cards/S-8.md）
+// 這一段是實作之後、量到數字才寫的（規則測試在前面、先紅過）；每格場數小（標準誤 10 個百分點上下），
+// 所以斷言只放很寬的界線，更大的樣本（200 場以上、多個種子區塊）在小規格裡。對手是精準型等級 10；偶數種子坐 0 號邊。
+// ---------------------------------------------------------------------------
+
+describe('S-8 掃射｜量測', () => {
+  const N = 16;
+  const sideOf = (seed: number): 0 | 1 => (seed % 2 === 0 ? 0 : 1);
+  const ai = (level: number, seed: number): Controller<S8State> =>
+    levelController(s8Game, precise, level, seed + 1_000_003);
+  const human = (seed: number): Controller<S8State> =>
+    wrapPolicy(s8Game, policyByName('pathfinder'), HUMAN_PARAMS, seed);
+  const IDLE_CONTROLLER: Controller<S8State> = { decide: () => NONE };
+  function rows(
+    makeMe: (seed: number) => Controller<S8State>,
+    makeOpp: (seed: number) => Controller<S8State>,
+    n = N,
+  ): MatchRecord[] {
+    return Array.from({ length: n }, (_, seed) =>
+      playRecord(makeMe(seed), makeOpp(seed), seed, sideOf(seed), s8Game),
+    );
+  }
+  const win = (records: readonly MatchRecord[]): number => 100 * mean(records.map((r) => r.points));
+
+  it('局長：每一局都跑滿 2700 tick（45 秒），在 30 到 90 秒之間 —— 精準型 10 對 10、人類模型對 10／2／1 四個情境', () => {
+    const scenarios: [string, (seed: number) => Controller<S8State>, (seed: number) => Controller<S8State>][] = [
+      ['10 對 10', (seed) => levelController(s8Game, precise, 10, seed), (seed) => ai(10, seed)],
+      ['人類模型對 10', human, (seed) => ai(10, seed)],
+      ['人類模型對 2', human, (seed) => ai(2, seed)],
+      ['人類模型對 1', human, (seed) => ai(1, seed)],
+    ];
+    for (const [name, makeMe, makeOpp] of scenarios) {
+      for (let seed = 0; seed < 3; seed += 1) {
+        const r = playMatch(s8Game, seed, CONFIG, makeMe(seed), makeOpp(seed));
+        expect(r.ticks, `${name} 種子 ${seed}`).toBe(2700);
+        expect(r.ticks / 60).toBeGreaterThanOrEqual(30);
+        expect(r.ticks / 60).toBeLessThanOrEqual(90);
+      }
+    }
+  }, 600_000);
+
+  it('互動的頻率（第一件要量的事）：兩人同時在縫裡的 tick 占一場的比例 —— 10 對 10 約九成，人類模型對 10 約七成，對最弱的也 ≥ 20%', () => {
+    const both = (rs: readonly MatchRecord[]): number => mean(rs.map((r) => r.bothIn));
+    const tenTen = both(rows((seed) => levelController(s8Game, precise, 10, seed), (seed) => ai(10, seed)));
+    const humanTen = both(rows(human, (seed) => ai(10, seed)));
+    const humanOne = both(rows(human, (seed) => ai(1, seed)));
+    expect(tenTen).toBeGreaterThanOrEqual(0.85);
+    expect(humanTen).toBeGreaterThanOrEqual(0.55);
+    expect(humanOne).toBeGreaterThanOrEqual(0.2);
+  }, 3_600_000);
+
+  it('等級差是物理上真的：單人（對手不動）時，等級 10 幾乎一直在縫裡、等級 5 只有一半多、等級 1 大半時間跟丟', () => {
+    const inSlit = (level: number): number =>
+      mean(rows((seed) => levelController(s8Game, precise, level, seed), () => IDLE_CONTROLLER, 6).map((r) => r.inMe));
+    const ten = inSlit(10);
+    const five = inSlit(5);
+    const one = inSlit(1);
+    expect(ten).toBeGreaterThanOrEqual(0.9);
+    expect(five).toBeLessThanOrEqual(0.85);
+    expect(five).toBeGreaterThan(one);
+    expect(one).toBeLessThanOrEqual(0.55);
+  }, 3_600_000);
+
+  it('探針 A 的三列與劇本玩家（對精準型等級 10，每格 16 場；標準誤約 10 個百分點，更大的樣本在小規格）：擠它的人 > 不看對手的人 > 只守內側的人', () => {
+    const row = (kind: ScriptKind): MatchRecord[] => rows(() => scripted(kind), (seed) => ai(10, seed));
+    const squeeze = row('squeeze');
+    const a = row('a');
+    const inner = row('inner');
+    expect(win(squeeze)).toBeGreaterThanOrEqual(75);
+    expect(win(a)).toBeLessThanOrEqual(65);
+    expect(win(inner)).toBeLessThanOrEqual(25);
+    expect(win(squeeze)).toBeGreaterThan(win(a) + 30);
+    // 擠的人把 AI 擠出縫：AI 被打中的次數比不擠的人（a）多
+    expect(mean(squeeze.map((r) => r.hitsOpp))).toBeGreaterThan(mean(a.map((r) => r.hitsOpp)) + 1);
+    // 互相推開的 tick 也多一倍以上
+    expect(mean(squeeze.map((r) => r.bumped))).toBeGreaterThan(2 * mean(a.map((r) => r.bumped)));
+  }, 3_600_000);
+
+  it('A4（人類模型對精準型等級 10，16 場）：贏不了（勝率 ≤ 10%）；對照上一條，會擠人的劇本玩家贏得了', () => {
+    expect(win(rows(human, (seed) => ai(10, seed)))).toBeLessThanOrEqual(10);
+  }, 3_600_000);
+
+  it('反應速度測試（DESIGN-AI-FUN 3.1，精準型，16 場）：快而淺對慢而深 ≥ 90%（沒過）；拆開之後全部來自決定頻率，反應延遲單獨只有五成上下', () => {
+    const seeds = Array.from({ length: N }, (_, i) => i);
+    const run = (fast: [number, number, number], slow: [number, number, number]): number =>
+      100 *
+      winRate(
+        s8Game,
+        precise,
+        { reactionTicks: fast[0], decideEvery: fast[1], depth: fast[2], epsilon: 0 },
+        precise,
+        { reactionTicks: slow[0], decideEvery: slow[1], depth: slow[2], epsilon: 0 },
+        seeds,
+        CONFIG,
+      );
+    expect(run([3, 1, 1], [18, 12, 6])).toBeGreaterThanOrEqual(90);
+    expect(run([12, 1, 1], [12, 12, 1])).toBeGreaterThanOrEqual(90);
+    expect(run([3, 1, 1], [18, 1, 1])).toBeLessThanOrEqual(75);
+  }, 3_600_000);
+  it.todo('不是純反應競速（反應速度測試 < 90%）：未達成，合併 100%、只差決定頻率 100%（docs/cards/S-8.md「反應速度四格」）');
+
+  it('四個性格的指紋（機制，10.48）：選到 danger ≥ 0.5 的決定占比 精準型 < 賭徒型 < 貪心型，貪心型被打中的次數遠高於精準型（對精準型等級 10，12 場，每個決定都量）', () => {
+    const stats = (name: 'precise' | 'gambler' | 'greedy'): { high: number; hits: number; danger: number } => {
+      let decisions = 0;
+      let high = 0;
+      let danger = 0;
+      let hits = 0;
+      const n = 12;
+      for (let seed = 0; seed < n; seed += 1) {
+        const side = sideOf(seed);
+        const me = levelController(s8Game, policyByName(name), 10, seed);
+        const opp = ai(10, seed);
+        let state = s8Game.init(seed, CONFIG);
+        for (let tick = 0; !s8Game.isOver(state); tick += 1) {
+          const a = me.decide(state, side, tick);
+          const b = opp.decide(state, side === 0 ? 1 : 0, tick);
+          const actions = s8Game.actions(state, side);
+          const index = actions.findIndex((x) => JSON.stringify(x) === JSON.stringify(a));
+          if (index >= 0) {
+            const d = (lookOneStep(s8Game, state, side)[index] as { danger: number }).danger;
+            decisions += 1;
+            high += d >= 0.5 ? 1 : 0;
+            danger += d;
+          }
+          state = s8Game.step(state, side === 0 ? [a, b] : [b, a]);
+        }
+        hits += state.players[side].hits;
+      }
+      return { high: high / decisions, hits: hits / n, danger: danger / decisions };
+    };
+    const p = stats('precise');
+    const g = stats('gambler');
+    const gr = stats('greedy');
+    expect(g.high).toBeGreaterThanOrEqual(2 * Math.max(p.high, 0.01));
+    expect(gr.high).toBeGreaterThanOrEqual(1.5 * g.high);
+    expect(gr.danger).toBeGreaterThanOrEqual(2 * g.danger);
+    expect(gr.hits).toBeGreaterThanOrEqual(3 * Math.max(p.hits, 1));
+  }, 3_600_000);
+
+  it('貪心型對精準型等級 10 的勝率（診斷）：貪心型不看 danger，被擠出縫、被打中最多，輸光', () => {
+    const seeds = Array.from({ length: 12 }, (_, i) => i);
+    expect(100 * winRate(s8Game, greedy, 10, precise, 10, seeds, CONFIG)).toBeLessThanOrEqual(10);
+  }, 3_600_000);
 });
