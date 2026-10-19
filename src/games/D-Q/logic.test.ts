@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import { levelController } from '../../ai/level';
+import { winRate } from '../../ai/evolution';
+import { levelController, levelParams } from '../../ai/level';
 import { gambler } from '../../ai/policies/gambler';
 import { greedy } from '../../ai/policies/greedy';
 import { pathfinder } from '../../ai/policies/pathfinder';
@@ -658,4 +659,46 @@ describe('D-Q 唯一的礦｜互動強度（DESIGN-AI-FUN 2.5）', () => {
     expect(samples.length).toBeGreaterThanOrEqual(150);
     expect(changed / samples.length).toBeGreaterThanOrEqual(0.2);
   });
+});
+
+describe('D-Q 唯一的礦｜走格週期內問幾次都一樣（10.49 群一：每 tick 決定在 5 tick 走一格的牌上不該變弱）', () => {
+  it('danger：開挖那一拍剛挖到的礦石不算進「身上的庫存」（走格與開挖同一個 tick，這筆是留下來的獎勵，不是風險）', () => {
+    // 站在礦上、身上 6 塊、礦已挖 10 次。找一個這一次開挖不會塌的亂數。
+    let found: DQState | null = null;
+    for (let seed = 0; seed < 50 && found === null; seed += 1) {
+      const before = makeState({
+        tick: MINE_EVERY - 1,
+        age: 10,
+        carried: [6, 0],
+        rng: rngStateFor(seed, 'coins'),
+        players: [{ cell: cell(15, 12) }, { cell: cell(2, 2) }],
+      });
+      const after = dQGame.step(before, [NONE, NONE]);
+      if (after.collapses === 0) {
+        found = after;
+      }
+    }
+    expect(found).not.toBeNull();
+    const dug = found as DQState;
+    expect(dug.carried[0]).toBe(6 + SOLO_YIELD);
+    const withoutFresh: DQState = { ...dug, carried: [6, 0] };
+    expect(dQGame.evaluate(dug, 0).danger).toBeCloseTo(dQGame.evaluate(withoutFresh, 0).danger, 10);
+    // 下一拍（不是開挖的 tick）這 2 塊就是庫存了：同樣的比較，身上多 2 塊 danger 更高。
+    const later: DQState = { ...dug, tick: dug.tick + 1 };
+    const laterLess: DQState = { ...later, carried: [6, 0] };
+    expect(dQGame.evaluate(later, 0).danger).toBeGreaterThan(dQGame.evaluate(laterLess, 0).danger);
+  });
+
+  it(
+    '同一個性格、等級 10：每 tick 決定的對每 5 個 tick 決定的，勝率至少 40%（20 場；修之前約 0 到 2%）',
+    { timeout: 120_000 },
+    () => {
+      const every1 = levelParams(10);
+      const every5 = { ...levelParams(10), decideEvery: 5 };
+      const seeds = Array.from({ length: 20 }, (_, i) => i);
+      expect(
+        winRate(dQGame, precise, every1, precise, every5, seeds, CONFIG),
+      ).toBeGreaterThanOrEqual(0.4);
+    },
+  );
 });

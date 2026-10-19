@@ -663,7 +663,13 @@ describe('D-8 塗地｜互動強度（DESIGN-AI-FUN 2.5）', () => {
 describe('D-8 塗地｜兩邊對等（K12 的根因：距離相同的目標，兩邊要選到鏡像的那一格）', () => {
   const flip = (c: number): number => cell(31 - cellX(c), 23 - cellY(c));
   const turn = (d: number): number => (d < 0 ? d : (d + 2) % 4);
-  const turnButtons = (b: Buttons): Buttons => ({ ...b, up: b.down, down: b.up, left: b.right, right: b.left });
+  const turnButtons = (b: Buttons): Buttons => ({
+    ...b,
+    up: b.down,
+    down: b.up,
+    left: b.right,
+    right: b.left,
+  });
 
   /** 把整個局面轉 180 度並交換兩邊：0 號邊的視角變成 1 號邊的視角。 */
   function mirror(s: D8State): D8State {
@@ -680,7 +686,7 @@ describe('D-8 塗地｜兩邊對等（K12 的根因：距離相同的目標，�
     const w = (i: 0 | 1) => ({
       ...s.players[i],
       cell: flip(s.players[i].cell),
-      pending: turn(s.players[i].pending) as typeof s.players[0]['pending'],
+      pending: turn(s.players[i].pending) as (typeof s.players)[0]['pending'],
     });
     return {
       ...s,
@@ -698,7 +704,7 @@ describe('D-8 塗地｜兩邊對等（K12 的根因：距離相同的目標，�
     for (let t = 0; t < ticks; t += 1) {
       const pick = (side: number): Buttons => {
         const k = (t * 7 + side * 13 + seed * 5) % 23;
-        return k < 4 ? [PRESS_UP, PRESS_RIGHT, PRESS_DOWN, PRESS_LEFT][k] ?? NONE : NONE;
+        return k < 4 ? ([PRESS_UP, PRESS_RIGHT, PRESS_DOWN, PRESS_LEFT][k] ?? NONE) : NONE;
       };
       state = d8Game.step(state, [pick(0), pick(1)]);
     }
@@ -722,5 +728,30 @@ describe('D-8 塗地｜兩邊對等（K12 的根因：距離相同的目標，�
       }
     }
     expect(compared).toBe(96);
+  });
+});
+
+describe('D-8 塗地｜走格週期內問幾次都一樣（10.49 群一：每 tick 決定在 5 tick 走一格的牌上不該變弱）', () => {
+  it('actions：走格剛結束、還沒按方向時，排序與「已鎖定成上一次走的方向」完全相同（目標不因為這一拍有沒有鎖定而換）', () => {
+    // 用貪心型自己打一場，收集每個走格週期第一拍（沒有待走方向、有上一次的走向）的局面。
+    const a = levelController(d8Game, greedy, 10, 3);
+    const b = levelController(d8Game, greedy, 10, 3 + 1_000_003);
+    let state = d8Game.init(3, CONFIG);
+    let checked = 0;
+    for (let tick = 0; tick < 900 && !d8Game.isOver(state); tick += 1) {
+      if (tick % 5 === 0 && state.players[0].pending < 0 && state.heading[0] >= 0) {
+        const locked = {
+          ...state,
+          players: [{ ...state.players[0], pending: state.heading[0] }, state.players[1]],
+        } as unknown as D8State;
+        expect(d8Game.actions(state, 0), `tick ${tick}`).toEqual(d8Game.actions(locked, 0));
+        checked += 1;
+      }
+      state = d8Game.step(state, [
+        copyButtons(a.decide(state, 0, tick)),
+        copyButtons(b.decide(state, 1, tick)),
+      ]);
+    }
+    expect(checked).toBeGreaterThan(50);
   });
 });
