@@ -59,7 +59,7 @@ export interface CardMeta {
    * （DESIGN-AI-FUN 10.14 的判準）。契約測試對它跳過 A4（輸出印出「不適用」與帶實測數字的理由，
    * 絕不回報通過）；A1、A2、A3、A5 照跑，門檻不動。小規格要附簡單策略的勝率表。
    * 這和 `reflexOnly`（沒有策略深度）、`equilibriumCapped`（均衡不可剝削）是不同的理由，不共用旗標。
-   * 只有老闆核准的牌可以掛（H-6）；簡單策略明顯不夠好的牌（梅花、D-4 之類）不准用它蓋掉 A4。
+   * 只有老闆核准的牌可以掛（H-6、H-5、S-10；第四張出現就要重新檢討 10.14 的判準，見 DESIGN-AI-FUN 末節）；簡單策略明顯不夠好的牌（梅花、D-4 之類）不准用它蓋掉 A4。
    */
   readonly simpleStrategyViable?: boolean;
   /**

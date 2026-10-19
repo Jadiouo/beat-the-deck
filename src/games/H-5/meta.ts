@@ -14,4 +14,6 @@ export const h5Meta: CardMeta = {
   baseLevel: 2,
   symmetric: true,
   luckHeavy: true,
+  /** A4 豁免（DESIGN-AI-FUN 10.14，老闆 2026-10-19 裁示）：固定門檻 15 的簡單策略勝率 51.5%。前提由 tests/ai/simple-strategy-premise.h5.test.ts 看守。 */
+  simpleStrategyViable: true,
 };

@@ -14,4 +14,6 @@ export const s10Meta: CardMeta = {
   baseLevel: 3,
   symmetric: true,
   defaultMaxTicks: 2700,
+  /** A4 豁免（DESIGN-AI-FUN 10.14，老闆 2026-10-19 裁示）：子彈 ≥ 8 才按清場的簡單策略 39.0%，等於人類模型。前提由 tests/ai/simple-strategy-premise.s10.test.ts 看守。 */
+  simpleStrategyViable: true,
 };
