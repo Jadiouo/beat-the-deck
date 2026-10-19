@@ -55,6 +55,8 @@ export const STAY_PENALTY = 400;
 export const HEADING_LOOK = 12;
 /** 評估：走到一格要比它掉下去的時間至少早這麼多個 tick 才算走得到（走位不會剛好是直線）。 */
 export const SAFETY_TICKS = 4;
+/** 評估：腳下格子的上下左右每有一格已經掉了（站在洞的邊上，踩錯一步就掉下去），danger 加這個值的四分之一。 */
+export const EDGE_DANGER = 0.8;
 /** 評估：一回合的輸贏值多少。 */
 export const ROUND_VALUE = 1000;
 
@@ -556,8 +558,12 @@ export function actionsS9(state: S9State, side: Side): readonly Buttons[] {
 }
 
 /**
- * 評估。進行中：`gain = 10 × (我的領地 − 對手的領地) + 我走得到的格子數`；
- * `danger = clamp((12 − 走得到的格子數) / 12, 0, 1)`，腳下的格子撐不到任何一個鄰格時是 1。
+ * 評估。進行中：
+ * - `gain = 10 × (我的領地 − 對手的領地) + 我走得到的格子數 − 400 × 來不及²`。領地與走得到的格子數都是時間感知的廣度優先搜尋算的；
+ *   「來不及」是 `clamp((20 − 餘裕) / 20, 0, 1.5)`，餘裕是走到一個新鮮格子的最好一條路上每一格「剩下的 tick 減走到它的 tick」的最小值
+ *   （腳下的格子也算）。來不及是確定的損失，不是風險，所以扣在 gain，不放進 danger（賭徒型把 danger 當加成，放進去它會等到來不及）。
+ * - `danger`：腳下的格子撐不到任何一個鄰格、或照目前的速度再走 12 個 tick 會走進（或來不及走到）已掉的格子：1；
+ *   否則取兩者較大的：被困的風險 `clamp((12 − 走得到的格子數) / 12, 0, 1)`、站在洞邊的風險（上下左右每一格已掉的鄰格 0.2）。
  * 一回合結束（停頓、整場結束）：`gain = ±1000`（我贏這一回合 / 我輸 / 平手 0），
  * 我腳下的格子掉了時 `danger = 1`，否則 0。兩邊贏的回合數不進進行中的評估（沒有橡皮筋）。
  */
@@ -604,12 +610,26 @@ export function evaluateWithRival(
     slack = t.slack[side];
   }
   const late = clamp((STAY_SAFE - slack) / STAY_SAFE, 0, 1.5);
+  const edge = (EDGE_DANGER * holeNeighbors(state.tiles, me)) / 4;
   const gain = TERRITORY_WEIGHT * owned + reach - STAY_PENALTY * late * late;
   const danger =
     exits === 0 || headingBlocked(state.tiles, me)
       ? 1
-      : clamp((REACH_SAFE - reach) / REACH_SAFE, 0, 1);
+      : Math.max(clamp((REACH_SAFE - reach) / REACH_SAFE, 0, 1), edge);
   return { gain, danger };
+}
+
+/** 腳下格子的上下左右有幾格已經掉了（場地邊緣不算，崩落中還沒掉的也不算）。 */
+export function holeNeighbors(tiles: readonly number[], p: S9Player): number {
+  const at = tileAt(p.x, p.y);
+  let count = 0;
+  for (let k = 0; k < 4; k += 1) {
+    const n = NEIGHBORS[at * 4 + k] as number;
+    if (n >= 0 && (tiles[n] as number) === GONE) {
+      count += 1;
+    }
+  }
+  return count;
 }
 
 /**
