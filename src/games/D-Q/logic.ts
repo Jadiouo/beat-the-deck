@@ -108,6 +108,31 @@ export function hazardPermille(age: number): number {
   return Math.min(1000, HAZARD_STEP * age);
 }
 
+/**
+ * 評估時「下一次開挖」是第幾次：開挖與走格同一個 tick 結算，剛結算完那一拍的 state 的 `age` 已經多了 1，
+ * 但做出這個動作的決定是在開挖之前（同一個走格週期的前幾拍看到的是沒加的）。
+ * 這一拍要和前幾拍用同一個機率，不然週期最後一拍的決定會比前幾拍多算一次開挖的風險。塌了的那一次（`age` 歸零）不調。
+ */
+export function upcomingAge(state: DQState): number {
+  const justDug = state.tick > 0 && state.tick % MINE_EVERY === 0 && state.age > 0;
+  return state.age + (justDug ? 0 : 1);
+}
+
+/**
+ * 這個 state 是不是剛結算完一次開挖，是的話 `walker` 這次挖到幾塊（從 state 推得出來：開挖在走格之後，
+ * 所以挖礦時的位置就是現在的位置）。塌了的那一次（`age` 歸零）礦石已經作廢，回傳 0。
+ */
+export function freshOre(state: DQState, walker: Walker): number {
+  if (state.tick === 0 || state.tick % MINE_EVERY !== 0 || state.age === 0) {
+    return 0;
+  }
+  if (zoneDistance(walker.cell, state.mine) > MINE_REACH) {
+    return 0;
+  }
+  const other = walker === state.players[0] ? state.players[1] : state.players[0];
+  return zoneDistance(other.cell, state.mine) <= MINE_REACH ? SHARED_YIELD : SOLO_YIELD;
+}
+
 // ---------------------------------------------------------------------------
 // 挑礦的位置
 // ---------------------------------------------------------------------------
@@ -320,7 +345,7 @@ export const dQGame: Game<DQState> = {
       -RACE_CAP,
       Math.min(RACE_CAP, (toNext[oppNext] as number) - (toNext[myNext] as number)),
     );
-    const race = (RACE_PER_MOVE * hazardPermille(state.age + 1) * lead) / 1000;
+    const race = (RACE_PER_MOVE * hazardPermille(upcomingAge(state)) * lead) / 1000;
     const gain =
       GAIN_PER_POINT * (score - opponent.score) +
       race +
@@ -338,8 +363,11 @@ export const dQGame: Game<DQState> = {
     if (leaving) {
       events = (MOVE_EVERY - (state.tick % MOVE_EVERY) + MOVE_EVERY * exit) / MINE_EVERY;
     }
-    const collapse = 1 - Math.pow(1 - hazardPermille(state.age + 1) / 1000, events);
-    const x = (collapse * (carried + yieldNow)) / RISK_SCALE;
+    const collapse = 1 - Math.pow(1 - hazardPermille(upcomingAge(state)) / 1000, events);
+    // 剛挖到的礦石不算「放在身上的風險」：挖礦與走格在同一個 tick 結算（先走格、再挖），
+    // 這個 tick 的挖礦量是留下來的獎勵，不是已經在身上的庫存。算進去的話，走格週期最後一拍的評估
+    // 會比前幾拍多算這一筆風險，把本來要再挖一次的動作否決掉。
+    const x = (collapse * (Math.max(0, carried - freshOre(state, me)) + yieldNow)) / RISK_SCALE;
     return { gain, danger: x / (1 + x) };
   },
 };

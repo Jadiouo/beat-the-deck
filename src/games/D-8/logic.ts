@@ -284,7 +284,8 @@ function nearestTargets(
     }
     if (unpaintedDist >= 0 && opponentDist >= 0 && d >= Math.max(unpaintedDist, opponentDist)) {
       // 兩種都找到了，而且這一層（距離相同的格子）已經看完。
-      const upcoming = head < tail ? (DIST[QUEUE[head] as number] as number) : Number.POSITIVE_INFINITY;
+      const upcoming =
+        head < tail ? (DIST[QUEUE[head] as number] as number) : Number.POSITIVE_INFINITY;
       if (upcoming > d) {
         break;
       }
@@ -462,7 +463,14 @@ export const d8Game: Game<D8State> = {
     // 目標從「已鎖定的下一步走完之後的格子」找（目標不會跟著按鍵跳來跳去）；方向卻要從「現在的格子」排：
     // 走格的那一刻按了哪個方向，就是從現在的格子往那個方向走一格。（前一版連方向也從鎖定後的格子排，
     // 鎖定往右時排最前面的常是現在走不動的方向；搜尋型每個走格週期最後一下按到它，整場站在上緣原地不動。）
-    const planned: Walker = { ...me, cell: nextCell(state.walls, me) };
+    // 走格剛結束、這一拍還沒按方向（`pending` 是 -1）時，「已鎖定的下一步」用上一次走的方向代替：
+    // 否則走格週期的第一拍會從「現在的格子」找目標，其餘幾拍從「前面一格」找，距離相同的目標與方向的平手
+    // 就在第一拍選成階梯狀（一直轉彎），其餘幾拍選成直線。每 tick 決定的 AI 第一拍一定先決定，變成整場階梯。
+    const ahead =
+      me.pending < 0 && state.heading[side] >= 0
+        ? stepTarget(state.walls, me.cell, state.heading[side] as Dir)
+        : nextCell(state.walls, me);
+    const planned: Walker = { ...me, cell: ahead };
     const target = pickTarget(
       nearestTargets(
         state.walls,
