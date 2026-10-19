@@ -240,6 +240,29 @@ describe('D-A 搶金幣｜動作與評估（給貪心型用）', () => {
     expect(dAGame.actions(down, 1)[0]).toEqual(PRESS_DOWN);
   });
 
+  it('actions：排最前面的方向是「搶得到的那一枚」，不是單純最近的那一枚（對手比我近的金幣要加 CONTEST_PENALTY，和 evaluate 同一個標準）', () => {
+    // 人在 (10, 10)。左邊 4 格有一枚，但對手就站在它旁邊（對手 1 格、我 4 格）；下面 7 格有一枚，對手離它很遠。
+    // 最近的是左邊那枚（4），可是它搶不到（4 + 8 = 12）；下面那枚 7 比較划算 → 下排最前面。
+    const state = makeState({
+      players: [{ cell: cell(10, 10) }, { cell: cell(5, 10) }],
+      coins: [cell(6, 10), cell(10, 17)],
+    });
+    expect(dAGame.actions(state, 0)[0]).toEqual(PRESS_DOWN);
+    expect(dAGame.actions(state, 0)[4]).toEqual(NONE);
+    // 對手不比我近的時候，還是最近的那枚。
+    const open = makeState({
+      players: [{ cell: cell(10, 10) }, { cell: cell(30, 1) }],
+      coins: [cell(6, 10), cell(10, 17)],
+    });
+    expect(dAGame.actions(open, 0)[0]).toEqual(PRESS_LEFT);
+    // 1 號邊（轉 180 度）：同樣的局面轉過來，結論也要轉過來（上排最前面）。
+    const mirrored = makeState({
+      players: [{ cell: cell(26, 13) }, { cell: cell(21, 13) }],
+      coins: [cell(25, 13), cell(21, 6)],
+    });
+    expect(dAGame.actions(mirrored, 1)[0]).toEqual(PRESS_UP);
+  });
+
   it('gain：往最近的金幣走一步（只看下一個 tick），比別的方向、比不動都高', () => {
     const state = makeState({
       tick: 1,
