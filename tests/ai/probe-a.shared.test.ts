@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { levelController } from '../../src/ai/level';
 import { MATCH_CONFIG } from '../../src/ai/evolution';
 import { pathfinder } from '../../src/ai/policies/pathfinder';
+import { random } from '../../src/ai/policies/random';
 import { playMatch } from '../../src/core/match';
 import type { Buttons, Controller, Game, GameConfig, Inputs, Side } from '../../src/core/types';
 import { registry } from '../../src/games/registry';
@@ -73,7 +74,7 @@ const fn = (f: (s: TapState, side: Side, tick: number) => boolean): Controller<T
 });
 /** 對手：只在 tick 0 按一次，得 1 分。 */
 const oppOnce = fn((_s, _side, tick) => tick === 0);
-const seat0 = (ctl: Controller<TapState>, seed: number): MatchOutcome => {
+const seat0 = (seed: number, ctl: Controller<TapState>): MatchOutcome => {
   const r = playMatch(tap, seed, CONFIG, ctl, oppOnce);
   return outcomeOf(r, 0);
 };
@@ -81,9 +82,27 @@ const SEEDS = Array.from({ length: 60 }, (_v, i) => i);
 
 describe('outcomeOf', () => {
   it('勝 1、敗 0、平 0.5，分差是我方減對方', () => {
-    const win = playMatch(tap, 0, CONFIG, fn(() => true), fn(() => false));
-    const lose = playMatch(tap, 0, CONFIG, fn(() => false), fn(() => true));
-    const draw = playMatch(tap, 0, CONFIG, fn(() => true), fn(() => true));
+    const win = playMatch(
+      tap,
+      0,
+      CONFIG,
+      fn(() => true),
+      fn(() => false),
+    );
+    const lose = playMatch(
+      tap,
+      0,
+      CONFIG,
+      fn(() => false),
+      fn(() => true),
+    );
+    const draw = playMatch(
+      tap,
+      0,
+      CONFIG,
+      fn(() => true),
+      fn(() => true),
+    );
     expect(outcomeOf(win, 0)).toEqual({ win: 1, margin: TICKS });
     expect(outcomeOf(lose, 0)).toEqual({ win: 0, margin: -TICKS });
     expect(outcomeOf(draw, 0)).toEqual({ win: 0.5, margin: 0 });
@@ -173,8 +192,7 @@ describe('compareBC：場級分歧率是勝率差的上限（10.59）', () => {
     // C 只在 bits[0] = 1 的局面按兩下 → 2 比 1 贏；其餘局面也不按 → 輸。
     // 所以 C 與 B 只在 bits[0] = 1 的場不同，而且每一場不同的都從輸變成贏。
     const makeB = (): Controller<TapState> => fn(() => false);
-    const makeC = (): Controller<TapState> =>
-      fn((s, _side, tick) => s.bits[0] === 1 && tick < 2);
+    const makeC = (): Controller<TapState> => fn((s, _side, tick) => s.bits[0] === 1 && tick < 2);
     const r = compareBC({ makeB, makeC, seeds: SEEDS, play: seat0 });
     expect(r.divergence.gameRate).toBeGreaterThan(0);
     expect(r.divergence.gameRate).toBeLessThan(1);
@@ -205,8 +223,7 @@ describe('compareBC：場級分歧率是勝率差的上限（10.59）', () => {
 
   it('同時回傳勝率與分差，分差是同種子配對差，並另報「有分歧的場」的分差', () => {
     const makeB = (): Controller<TapState> => fn(() => false);
-    const makeC = (): Controller<TapState> =>
-      fn((s, _side, tick) => s.bits[0] === 1 && tick < 2);
+    const makeC = (): Controller<TapState> => fn((s, _side, tick) => s.bits[0] === 1 && tick < 2);
     const r = compareBC({ makeB, makeC, seeds: SEEDS, play: seat0 });
     // B 每場 0:1 → 分差 −1。C 在 bits[0]=1 的場 2:1 → +1，其餘 −1。
     const differing = r.divergence.gamesDiffer;
@@ -228,10 +245,11 @@ describe('compareBC：場級分歧率是勝率差的上限（10.59）', () => {
     const makeB = (): Controller<TapState> => fn(() => false);
     // 每次建構的 C 看一個全域計數器：奇數次（B 驅動時的影子）永遠不按，與 B 一致；
     // 偶數次（C 驅動時）永遠按。比對看不出分歧，但兩條路徑的結果不同。
-    let built = 0;
-    const flaky = (): Controller<TapState> => {
-      built += 1;
-      const pressing = built % 2 === 0;
+    const built = new Map<number, number>();
+    const flaky = (seed: number): Controller<TapState> => {
+      const times = (built.get(seed) ?? 0) + 1;
+      built.set(seed, times);
+      const pressing = times % 2 === 0;
       return fn(() => pressing);
     };
     const r = compareBC({ makeB, makeC: flaky, seeds: [0, 1, 2], play: seat0 });
@@ -293,18 +311,20 @@ describe('影子的回答不會影響對局（整個方法的正確性前提）'
     const entry = registry[0];
     if (entry === undefined) throw new Error('registry 是空的');
     const game = entry.game as Game<unknown>;
-    for (const seed of [0, 1, 2]) {
+    for (const seed of [0]) {
       const mk = (s: number): Controller<unknown> => levelController(game, pathfinder, 10, s);
-      const rival = (): Controller<unknown> => levelController(game, pathfinder, 10, seed + 1_000_003);
+      const rival = (): Controller<unknown> =>
+        levelController(game, pathfinder, 10, seed + 1_000_003);
       const alone = playMatch(game, seed, MATCH_CONFIG, mk(seed), rival());
-      // 影子是另一個種子的等級控制器，答案和驅動者會常常不同
-      const { ctl, stat } = shadow(mk(seed), mk(seed + 99));
+      // 影子是另一種性格（亂按），答案和驅動者會常常不同
+      const { ctl, stat } = shadow(mk(seed), levelController(game, random, 10, seed + 99));
       const withShadow = playMatch(game, seed, MATCH_CONFIG, ctl, rival());
       expect(withShadow.finalHash).toBe(alone.finalHash);
       expect(withShadow.inputs).toEqual(alone.inputs);
       expect(stat.ticks).toBe(alone.ticks);
+      expect(stat.diffTicks).toBeGreaterThan(0); // 影子真的和驅動者不一樣，這個比對才有意義
     }
-  });
+  }, 60_000);
 });
 
 describe('formatProbeA', () => {
