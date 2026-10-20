@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { counterEntry, counterMeta } from '../fixtures/counter-entry';
 import type { CardMeta, RegistryEntry } from '../../src/games/types';
 import { defineEntry } from '../../src/games/types';
+import { registry } from '../../src/games/registry';
 import { counterGame } from '../fixtures/counter-game';
 import type { CounterState } from '../fixtures/counter-game';
 import {
@@ -57,10 +58,21 @@ describe('A1–A5 接進了契約的檢查清單（AI_CHECKS）', () => {
     }
   });
 
-  it('鬼牌不跑 5.1，就算有預設性格', () => {
-    const joker = withMeta({ defaultPolicy: 'gambler', suit: 'JK', rank: 'R' });
+  it('宣告 noWinner 的牌（JK-R）不跑 5.1，就算有預設性格', () => {
+    const joker = withMeta({ defaultPolicy: 'gambler', suit: 'JK', rank: 'R', noWinner: true });
     for (const code of A_CODES) {
       expect(AI_CHECKS.find((c) => c.code === code)?.applies(joker)).toBe(false);
+    }
+  });
+
+  it('有勝負、有預設性格的鬼牌（JK-B）要跑 A1–A4；JK-R 不跑', () => {
+    const jkb = registry.find((e) => e.id === 'JK-B');
+    const jkr = registry.find((e) => e.id === 'JK-R');
+    expect(jkb).toBeDefined();
+    expect(jkr).toBeDefined();
+    for (const code of ['A1', 'A2', 'A3', 'A4']) {
+      expect(AI_CHECKS.find((c) => c.code === code)?.applies(jkb!)).toBe(true);
+      expect(AI_CHECKS.find((c) => c.code === code)?.applies(jkr!)).toBe(false);
     }
   });
 
