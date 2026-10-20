@@ -1,14 +1,11 @@
 import { intFrom, rngStateFor } from '../../core/rng';
 import type { Buttons, Game, GameConfig, Inputs, Side } from '../../core/types';
 import { IDLE, PRESS_A, PRESS_B, otherSide } from '../_hearts/logic';
-import { h2Game } from '../H-2/logic';
-import { h3Game } from '../H-3/logic';
 import { h4Game } from '../H-4/logic';
 import { h5Game } from '../H-5/logic';
 import { h6Game } from '../H-6/logic';
 import { h9Game } from '../H-9/logic';
 import { h10Game } from '../H-10/logic';
-import { hAGame } from '../H-A/logic';
 import { hJGame } from '../H-J/logic';
 import { hQGame } from '../H-Q/logic';
 
@@ -53,38 +50,23 @@ export const MIN_MAX_TICKS = STAGES * 400;
 export const HABIT = 0.01;
 
 /** 場次池，依牌面由小到大。為什麼是這幾張、為什麼不含 H-7 與 H-8：見小規格「場次池」。 */
-export type StageId =
-  'H-A' | 'H-2' | 'H-3' | 'H-4' | 'H-5' | 'H-6' | 'H-9' | 'H-10' | 'H-J' | 'H-Q';
-export const STAGE_POOL: readonly StageId[] = [
-  'H-A',
-  'H-2',
-  'H-3',
-  'H-4',
-  'H-5',
-  'H-6',
-  'H-9',
-  'H-10',
-  'H-J',
-  'H-Q',
-];
+export type StageId = 'H-4' | 'H-5' | 'H-6' | 'H-9' | 'H-10' | 'H-J' | 'H-Q';
+export const STAGE_POOL: readonly StageId[] = ['H-4', 'H-5', 'H-6', 'H-9', 'H-10', 'H-J', 'H-Q'];
 
 /**
  * edge 表：站在 `side` 這一邊、用搜尋型等級 10 打那張牌的縮短版（`maxTicks = 673`），
- * 對人類模型（SPEC 7.3）的實測勝率（平手算半場，兩個座位、各 400 場合併，限制在 [0.05, 0.95]）。
+ * 對人類模型（SPEC 7.3）的實測勝率（平手算半場，兩個座位各 500 場合併，限制在 [0.05, 0.95]；兩個座位的差在雜訊內，所以兩格填同一個數）。
  * 它代表「AI 對一個一般的人，在這一場有多大的優勢」，不是「兩個 AI 打」的勝率（鏡像牌兩個 AI 打必然 0.5）。
  * 量法與每一個數字：`docs/cards/H-K.md`「edge 表」。
  */
 export const EDGE: Readonly<Record<StageId, readonly [number, number]>> = {
-  'H-A': [0.95, 0.95],
-  'H-2': [0.95, 0.95],
-  'H-3': [0.95, 0.95],
-  'H-4': [0.56, 0.59],
+  'H-4': [0.57, 0.57],
   'H-5': [0.53, 0.53],
-  'H-6': [0.54, 0.53],
-  'H-9': [0.6, 0.62],
+  'H-6': [0.53, 0.53],
+  'H-9': [0.57, 0.57],
   'H-10': [0.95, 0.95],
   'H-J': [0.48, 0.48],
-  'H-Q': [0.94, 0.95],
+  'H-Q': [0.95, 0.95],
 };
 
 /**
@@ -92,16 +74,13 @@ export const EDGE: Readonly<Record<StageId, readonly [number, number]>> = {
  * 勝率 = σ(logit(edge) + SLOPE × gain)；每張牌的 gain 單位不同，所以逐張用對局資料做有偏移量的 logistic 迴歸。
  */
 export const SLOPE: Readonly<Record<StageId, number>> = {
-  'H-A': 0.124,
-  'H-2': 0.01,
-  'H-3': 0.006,
-  'H-4': 0.471,
-  'H-5': 1.082,
-  'H-6': 0.045,
-  'H-9': 2.338,
-  'H-10': 0.453,
-  'H-J': 0.44,
-  'H-Q': 0.072,
+  'H-4': 0.492,
+  'H-5': 1.055,
+  'H-6': 0.047,
+  'H-9': 2.335,
+  'H-10': 0.317,
+  'H-J': 0.46,
+  'H-Q': 0.077,
 };
 
 /** 開場的選擇：0 不用、1 用掉加倍牌。 */
@@ -157,9 +136,6 @@ export interface HKState {
 
 type Delegate = Game<unknown>;
 const DELEGATES: Readonly<Record<StageId, Delegate>> = {
-  'H-A': hAGame as unknown as Delegate,
-  'H-2': h2Game as unknown as Delegate,
-  'H-3': h3Game as unknown as Delegate,
   'H-4': h4Game as unknown as Delegate,
   'H-5': h5Game as unknown as Delegate,
   'H-6': h6Game as unknown as Delegate,

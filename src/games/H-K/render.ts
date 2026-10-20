@@ -1,14 +1,11 @@
 import type { RenderFn } from '../types';
 import { COLOR } from '../../shell/palette';
 import { AI_COLOR, bar, clear, disc, frame, HUMAN_COLOR, number, sideColor } from '../_hearts/draw';
-import { h2Render } from '../H-2/render';
-import { h3Render } from '../H-3/render';
 import { h4Render } from '../H-4/render';
 import { h5Render } from '../H-5/render';
 import { h6Render } from '../H-6/render';
 import { h9Render } from '../H-9/render';
 import { h10Render } from '../H-10/render';
-import { hARender } from '../H-A/render';
 import { hJRender } from '../H-J/render';
 import { hQRender } from '../H-Q/render';
 import { BET_TIMEOUT, STAGES } from './logic';
@@ -26,9 +23,6 @@ import type { HKState, StageId } from './logic';
 
 type SubRender = RenderFn<unknown>;
 const RENDERS: Readonly<Record<StageId, SubRender>> = {
-  'H-A': hARender as unknown as SubRender,
-  'H-2': h2Render as unknown as SubRender,
-  'H-3': h3Render as unknown as SubRender,
   'H-4': h4Render as unknown as SubRender,
   'H-5': h5Render as unknown as SubRender,
   'H-6': h6Render as unknown as SubRender,
