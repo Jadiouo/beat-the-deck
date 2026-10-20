@@ -314,7 +314,7 @@ export function member(name: string): Controller<D3State> {
       let chosen: Cand | null = null;
       if (m.stick && target !== null) {
         const held = cands.find((c) => c.gem.cell === target?.cell && c.gem.born === target.born);
-        // (b) 一直到手或消失才換；(c) 在對手明顯比我近（≥ 2 步）時放棄。
+        // (b) 一直到手或消失才換；(c) 在對手比我近（嚴格小於）時放棄重選。
         const lost = m.mode !== 'none' && held !== undefined && held.contested && held.eff > held.d;
         if (held !== undefined && !lost) {
           chosen = held;
