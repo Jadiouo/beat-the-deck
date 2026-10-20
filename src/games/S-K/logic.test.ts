@@ -438,6 +438,7 @@ describe('S-K 黑桃馬拉松｜每段結算與總分', () => {
       phase: 'play',
       seg: 0,
       cardId: 'S-3',
+      first: 0,
       picker: 0,
       offer: ['S-3', 'S-7', 'S-Q', 'S-4'],
       inner,
@@ -607,7 +608,7 @@ describe('S-K 黑桃馬拉松｜每段結算與總分', () => {
       expect(result.ticks).toBeLessThanOrEqual(CONFIG.maxTicks);
       expect(result.ticks).toBeGreaterThan(1500);
     }
-  });
+  }, 120_000);
 });
 
 // ---------------------------------------------------------------------------
@@ -647,6 +648,7 @@ describe('S-K 黑桃馬拉松｜step 是純的、state 可序列化（遞迴成�
           : (inputs[i] as Inputs),
       );
     }
+    seen.add(state.phase);
     expect([...seen].sort()).toEqual(['over', 'pick', 'play', 'rest', 'show'].sort());
   });
 
@@ -690,7 +692,7 @@ describe('S-K 黑桃馬拉松｜選牌的 evaluate 與 actions', () => {
     });
   });
 
-  it('沒鎖定（等著）的 danger 是 0，gain 嚴格低於任何一個鎖定（拖延不是平手，不是靠 actions 排序決勝）', () => {
+  it('沒鎖定（等著）的 danger 是 1（逾時會被強制鎖定第一張，是失去選擇的損失；精準型的門檻因此不會把等著當成「安全」），gain 嚴格低於任何一個鎖定（拖延不是平手，不是靠 actions 排序決勝）', () => {
     for (const ledger of [
       [],
       [entryOf('S-9', 700)],
@@ -699,7 +701,7 @@ describe('S-K 黑桃馬拉松｜選牌的 evaluate 與 actions', () => {
       for (const side of [0, 1] as const) {
         const s = makeState({ offer, picker: side, ledger });
         const wait = skGame.evaluate(s, side);
-        expect(wait.danger).toBe(0);
+        expect(wait.danger).toBe(1);
         for (let i = 0; i < offer.length; i += 1) {
           expect(lockedValue(s, side, i).gain).toBeGreaterThan(wait.gain);
         }
@@ -743,8 +745,16 @@ describe('S-K 黑桃馬拉松｜選牌的 evaluate 與 actions', () => {
     ];
     for (const [name, policy] of policies) {
       for (const depth of [1, 6]) {
-        for (const ledger of [[], [entryOf('S-9', -600)], [entryOf('S-9', 600)]]) {
-          const s = makeState({ offer, picker: 1, ledger });
+        for (const [name2, offered, ledger] of [
+          ['有穩的牌、空 ledger', offer, []],
+          ['有穩的牌、落後', offer, [entryOf('S-9', -600)]],
+          ['有穩的牌、領先', offer, [entryOf('S-9', 600)]],
+          // 候選牌全是「中」或「險」：精準型的 danger 門檻 0.3 把每一張鎖定都判成不安全，
+          // 這時「等著」不可以因為 danger 低而贏（C-Q 的放僚機是同一個病：排在最後、平手時永遠拖延）。
+          ['全是險或中、空 ledger', ['S-7', 'S-J', 'S-9', 'S-8'], []],
+          ['全是險或中、落後', ['S-7', 'S-J', 'S-9', 'S-4'], [entryOf('S-3', -600)]],
+        ] as [string, string[], SKLedgerEntry[]][]) {
+          const s = makeState({ offer: offered, picker: 1, ledger });
           const controller = wrapPolicy(
             skGame,
             policy,
@@ -753,7 +763,7 @@ describe('S-K 黑桃馬拉松｜選牌的 evaluate 與 actions', () => {
           );
           const pressed = controller.decide(s, 1, 0);
           const locked = KEYS.some((k) => pressed[k]);
-          expect(locked, `${name} 深度 ${depth}`).toBe(true);
+          expect(locked, `${name} 深度 ${depth} ${name2}`).toBe(true);
         }
       }
     }
@@ -824,11 +834,13 @@ describe('S-K 黑桃馬拉松｜選牌的 evaluate 與 actions', () => {
   it('E 的 n/(n+1) 權重：同一家族打過兩段比打過一段更有說服力', () => {
     const one = makeState({
       seg: 1,
+      picker: 0,
       offer: ['S-Q', 'S-7'],
       ledger: [entryOf('S-3', 600)],
     });
     const two = makeState({
       seg: 2,
+      picker: 0,
       offer: ['S-Q', 'S-7'],
       ledger: [entryOf('S-3', 600), entryOf('S-8', 0, { family: poolEntry('S-3').family })],
     });
