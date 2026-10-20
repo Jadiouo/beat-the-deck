@@ -583,6 +583,32 @@ describe('H-K 紅心馬拉松｜加倍牌的開場決定：用在對自己最強
   });
 });
 
+describe('H-K 紅心馬拉松｜消融開關：edge 表全放 0.5（DESIGN-AI-FUN 10.19 的第一版）', () => {
+  it('config.params.flat = 1：所有場次的勝率先驗都是 0.5，開場決定沒有依據（用與不用的 gain 相同）；預設不是 flat', () => {
+    expect(hkGame.init(0, CONFIG).flat).toBe(false);
+    const flat = hkGame.init(0, { maxTicks: 3600, params: { flat: 1 } });
+    expect(flat.flat).toBe(true);
+    const base = makeState({
+      stages: ['H-2', 'H-4', 'H-5', 'H-6'],
+      phase: 'bet',
+      wait: 0,
+      flat: true,
+    });
+    for (const side of [0, 1] as const) {
+      const after = (move: 0 | 1): number => {
+        const mine = move === 1 ? PRESS_A : PRESS_B;
+        const locked = hkGame.step(base, side === 0 ? [mine, PRESS_B] : [PRESS_B, mine]);
+        return hkGame.evaluate(run(locked, LOCK_TICKS), side).gain;
+      };
+      expect(after(1)).toBeCloseTo(after(0), 9);
+    }
+    const real = makeState({ stages: ['H-2', 'H-4', 'H-5', 'H-6'], phase: 'bet', wait: 0 });
+    const mine = hkGame.evaluate(run(hkGame.step(real, [PRESS_A, PRESS_B]), LOCK_TICKS), 0).gain;
+    const keep = hkGame.evaluate(run(hkGame.step(real, [PRESS_B, PRESS_B]), LOCK_TICKS), 0).gain;
+    expect(mine).not.toBeCloseTo(keep, 3);
+  });
+});
+
 describe('H-K 紅心馬拉松｜資訊限制：AI 看不到對方的 pending，也看不到它造成的倍數', () => {
   const phasesToCheck = ['bet', 'betLocked'] as const;
 
