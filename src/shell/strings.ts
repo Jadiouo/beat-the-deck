@@ -125,6 +125,27 @@ export const strings = {
     round: (round: number, total: number): string => `第 ${round} / ${total} 輪`,
   },
 
+  /** S-K 黑桃馬拉松：挑牌與結算的畫面文字（被包的牌的名稱來自它們自己的 meta）。 */
+  spadesMarathon: {
+    segment: (n: number, total: number): string => `第 ${n} / ${total} 段`,
+    finalName: '決勝',
+    finalDouble: '分數加倍',
+    youPick: '輪到你挑牌',
+    aiPick: '對手挑牌中',
+    /** 對手挑牌時的標記：前兩次沒有資料，是性格；之後才是看你的成績。 */
+    styleTag: '風格',
+    targetTag: '針對你',
+    sigma: { stable: '穩', mid: '中', risky: '險' },
+    keys: ['↑', '↓', '←', '→'],
+    youWin: '你贏這段',
+    aiWin: '對手贏這段',
+    drawSegment: '這段平手',
+    total: '總分',
+    you: '你',
+    ai: 'AI',
+    wrapperNote: '互動來自被包的牌',
+  },
+
   /** JK-B 規則壞掉了：規則名稱、預告與畫面上的短字（畫面文字集中在這裡）。 */
   brokenRules: {
     rules: {

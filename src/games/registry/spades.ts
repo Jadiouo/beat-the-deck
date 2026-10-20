@@ -36,6 +36,10 @@ import { sJGame } from '../S-J/logic';
 import type { SJState } from '../S-J/logic';
 import { sJMeta } from '../S-J/meta';
 import { sJRender } from '../S-J/render';
+import { skGame } from '../S-K/logic';
+import type { SKState } from '../S-K/logic';
+import { skMeta } from '../S-K/meta';
+import { skRender } from '../S-K/render';
 import { sQGame } from '../S-Q/logic';
 import type { SQState } from '../S-Q/logic';
 import { sQMeta } from '../S-Q/meta';
@@ -132,5 +136,12 @@ export const spadesEntries: readonly RegistryEntry[] = [
     game: sQGame,
     render: sQRender,
     meta: sQMeta,
+  }),
+  defineEntry<SKState>({
+    id: skMeta.id,
+    kind: 'card',
+    game: skGame,
+    render: skRender,
+    meta: skMeta,
   }),
 ];
