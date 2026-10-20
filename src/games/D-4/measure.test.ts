@@ -21,13 +21,27 @@ import type { Cell } from './probe-a.test-helpers';
  *   D4_PROBE_CELLS（`primary`｜`all`｜用逗號分隔的格子編號，預設 `primary`）、
  *   D4_PROBE_TRAIN（訓練場數，預設 2，種子 1000 起）、D4_PROBE_TEST（量測場數，預設 2，種子 5000 起）、
  *   D4_PROBE_OUT（把完整結果寫成 JSON 的路徑）、D4_PROBE_VERBOSE（印出一行報告）、
- *   D4_PROBE_ALLC（設了就把每個 (c) 成員都對 (b*) 量一遍，敏感度分析，不是標籤數字）。
+ *   D4_PROBE_PAIRS（設了就把每個 (c) 對自己的基底量一遍，敏感度分析）、D4_PROBE_ALLC（設了就把每個 (c) 成員都對 (b*) 量一遍，敏感度分析，不是標籤數字）。
  * 訓練種子 1000.. 與量測種子 5000.. 與掃描種子 2000.. 都不重疊（場數 < 1000）。
  */
 const TRAIN = Number(process.env.D4_PROBE_TRAIN ?? 2);
 const TEST = Number(process.env.D4_PROBE_TEST ?? 2);
 const TRAIN_FROM = 1000;
 const TEST_FROM = 5000;
+
+/**
+ * 敏感度分析（不是標籤數字）：每個 (c) 成員對它**自己的基底** (b)（小規格第 4 節表的「基底」欄），
+ * 兩者只差讀對手的那一條規則。
+ */
+const PAIRS: readonly (readonly [string, string])[] = [
+  ['b-thr12', 'c-free-thr12'],
+  ['b-thr20', 'c-free-thr20'],
+  ['b-thr12', 'c-contest-thr12'],
+  ['b-thr12', 'c-squeeze-thr12'],
+  ['b-thr20', 'c-free-squeeze-thr20'],
+  ['b-plan-m4', 'c-calc'],
+  ['b-plan-m4-det', 'c-all'],
+];
 
 const seedsOf = (from: number, n: number): number[] =>
   Array.from({ length: n }, (_v, i) => from + i);
@@ -80,10 +94,22 @@ describe(`D-4 探針 A 完整版（訓練 ${String(TRAIN)} 場、量測 ${String
         process.env.D4_PROBE_ALLC === undefined
           ? []
           : C_FAMILY.map((name) => ({ name, probe: compareBC(d4Spec(b, name, seeds, cell)) }));
-      results.push({ cell, b, c, bRows, cRows, probe, seat, engine, allC });
+      // 敏感度分析：每個 (c) 成員對自己的基底。
+      const pairs =
+        process.env.D4_PROBE_PAIRS === undefined
+          ? []
+          : PAIRS.map(([base, member]) => ({
+              base,
+              member,
+              probe: compareBC(d4Spec(base, member, seeds, cell)),
+            }));
+      results.push({ cell, b, c, bRows, cRows, probe, seat, engine, allC, pairs });
       if (process.env.D4_PROBE_VERBOSE !== undefined) {
         console.log(formatProbeA(`D-4 ${cellLabel(cell)} ${b} vs ${c}`, probe));
         console.log(formatProbeA(`  (d) ${b} vs d-engine`, engine));
+        for (const row of pairs) {
+          console.log(formatProbeA(`  [敏感度] ${row.base} vs ${row.member}`, row.probe));
+        }
         for (const row of allC) {
           console.log(formatProbeA(`  [敏感度] ${b} vs ${row.name}`, row.probe));
         }
