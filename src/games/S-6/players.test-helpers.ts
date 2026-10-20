@@ -13,6 +13,8 @@ import type { Note, S6State } from './logic';
  */
 
 export const CONTRACT_CONFIG = { maxTicks: 3600, params: {} };
+/** 共用拍位（選項，預設關）開啟的設定。 */
+export const SHARED_CONFIG = { maxTicks: 3600, params: { sharedBeat: 1 } };
 export const NONE: Buttons = {
   up: false,
   down: false,
@@ -23,6 +25,11 @@ export const NONE: Buttons = {
 };
 const KEYS = ['left', 'down', 'up', 'right'] as const;
 export const lane = (l: number): Buttons => ({ ...NONE, [KEYS[l] as string]: true });
+const both = (x: number, y: number): Buttons => ({
+  ...NONE,
+  [KEYS[x] as string]: true,
+  [KEYS[y] as string]: true,
+});
 
 export type Make = (seed: number, side: Side) => Controller<S6State>;
 
@@ -58,7 +65,12 @@ export function scripted(opts: {
         for (const n of s.phrases[side === 0 ? 1 : 0]) {
           const start = DROP_TICKS + SLOT_TICKS * n.slot;
           if (s.phaseTick >= start && s.phaseTick < start + NOTE_TICKS) {
-            return opts.skip?.(s, side, n.lane) === true ? NONE : lane(n.lane);
+            if (opts.skip?.(s, side, n.lane) === true) {
+              return NONE;
+            }
+            // 共用拍位：撞拍的格要兩條軌道一起按（自己曲子在同一格的音的軌道）。
+            const own = s.sharedBeat ? s.phrases[side].find((m) => m.slot === n.slot) : undefined;
+            return own === undefined || own.lane === n.lane ? lane(n.lane) : both(n.lane, own.lane);
           }
         }
       }
@@ -172,22 +184,32 @@ export function playRecorded(
 }
 
 /** A 的單位勝率（平手半場）。偶數種子 A 坐 0 邊，奇數種子換邊。 */
-export function winPercent(a: Make, b: Make, seeds: readonly number[]): number {
+export function winPercent(
+  a: Make,
+  b: Make,
+  seeds: readonly number[],
+  config = CONTRACT_CONFIG,
+): number {
   let total = 0;
   for (const seed of seeds) {
     const flip = seed % 2 === 1;
-    const r = flip ? playRecorded(seed, b, a) : playRecorded(seed, a, b);
+    const r = flip ? playRecorded(seed, b, a, config) : playRecorded(seed, a, b, config);
     total += r.winner === null ? 0.5 : r.winner === (flip ? 1 : 0) ? 1 : 0;
   }
   return (total / seeds.length) * 100;
 }
 
 /** A 的平均分差（A − B），邊輪流。 */
-export function meanDiff(a: Make, b: Make, seeds: readonly number[]): number {
+export function meanDiff(
+  a: Make,
+  b: Make,
+  seeds: readonly number[],
+  config = CONTRACT_CONFIG,
+): number {
   let total = 0;
   for (const seed of seeds) {
     const flip = seed % 2 === 1;
-    const r = flip ? playRecorded(seed, b, a) : playRecorded(seed, a, b);
+    const r = flip ? playRecorded(seed, b, a, config) : playRecorded(seed, a, b, config);
     total += flip ? r.points[1] - r.points[0] : r.points[0] - r.points[1];
   }
   return total / seeds.length;

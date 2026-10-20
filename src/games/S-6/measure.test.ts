@@ -20,6 +20,7 @@ import {
   mix,
   playRecorded,
   quantile,
+  SHARED_CONFIG,
   sandbag,
   strongHuman,
   weakLane,
@@ -332,6 +333,96 @@ describe('S-6 性格指紋｜等級 10 的四個性格對人類模型（AI 坐 1
       expect(g.over).toBeGreaterThan(10);
       expect(g.short - p.short).toBeGreaterThan(0.1);
       expect(b.short - p.short).toBeGreaterThan(0.1);
+    },
+    LONG,
+  );
+});
+
+// ---------------------------------------------------------------------------
+// 共用拍位（小規格第 11 節的提案；`params.sharedBeat = 1`，預設關）：四件事的量測
+// ---------------------------------------------------------------------------
+
+describe('S-6 共用拍位｜量測（對精準型等級 10，40 場，種子 0..39；小規格的數字是 200 場）', () => {
+  const emptyHistory = {
+    ...s6Game,
+    evaluate: (s: S6State, side: Side) => s6Game.evaluate({ ...s, history: [[], []] }, side),
+  };
+  const naive: readonly Note[] = [0, 2, 4, 6].map((slot) => ({ lane: slot / 2, slot }));
+  const composers: readonly (readonly [string, Make])[] = [
+    ['a', fixedPhrase(naive)],
+    ['b', (seed, side) => levelController(emptyHistory, precise, 10, seed * 2 + side + 7)],
+    ['c', (seed, side) => levelController(s6Game, precise, 10, seed * 2 + side + 7)],
+  ];
+
+  it(
+    '1. 編曲還是負期望：每多一個音平均送對方 3 分（2 音 0、3 音 −30、4 音 −60），撞拍不改變這件事',
+    () => {
+      const diff = (notes: readonly Note[]): number =>
+        meanDiff(fixedPhrase(notes), L10, seeds(40), SHARED_CONFIG);
+      const two = diff(naive.slice(0, 2));
+      const three = diff(naive.slice(0, 3));
+      const four = diff(naive);
+      report(`共用拍位 編曲分差：2 音 ${two}、3 音 ${three}、4 音 ${four}`);
+      expect(two).toBe(0);
+      expect(three).toBe(-30);
+      expect(four).toBe(-60);
+    },
+    LONG,
+  );
+
+  it(
+    '2. 探針 A：完美對打 (a)(b)(c) ＝ 0／50／50，(c) − (b) ＝ 0；人類模型對打 (c) − (b) ＝ 0',
+    () => {
+      const rows: Record<string, number> = {};
+      for (const [execName, exec] of [
+        ['完美', idle],
+        ['人類模型', human],
+      ] as const) {
+        for (const [name, composer] of composers) {
+          rows[`${execName}-${name}`] = winPercent(
+            mix(composer, exec),
+            L10,
+            seeds(40),
+            SHARED_CONFIG,
+          );
+        }
+      }
+      report(`共用拍位 探針 A：${JSON.stringify(rows)}`);
+      expect(rows['完美-c']! - rows['完美-b']!).toBe(0);
+      expect(rows['人類模型-c']! - rows['人類模型-b']!).toBe(0);
+      expect(rows['完美-b']).toBe(50);
+      expect(rows['完美-a']).toBe(0);
+    },
+    LONG,
+  );
+
+  it(
+    '3. 最好的玩法還是什麼都不做（50.0 平手）：撞拍型、跟隨型、迴避型的劇本都沒有更好，最高 50.0',
+    () => {
+      const rates = [
+        idle,
+        strongHuman,
+        fixedPhrase([0, 4].map((slot) => ({ lane: 0, slot }))),
+        fixedPhrase([0, 4].map((slot) => ({ lane: 1, slot }))),
+      ].map((make) => winPercent(make, L10, seeds(40), SHARED_CONFIG));
+      report(`共用拍位 劇本單位勝率：${JSON.stringify(rates)}`);
+      for (const r of rates) {
+        expect(r).toBe(50);
+      }
+    },
+    LONG,
+  );
+
+  it(
+    '4. 藏拙的期望分差仍是負的（1／2／3 回合），勝率 0',
+    () => {
+      for (const k of [1, 2, 3]) {
+        const d = meanDiff(sandbag(k), L10, seeds(40), SHARED_CONFIG);
+        const w = winPercent(sandbag(k), L10, seeds(40), SHARED_CONFIG);
+        report(`共用拍位 藏拙 ${k}：分差 ${d}、勝率 ${w}`);
+        expect(d).toBeLessThan(0);
+        expect(w).toBe(0);
+      }
     },
     LONG,
   );
