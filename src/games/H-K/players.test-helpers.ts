@@ -136,3 +136,39 @@ export function pointsOf(state: HKState, side: Side): number {
 
 /** 兩邊都只按「全放開」的輸入。 */
 export const IDLE_INPUTS: Inputs = [IDLE, IDLE];
+
+/** `c` 坐 `seed` 奇偶決定的座位對 `opponent` 打一整場；回傳 `c` 的得分（贏 1、平手 0.5、輸 0）。 */
+export function playAs(
+  c: Controller<HKState>,
+  opponent: Controller<HKState>,
+  seed: number,
+): number {
+  const side: Side = seed % 2 === 0 ? 0 : 1;
+  const { state } = side === 0 ? playFull(c, opponent, seed) : playFull(opponent, c, seed);
+  return pointsOf(state, side);
+}
+
+/** 開場決定交給 `bettor`（例如 AI 自己的引擎），其他時候交給 `inner`。 */
+export function betFrom(
+  inner: Controller<HKState>,
+  bettor: Controller<HKState>,
+): Controller<HKState> {
+  return {
+    decide(state: HKState, side: Side, tick: number): Buttons {
+      return state.phase === 'bet' && !state.over
+        ? bettor.decide(state, side, tick)
+        : inner.decide(state, side, tick);
+    },
+  };
+}
+
+/** 開場決定被記下來的一筆（自己剛選好的那個 tick）。 */
+export interface BetRecord {
+  readonly stageIdx: number;
+  readonly stage: string;
+  readonly used: boolean;
+  readonly holds: boolean;
+  /** 選之前 `evaluate(state, side).gain`：負的 = 自己的展望是輸面。 */
+  readonly outlook: number;
+  readonly chipsDiff: number;
+}
