@@ -61,7 +61,7 @@ function run(state: HKState, ticks: number, inputs: Inputs = IDLE_PAIR): HKState
 }
 
 /** 一個固定的場次表：從小到大，邊緣值（EDGE）高低都有。 */
-const FOUR: readonly StageId[] = ['H-2', 'H-4', 'H-9', 'H-10'];
+const FOUR: readonly StageId[] = ['H-4', 'H-6', 'H-9', 'H-10'];
 
 /** 在 `bet` 階段、兩邊都還沒選的局面。 */
 function betState(overrides: Partial<HKState> = {}): HKState {
@@ -159,6 +159,12 @@ describe('H-K 紅心馬拉松｜場次池與 edge 表', () => {
       expect(entry?.meta.suit).toBe('H');
     }
     expect(STAGE_POOL.length).toBeGreaterThanOrEqual(STAGES);
+  });
+
+  it('池裡每一張的預設性格都是搜尋型：H-K 的 AI 是搜尋型，不能逐場換性格，所以不收賭徒型的牌', () => {
+    for (const id of STAGE_POOL) {
+      expect(registry.find((e) => e.id === id)?.meta.defaultPolicy, id).toBe('pathfinder');
+    }
   });
 
   it('每個進池的牌，用 maxTicks = 673 跑，兩邊都不動也一定在 673 個 tick 內結束（縮短是合法的）', () => {
@@ -412,8 +418,8 @@ describe('H-K 紅心馬拉松｜段與段之間的籌碼結算（方向、金額
   });
 
   it('平手不動籌碼：被包的牌平手 = delta 0、winner null', () => {
-    // H-2 兩邊都不動（鏡像骰子、同樣的輸入）一定平手。
-    let state = makeState({ stages: ['H-2', 'H-4', 'H-9', 'H-10'], phase: 'play', wait: 0 });
+    // H-6 兩邊都不動（鏡像的場地、同樣的輸入）一定平手。
+    let state = makeState({ stages: ['H-6', 'H-9', 'H-10', 'H-J'], phase: 'play', wait: 0 });
     for (let i = 0; i < 700 && state.phase === 'play'; i += 1) {
       state = hkGame.step(state, IDLE_PAIR);
     }
@@ -538,8 +544,8 @@ describe('H-K 紅心馬拉松｜加倍牌的開場決定：用在對自己最強
     }
   });
 
-  it('第一場是對自己最強的一場（H-2），後面都比較弱、籌碼持平：用 > 不用', () => {
-    const state = betState({ stages: ['H-2', 'H-4', 'H-5', 'H-6'] });
+  it('第一場是對自己最強的一場（H-10），後面都比較弱、籌碼持平：用 > 不用', () => {
+    const state = betState({ stages: ['H-10', 'H-4', 'H-5', 'H-6'] });
     for (const side of [0, 1] as const) {
       expect(gainAfter(state, side, 1)).toBeGreaterThan(gainAfter(state, side, 0));
     }
@@ -552,10 +558,10 @@ describe('H-K 紅心馬拉松｜加倍牌的開場決定：用在對自己最強
     }
   });
 
-  it('深度 3 的搜尋型照這個比較選：H-2 先、H-J 先、落後 30 的最後一場', () => {
+  it('深度 3 的搜尋型照這個比較選：H-10 先、H-J 先、落後 30 的最後一場', () => {
     const decide = (state: HKState, side: Side, depth: number): Buttons =>
       pathfinder.decide(hkGame, state, side, 0, { depth, seed: 0 });
-    const strongFirst = betState({ stages: ['H-2', 'H-4', 'H-5', 'H-6'] });
+    const strongFirst = betState({ stages: ['H-10', 'H-4', 'H-5', 'H-6'] });
     const weakFirst = betState({ stages: ['H-J', 'H-4', 'H-9', 'H-10'] });
     const trailing = betState({ stages: FOUR, stageIdx: 3, chips: [85, 115] });
     expect(decide(strongFirst, 0, 3)).toEqual(PRESS_A);
@@ -575,8 +581,10 @@ describe('H-K 紅心馬拉松｜加倍牌的開場決定：用在對自己最強
         );
       }
       expect(decide(betState({ stages: FOUR, stageIdx: 3 }), 1, depth)).toEqual(PRESS_A);
-      // 即使第一場是 H-2（對自己最強）也一樣：反射規則不看 edge
-      expect(decide(betState({ stages: ['H-2', 'H-4', 'H-5', 'H-6'] }), 1, depth)).toEqual(PRESS_B);
+      // 即使第一場是 H-10（對自己最強）也一樣：反射規則不看 edge
+      expect(decide(betState({ stages: ['H-10', 'H-4', 'H-5', 'H-6'] }), 1, depth)).toEqual(
+        PRESS_B,
+      );
     }
     const spent = betState({ stages: FOUR, stageIdx: 3, doublers: [1, 0] });
     expect(hkGame.actions(spent, 1)).toEqual([IDLE]);
@@ -589,7 +597,7 @@ describe('H-K 紅心馬拉松｜消融開關：edge 表全放 0.5（DESIGN-AI-FU
     const flat = hkGame.init(0, { maxTicks: 3600, params: { flat: 1 } });
     expect(flat.flat).toBe(true);
     const base = makeState({
-      stages: ['H-2', 'H-4', 'H-5', 'H-6'],
+      stages: ['H-10', 'H-4', 'H-5', 'H-6'],
       phase: 'bet',
       wait: 0,
       flat: true,
@@ -602,7 +610,7 @@ describe('H-K 紅心馬拉松｜消融開關：edge 表全放 0.5（DESIGN-AI-FU
       };
       expect(after(1)).toBeCloseTo(after(0), 9);
     }
-    const real = makeState({ stages: ['H-2', 'H-4', 'H-5', 'H-6'], phase: 'bet', wait: 0 });
+    const real = makeState({ stages: ['H-10', 'H-4', 'H-5', 'H-6'], phase: 'bet', wait: 0 });
     const mine = hkGame.evaluate(run(hkGame.step(real, [PRESS_A, PRESS_B]), LOCK_TICKS), 0).gain;
     const keep = hkGame.evaluate(run(hkGame.step(real, [PRESS_B, PRESS_B]), LOCK_TICKS), 0).gain;
     expect(mine).not.toBeCloseTo(keep, 3);
@@ -792,13 +800,16 @@ describe('H-K 紅心馬拉松｜純度、不可變、結束', () => {
 });
 
 describe('H-K 紅心馬拉松｜meta 與登記', () => {
-  it('meta：H-K、搜尋型、baseLevel 4、不對稱（H-A 的先後手）、說明裡寫明互動借自被包的牌', () => {
+  it('meta：H-K、搜尋型、baseLevel 4、對稱（池裡每張牌都對稱）、說明裡寫明互動借自被包的牌', () => {
     expect(hkMeta.id).toBe('H-K');
     expect(hkMeta.suit).toBe('H');
     expect(hkMeta.rank).toBe('K');
     expect(hkMeta.defaultPolicy).toBe('pathfinder');
     expect(hkMeta.baseLevel).toBe(4);
-    expect(hkMeta.symmetric).toBeFalsy();
+    expect(hkMeta.symmetric).toBe(true);
+    for (const id of STAGE_POOL) {
+      expect(registry.find((e) => e.id === id)?.meta.symmetric, id).toBe(true);
+    }
     expect(hkMeta.description).toMatch(/借自/);
     expect(hkMeta.description).toMatch(/沒有自己的/);
   });
