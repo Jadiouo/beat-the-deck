@@ -15,6 +15,8 @@ import { CELLS, cell, cellX, cellY } from '../_clubs/logic';
 import {
   BRAID,
   DEATH_GAIN,
+  DANGER_SCALE,
+  HEAD_ON_DANGER,
   GAIN_PER_ROUND,
   GUARD,
   GUARD_CAP,
@@ -933,11 +935,12 @@ describe('C-9 鑰匙與門｜actions 與 evaluate', () => {
     expect(c9Game.evaluate(leaving, 0).gain).toBe(-(toKey[cell(5, 4)] as number));
   });
 
-  it('對手靠近我的下一格（頭對頭的可能）：danger 大於 0；同一格是 0.8', () => {
+  it('對手靠近我的下一格（頭對頭的可能）：danger 大於 0；同一格是 HEAD_ON_DANGER × DANGER_SCALE（0.4）', () => {
     const headOn = st({
       snakes: [{}, { body: snakeAt([6, 4], [7, 4], [8, 4], [9, 4]), dir: LEFT }],
     });
-    expect(c9Game.evaluate(headOn, 0).danger).toBe(0.8);
+    expect(c9Game.evaluate(headOn, 0).danger).toBeCloseTo(HEAD_ON_DANGER * DANGER_SCALE, 10);
+    expect(DANGER_SCALE).toBe(0.5);
     const apart = st();
     expect(c9Game.evaluate(apart, 0).danger).toBe(0);
   });
