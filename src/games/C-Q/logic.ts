@@ -388,22 +388,27 @@ const LAUNCH: Buttons = Object.freeze({ ...NONE, a: true });
 const launchCache = new WeakMap<readonly Buttons[], readonly Buttons[]>();
 
 /**
- * 基底動作後面接一個「全放開＋a」（排在最後：平手時搜尋型取排前面的＝不放）。
- * 基底動作是 `orderedActions` 的回傳值（模組內固定的共用陣列），所以用它當快取的鑰匙，不會每個 tick 新配置。
+ * 「全放開＋a」接在基底動作的**前面**。基底動作是 `orderedActions` 的回傳值（模組內固定的共用陣列），
+ * 所以用它當快取的鑰匙，不會每個 tick 新配置。
+ *
+ * 為什麼放在前面（小規格原本寫「不放在前、放在後（平手時不放）」，量測推翻）：搜尋型往前看 6 個 tick，
+ * 「現在放」與「晚一點放」的終點一樣好（僚機放出去 9 個 tick 才動一格），平手取排前面的，不放排前面就永遠拖延到最後一刻；
+ * 決定頻率低（每 4 個 tick 才決定一次）的 AI 於是幾乎不放：深度 6 每場 0.1 次，深度 1 卻放 3.4 次，淺的贏 82.5%
+ * （commit c44eab0，80 場）。放在前面之後，深的每場放 3.5 次、贏 55%。
+ * 這只影響「現在放」與「晚點放」平手的局面；放得值不值由 `evaluate` 決定，不值得時不放嚴格比較好，不是平手。
  */
 function withLaunch(base: readonly Buttons[]): readonly Buttons[] {
   let cached = launchCache.get(base);
   if (cached === undefined) {
-    cached = Object.freeze([...base, LAUNCH]);
+    cached = Object.freeze([LAUNCH, ...base]);
     launchCache.set(base, cached);
   }
   return cached;
 }
 
 /**
- * 基底動作完全沿用 C-A（`orderedActions`：兩個有效的轉向在前，之後是不會改變方向的三個；已鎖定轉向、
- * 被僚機鎖住或局結束時是固定順序）。小規格原本寫「3 個基底動作各帶一份 a」，量測推翻：3 個基底動作時
- * 搜尋型等級 5 對亂按只贏 71.0%（C-A 的 5 個動作是 81.0%，種子 0..99），沿用 5 個回到 79–80%。
+ * 基底動作完全沿用 C-A（`orderedActions`：兩個有效的轉向在前，之後是不會改變方向的三個）。小規格原本寫「3 個基底動作各帶一份 a」，
+ * 量測推翻：3 個基底動作時搜尋型等級 5 對亂按只贏 71.0%（C-A 的 5 個動作是 81.0%，種子 0..99），沿用 5 個回到 79–80%。
  * 放僚機的 a 是否與轉向同時按，對結果沒有差別（a 是邊緣觸發、轉向只要在走格前鎖定），所以只加一個「全放開＋a」。
  */
 function actionsWith(options: Resolved, state: CQState, side: Side): readonly Buttons[] {
