@@ -244,6 +244,7 @@ describe('D-K｜第 2 段：寶石與連結 1（地盤紅利）', () => {
     for (const [born, value] of cases) {
       const state = makeState({
         tick: 1140,
+        players: [{ score: 0 }, { score: 0 }],
         paint0: [BASE_0, target],
         gems: [{ cell: target, born }],
       });

@@ -48,8 +48,16 @@ export const STAGE2_START = 1140;
 export const STAGE2_END = 2520;
 /** 第 3 段（存與偷）：[2580, 結束)。 */
 export const STAGE3_START = 2580;
-/** 第 1 段的分數：每這麼多格顏色 1 分（無條件捨去）。 */
-export const TURF_POINTS = 10;
+/**
+ * 第 1 段的分數：每這麼多格顏色 1 分（無條件捨去）。小規格原本是 10；原型關卡量到三段的分數是 21:186:4
+ * （第 2 段占 87%），所以改成 1（1 格 1 分，和 D-8 原本的算法一致），見 `docs/cards/D-K.md`「原型關卡」。
+ */
+export const TURF_POINTS = 1;
+/**
+ * 第 3 段一枚金幣值幾分：D-2 的金幣存進去只加 1 分，在這張牌的分數尺度下第 3 段等於不存在；
+ * 這裡把存進基地改成每枚 `COIN_POINTS` 分，偷竊也搬一枚金幣的分數（背包裡的一枚，存進去時值 `COIN_POINTS`）。
+ */
+export const COIN_POINTS = 20;
 /** 偷成功時額外再從對手的分數拿 1 分放進背包（背包有空位、對手還有分才有）。 */
 export const STEAL_EXTRA = 1;
 
@@ -236,17 +244,33 @@ function stepSteal(state: DKState, inputs: Inputs): DKState {
     moved.stolen[0] > state.stolen[0],
     moved.stolen[1] > state.stolen[1],
   ];
-  if (!won[0] && !won[1]) {
-    return moved;
+  // 金幣一枚 COIN_POINTS 分。D-2／D-J 把存進基地記成 +背包數、把偷成功記成 −1，這裡改成每枚 COIN_POINTS：
+  // 存進基地的人補上 (COIN_POINTS − 1) × 枚數；被偷的人改成損失一枚金幣的分數（不到一枚就是他全部）。
+  // 兩邊都用 D-J 結算後的同一份快照算，再同時套用（零和：被偷的減多少，偷的人背包的金幣就值多少）。
+  const base: [number, number] = [0, 0];
+  for (const side of [0, 1] as const) {
+    const other: Side = side === 0 ? 1 : 0;
+    const lost = won[other] ? 1 : 0;
+    const deposited = moved.players[side].score - state.players[side].score + lost;
+    base[side] = state.players[side].score + COIN_POINTS * deposited;
   }
-  // 偷成功的加碼：兩邊都用 D-J 結算後的同一份快照算，再同時套用（零和：被偷的減多少，偷的人背包加多少）。
-  const scores: [number, number] = [moved.players[0].score, moved.players[1].score];
+  const scores: [number, number] = [base[0], base[1]];
   const bags: [number, number] = [moved.bags[0], moved.bags[1]];
   const stolen: [number, number] = [moved.stolen[0], moved.stolen[1]];
   for (const thief of [0, 1] as const) {
     const victim: Side = thief === 0 ? 1 : 0;
-    if (won[thief] && moved.players[victim].score >= 1 && moved.bags[thief] < BAG_LIMIT) {
-      scores[victim] -= STEAL_EXTRA;
+    if (!won[thief]) {
+      continue;
+    }
+    const first = Math.min(COIN_POINTS, base[victim]);
+    scores[victim] -= first;
+    // 偷成功的加碼：對手還有分、背包還有空位，再偷一枚。
+    if (
+      STEAL_EXTRA > 0 &&
+      base[victim] - first >= 1 &&
+      moved.bags[thief] < BAG_LIMIT
+    ) {
+      scores[victim] -= Math.min(COIN_POINTS, base[victim] - first);
       bags[thief] += STEAL_EXTRA;
       stolen[thief] += STEAL_EXTRA;
     }
