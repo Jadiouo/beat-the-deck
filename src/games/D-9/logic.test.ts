@@ -35,7 +35,7 @@ import type { D9State, Round } from './logic';
  * D-9 擺放的規則測試（規則見 `docs/cards/D-9.md`）。
  * 全部用 `makeState` 直接構造局面。`makeState` 的礦脈：存量照 `STOCKS` 原順序（索引 0 是 6、索引 9 是 20），
  * 所以「最肥」是索引 9（20）、第二肥 8（16）、第三肥 7（14）、再來 5（12）、6（12）、3（10）、4（10）、1（8）、2（8）、0（6）。
- * 游標預設都在索引 0。測試用的局面預設 8 輪（`MAX_ROUNDS`）、`zs`（對手收成的權重）= 0（小規格原文的「自己的期望收成」）。
+ * 游標預設都在索引 0。測試用的局面預設 8 輪（`MAX_ROUNDS`）、`zs`（對手收成的權重）= 預設值（1：算兩邊的差；要看小規格原文的「只算自己的期望收成」要明寫 `zs: 0`）。
  */
 
 const CONFIG = { maxTicks: 3600, params: {} };
@@ -889,13 +889,40 @@ describe('D-9 擺放｜AI 的選擇（用真的控制器：等級 10 的設定�
     expect(new Set(picks).size).toBe(1);
   });
 
-  it('歷史改變選擇：對手連 3 輪選名次 1，AI 不再跟它搶名次 1，改選名次 2；沒有歷史時選名次 1', () => {
-    const base = placing({ round: 3 });
+  it('歷史改變選擇（小規格原文的 zs = 0，只算自己的期望收成）：對手連 3 輪選名次 1，AI 不再跟它搶名次 1，改選名次 2；沒有歷史時選名次 1', () => {
+    const base = placing({ round: 3, zs: 0 });
     expect(chosen({ ...base, history: [] })).toBe(9);
     const read = chosen({ ...base, history: opp1(3) });
     expect(read).toBe(8);
     // 消融：model = false 就不看歷史，選擇與沒有歷史時相同。
     expect(chosen({ ...base, history: opp1(3), model: false })).toBe(9);
+  });
+
+  it('預設（zs = 1，算兩邊的差）：不被歷史帶偏——對手連 3 輪選名次 1、連 3 輪選名次 2、沒有歷史，AI 都選最肥的（跟它分，兩邊都少一半，不吃虧；躲開它才是讓它獨吞最肥的）', () => {
+    const base = placing({ round: 3 });
+    expect(base.zs).toBe(1);
+    expect(chosen({ ...base, history: [] })).toBe(9);
+    expect(chosen({ ...base, history: opp1(3) })).toBe(9);
+    const two = opp1(3).map((h) => ({ ...h, ranks: [2, 2] as [number, number] }));
+    expect(chosen({ ...base, history: two })).toBe(9);
+  });
+
+  it('danger 是「落空」的機率：空位還有 2 個的礦脈 danger 是 0（跟它分不算危險）；只剩 1 個空位的礦脈 danger 等於對手也挑它的機率；滿了或沒存量是 1', () => {
+    const s = placing({
+      round: 2,
+      coll: [{ dep: 9, owner: 0, round: 0 }],
+      deposits: ringStocks([6, 8, 8, 10, 10, 12, 12, 14, 16, 20]),
+      history: opp1(2).map((h) => ({ ...h, ranks: [5, 5] as [number, number] })),
+    });
+    const dangerOf = (dep: number): number =>
+      d9Game.evaluate(d9Game.step({ ...s, sel: [0, dep] }, both(IDLE, KEY_LOCK)), 1).danger;
+    const q = predictOpponent(s.history, s, 1);
+    expect(dangerOf(8)).toBe(0);
+    expect(dangerOf(9)).toBeCloseTo(q[9] as number, 12);
+    const gone = { ...s, deposits: ringStocks([6, 8, 8, 10, 10, 12, 12, 14, 0, 20]) };
+    expect(
+      d9Game.evaluate(d9Game.step({ ...gone, sel: [0, 8] }, both(IDLE, KEY_LOCK)), 1).danger,
+    ).toBe(1);
   });
 
   it('不選已經滿了的礦脈，也不選存量 0 的；全部都沒價值就不擺', () => {
