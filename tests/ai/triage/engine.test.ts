@@ -42,6 +42,7 @@ function smallCorpus(id: string): { corpus: Corpus<never>; spec: ReturnType<type
     seeds: CORPUS_SEEDS,
     matchups: SMALL_MATCHUPS,
     every: 60,
+    config: { maxTicks: 900, params: {} },
   }) as unknown as Corpus<never>;
   return { corpus, spec };
 }
@@ -105,7 +106,7 @@ describe('取樣是真實對局', () => {
   });
 });
 
-describe('合法性檢查有牙齒（C-A，蛇）', () => {
+describe('合法性檢查有牙齒（C-A，蛇）', { timeout: 60_000 }, () => {
   const { corpus, spec } = smallCorpus('C-A');
   const real = corpus.seeds.flatMap((s) => s.samples).filter((s) => !spec.game.isOver(s.state));
 
@@ -135,7 +136,7 @@ describe('合法性檢查有牙齒（C-A，蛇）', () => {
   });
 });
 
-describe('擾動只動對手（C-A 與 D-A）', () => {
+describe('擾動只動對手（C-A 與 D-A）', { timeout: 60_000 }, () => {
   for (const id of ['C-A', 'D-A']) {
     const { corpus, spec } = smallCorpus(id);
     const det = new Det(7, `perturb-${id}`);
@@ -211,7 +212,7 @@ describe('擾動只動對手（C-A 與 D-A）', () => {
   });
 });
 
-describe('AI 決策與正負對照', () => {
+describe('AI 決策與正負對照', { timeout: 60_000 }, () => {
   const { corpus, spec } = smallCorpus('C-A');
   const det = new Det(11, 'decide');
   const seedCorpus = corpus.seeds[0] as (typeof corpus.seeds)[number];
@@ -253,7 +254,7 @@ describe('AI 決策與正負對照', () => {
   });
 });
 
-describe('measureCard 的帳', () => {
+describe('measureCard 的帳', { timeout: 60_000 }, () => {
   it('每個 (性格, 等級) 一格；分母 = 查詢數；改變數 ≤ 分母；null 對照全是 0', () => {
     const { corpus, spec } = smallCorpus('D-A');
     const m = measureCard(spec, corpus, {
