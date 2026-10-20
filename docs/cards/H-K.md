@@ -275,3 +275,11 @@ DESIGN-AI-FUN 10.19、10.27 都提醒：舊版把 H-4、H-5、H-6、H-7、H-8、
 - **子遊戲縮短版的粗糙：** 被包的牌都被 673 tick 截斷，勝負以那個時間點的分數為準；H-4 到 H-9 有 10% 到 14% 平手。
 - **A5 是在 loadavg 5 的機器上量的**，沒有等到 < 2。
 - **沒有跑 `npm run check` 全套**（乾淨機器 47 分鐘，指揮官指示不要）；只跑了 H-K 自己的單元測試與量測測試、H-K 的契約檢查與 A1 到 A5、`tests/purity`、`registry` 相關測試，以及 `tsc`、`eslint`、`prettier --check`。
+
+## 最後驗收（commit `85faf68`，rebase 到 origin 最新之後）
+
+- `tsc --noEmit`、`eslint src/games/H-K src/games/registry`、`prettier --check`（H-K、registry、這份文件）：全過。
+- `vitest --project light`：`src/games/H-K`（logic 68 條 + measure 33 條）、`tests/purity`、`src/games/registry.test.ts`、`tests/contract/registry-meta.test.ts`：6 個檔案、**175 條全過**。
+- `vitest --project heavy tests/contract/all-games.slot03.test.ts tests/ai/a-checks.slot03.test.ts -t H-K`：H-K 的 K1 到 K10、K12（四段加總）、K13、R1 到 R3、META、A1 到 A4：**全過**（26 條通過；`-t` 篩選會把同檔的其他牌也算進去，這裡只看 H-K 的 24 條）。
+- `vitest --project timing tests/timing/checks.test.ts -t H-K`（量的前後 `loadavg` 是 2.91 與 2.92，**不到 2**，機器上有別的 agent）：K11 **755 ms**（< 2000）；A5 **平均 0.019 ms、p99.9 0.589 ms**（樣本 18180，6 個種子），最慢一次 4.187 ms。
+- **沒有跑 `npm run check` 全套。**
