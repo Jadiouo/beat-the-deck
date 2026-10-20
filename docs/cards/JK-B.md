@@ -256,7 +256,7 @@ A1–A4 三個種子區塊（`cad334e`；loadavg 7 到 10，有別人的 vitest 
 
 **宣告：** `selfFromPresent(replayed, present, side)` 把 `side` 這一邊自己的點（位置、冷卻、按著的方向）換成真實的現在；對手、金幣、分數、亂數維持重播的樣子。**不換分數**：互換與搶劫會把對手最近 12 個 tick 做了什麼寫進我的分數，那是反應延遲該藏起來的。宣告之後（`0f60c02`，同一個腳本）：5 個情境全部 **位置不同 0、冷卻不同 0**。
 
-**守門測試（`src/ai/self-present.test.ts`）：** 名單從 `['S-8']` 改成 `['JK-B', 'S-8']`，註解裡附上這張表的數字與量法，並寫「要宣告第三張牌，先在小規格裡附上同一種量測」。**沒有只為了讓測試過而動它**：先改測試（紅）、再宣告 hook（綠），分開兩個 commit（`484e527`、`0f60c02`）。`docs/SPEC.md` 7.2.1 最後一句「目前只有 S-8 宣告」現在是舊的，那份文件不在我可以改的範圍，留給你。
+**守門測試（`src/ai/self-present.test.ts`）：** 名單從 `['S-8']` 改成 `['JK-B', 'S-8']`，註解裡附上這張表的數字與量法，並寫「要宣告第三張牌，先在小規格裡附上同一種量測」。**沒有只為了讓測試過而動它**：先改測試（紅）、再宣告 hook（綠），分開兩個 commit（`484e527`、`0f60c02`）。`docs/SPEC.md` 7.2.1 最後一句「目前只有 S-8 宣告」現在是舊的，那份文件不在我可以改的範圍，留給你。（已由 `7dfabed` 改好。）
 
 **宣告的代價（照實寫）：** 宣告之後 AI 被推的次數變多（同一批種子 0..19、同一個腳本 `hook.ts`，宣告前 `246fa3a` → 宣告後 `cad334e`，次／場）：對等級 10 1.6 → 3.3、對 `chase` 3.6 → 11.2、對 `stalk` 26.8 → 31.6、對 `b` 3.0 → 3.2、人類模型對 `stalk` 25.8 → 37.0。**我的解釋（沒有另外驗證）：** 以前它不知道自己被推開，所以重播出來的位置是「沒被推」的位置，行為是「在一個錯的位置做對的決定」；現在位置是對的，對手的位置還是 12 個 tick 以前的，搶劫期間更容易被一個沒有延遲的追擊者追上（第 6 小節）。宣告之前的勝率不能當證據（那個版本的 AI 對自己的位置有 14% 的決定是錯的），所以我沒有量「宣告前後的勝率差」。
 
@@ -446,6 +446,8 @@ A1–A4 三個種子區塊（`cad334e`；loadavg 7 到 10，有別人的 vitest 
 ### 12. 沒做完、不確定、沒碰共用層、可能被當成退步的地方
 
 **改了哪些檔（只有這些）：** `src/games/JK-B/*`、`docs/cards/JK-B.md`、`src/games/registry/jokers.ts`（加一筆）、`src/shell/strings.ts`（`brokenRules`，畫面文字）、`src/ai/self-present.test.ts`（守門名單加 JK-B，附數字，第 3 小節）。**`src/core/`、`src/ai/` 的其他檔案、`src/games/_clubs/`、`tests/contract/checks.ts` 一個字沒動**；沒有碰 `src/games/C-Q/`、`D-9/`。
+
+**已修（2026-10-20 文件核對）：下面三項共用層的問題，在這張牌交付之後都已經被修掉。** 依據 `git show 7dfabed`：做法是 `CardMeta` 加 `noWinner` 旗標（`src/games/types.ts`）、**只有 JK-R 宣告**（`src/games/JK-R/meta.ts`）；外殼的三處判斷（`outcomeOf`、標題種類、是否顯示分數）先由 `1c7cfba` 抽到 `src/shell/outcome.ts`（行為不變），再由 `7dfabed` 改讀 `meta.noWinner`，`src/shell/app.ts` 現在只呼叫 `outcome.ts` 的函式，已沒有 `startsWith('JK')` 的判斷；`tests/contract/checks.ts` 的 `runsAiChecks` 也改讀 `noWinner`，所以 JK-B 現在進官方的 A1–A4（第 3 項）；`docs/SPEC.md` 7.2.1 的名單已改成 S-8 與 JK-B 兩張（第 2 項）。**沒有驗證的部分仍然沒有：結算頁沒有在真的瀏覽器看過（只有 `src/shell/outcome.test.ts` 的單元測試）。** 以下保留交付當時的原文。
 
 **共用層的問題（我沒有改，留給你）：**
 
