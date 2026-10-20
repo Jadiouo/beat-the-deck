@@ -40,6 +40,9 @@ const HEAVY_FILES = [
   'tests/ai/c4-fog.test.ts',
   // A4 豁免的前提（10.14）：簡單策略對等級 10 的勝率 ≥ 40%（H-5 兩百場、S-10 一百場 × 2），慢。
   'tests/ai/simple-strategy-premise.*.test.ts',
+  // 每張牌的量測測試（A1–A4 樣本外、對打、劇本等）：一支就數十秒到數十分鐘（C-K 一次約 31 分鐘），
+  // 不屬於「快、每次都跑」的 light。用 glob，以後新增的牌自動包含；`scratch.*` 不在這裡。
+  'src/games/*/measure.test.ts',
 ];
 
 const common = {
