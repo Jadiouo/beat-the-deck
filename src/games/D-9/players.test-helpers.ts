@@ -8,7 +8,6 @@ import { pathfinder } from '../../ai/policies/pathfinder';
 import { copyButtons, playMatch } from '../../core/match';
 import type { Buttons, Controller, GameConfig, Side } from '../../core/types';
 import {
-  CAP,
   DEPOSITS,
   DRAW_EVERY,
   IDLE,
@@ -100,7 +99,7 @@ export function depositAtRank(state: D9State, k: number): number {
   const ranks = ranksOf(state);
   const live: number[] = [];
   for (let d = 0; d < DEPOSITS; d += 1) {
-    const full = state.coll.filter((c) => c.dep === d).length >= CAP;
+    const full = state.coll.filter((c) => c.dep === d).length >= state.cap;
     if (!full && (state.deposits[d]?.stock ?? 0) > 0) {
       live.push(d);
     }
@@ -112,10 +111,10 @@ export function depositAtRank(state: D9State, k: number): number {
   return live[Math.min(k, live.length) - 1] as number;
 }
 
-function livePool(state: D9State): number[] {
+export function livePool(state: D9State): number[] {
   const live: number[] = [];
   for (let d = 0; d < DEPOSITS; d += 1) {
-    const full = state.coll.filter((c) => c.dep === d).length >= CAP;
+    const full = state.coll.filter((c) => c.dep === d).length >= state.cap;
     if (!full && (state.deposits[d]?.stock ?? 0) > 0) {
       live.push(d);
     }
@@ -135,7 +134,7 @@ function horizonOf(state: D9State): number {
 export function ownEv(state: D9State, side: Side, d: number, q: readonly number[]): number {
   const stock = state.deposits[d]?.stock ?? 0;
   const ex = state.coll.filter((c) => c.dep === d).map((c) => ({ owner: c.owner, round: c.round }));
-  const free = CAP - ex.length;
+  const free = state.cap - ex.length;
   if (free < 1 || stock <= 0) {
     return 0;
   }
@@ -143,13 +142,18 @@ export function ownEv(state: D9State, side: Side, d: number, q: readonly number[
   const them = { owner: otherSide(side), round: state.round };
   const h = horizonOf(state);
   const alone = projectDraws(stock, [...ex, me], h)[side];
-  const shared = free >= 2 ? projectDraws(stock, [...ex, me, them], h)[side] : 0;
+  const shared =
+    free >= 2
+      ? projectDraws(stock, [...ex, me, them], h)[side]
+      : state.contest === 1 && state.round % 2 === side
+        ? alone
+        : 0;
   const qd = q[d] ?? 0;
   return (1 - qd) * alone + qd * shared;
 }
 
 /** 對手挑每個礦脈的機率，用「名次的機率」映射到現在的礦脈上（rank1、rank2、其他三類）。 */
-function qFromRankWeights(state: D9State, w: readonly [number, number, number]): number[] {
+export function qFromRankWeights(state: D9State, w: readonly [number, number, number]): number[] {
   const q = new Array<number>(DEPOSITS).fill(0);
   const live = livePool(state);
   if (live.length === 0) {
@@ -366,7 +370,7 @@ export const oracleBest: Plan = (state, side) => {
     for (let j = 0; j < DEPOSITS; j += 1) {
       const sj = state.deposits[j]?.stock ?? 0;
       const exj = exOf(j);
-      const free = CAP - exj.length;
+      const free = state.cap - exj.length;
       const wantMe = j === d;
       const wantThem = j === theirs;
       const req = (wantMe ? 1 : 0) + (wantThem ? 1 : 0);
@@ -378,6 +382,8 @@ export const oracleBest: Plan = (state, side) => {
         if (wantThem) {
           set.push(them);
         }
+      } else if (req === 2 && free === 1 && state.contest === 1) {
+        set.push(state.round % 2 === side ? me : them);
       }
       const before = projectDraws(sj, exj, h);
       const after = projectDraws(sj, set, h);
