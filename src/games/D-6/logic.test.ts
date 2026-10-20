@@ -4,7 +4,7 @@ import { levelController, policyByName, wrapPolicy } from '../../ai/level';
 import { pathfinder } from '../../ai/policies/pathfinder';
 import { random } from '../../ai/policies/random';
 import { playMatch } from '../../core/match';
-import type { Buttons, Inputs, Side } from '../../core/types';
+import type { Buttons, Controller, Inputs, Side } from '../../core/types';
 import {
   BUY,
   CASH,
@@ -847,5 +847,172 @@ describe('D-6 市場｜AI 的買賣有道理（深度 ≥ 3 看得到開牌）',
     expect(buys(decideAtDepth(state, 1, 1, 'greedy'))).toBe(true);
     expect(buys(decideAtDepth(state, 1, 1, 'precise'))).toBe(false);
     expect(buys(decideAtDepth(state, 1, 6))).toBe(false);
+  });
+});
+
+describe('D-6 市場｜自己抬價沒有套利（量過的風險：衝擊調大就會出現）', () => {
+  /** 劇本玩家：choose 一開始就出手（沒有反應延遲）；非法就不動。 */
+  function scripted(script: (s: D6State, side: Side) => Trade): Controller<D6State> {
+    return {
+      decide(s, side) {
+        if (s.phase !== 'choose' || s.pending[side] !== null) {
+          return IDLE;
+        }
+        const want = TRADE_BUTTONS[script(s, side)]!;
+        const ok = d6Game.actions(s, side).some((a) => sameButtons(a, want));
+        return ok ? want : TRADE_BUTTONS[PASS]!;
+      },
+    };
+  }
+  /** 連買 k 回合同一種貨，再連賣 k 回合，整局重複（換一種貨）。 */
+  const pumpDump =
+    (k: number) =>
+    (s: D6State): Trade => {
+      const g = Math.floor(s.round / (2 * k)) % GOODS;
+      return s.round % (2 * k) < k ? BUY(g) : SELL(g);
+    };
+  /** 買了下一回合就賣。 */
+  const roundTrip = (s: D6State): Trade => (s.round % 2 === 0 ? BUY(0) : SELL(0));
+  const seeds = Array.from({ length: 30 }, (_v, i) => i);
+
+  function play(c0: Controller<D6State>, c1: Controller<D6State>, seed: number) {
+    return playMatch(d6Game, seed, CONFIG, c0, c1);
+  }
+
+  it('G1. 對一個什麼都不做的對手，抬價再出貨與來回買賣的玩家現金都低於開局（沒有無風險套利）', () => {
+    const idle = scripted(() => PASS);
+    for (const script of [pumpDump(2), pumpDump(3), pumpDump(5), roundTrip]) {
+      let total = 0;
+      for (const seed of seeds) {
+        total += play(scripted(script), idle, seed).score[0];
+      }
+      expect(total / seeds.length).toBeLessThan(CASH);
+    }
+  });
+
+  it('G2. 對等級 10 的搜尋型：抬價再出貨與來回買賣的劇本玩家勝率不超過 10%（量到的是 0%；> 90% 就是支配策略）', () => {
+    for (const script of [pumpDump(2), pumpDump(3), pumpDump(5), roundTrip]) {
+      let points = 0;
+      for (const seed of seeds) {
+        const playerSide: Side = seed % 2 === 0 ? 0 : 1;
+        const me = scripted(script);
+        const ai = levelController(d6Game, pathfinder, 10, seed);
+        const r = playerSide === 0 ? play(me, ai, seed) : play(ai, me, seed);
+        points += r.winner === null ? 0.5 : r.winner === playerSide ? 1 : 0;
+      }
+      expect(points / seeds.length).toBeLessThanOrEqual(0.1);
+    }
+  }, 120_000);
+
+  it('G3. 衝擊調到 6，來回買賣的玩家對不動的對手就賺錢（小規格的警告成真）；預設的衝擊 2 不會', () => {
+    const idle = scripted(() => PASS);
+    const cash = (impact: number): number => {
+      let total = 0;
+      for (const seed of seeds) {
+        total += playMatch(
+          d6Game,
+          seed,
+          { maxTicks: 3600, params: { impact } },
+          scripted(roundTrip),
+          idle,
+        ).score[0];
+      }
+      return total / seeds.length;
+    };
+    expect(cash(6)).toBeGreaterThan(CASH + 10);
+    expect(cash(2)).toBeLessThan(CASH);
+  });
+});
+
+describe('D-6 市場｜四個性格的機制（10.48：測機制，不測症狀）', () => {
+  /** 隨機打到的 choose 局面（AI 是 1 號邊、還沒鎖定、這回合剛開始）。 */
+  function sampleStates(count: number): D6State[] {
+    const out: D6State[] = [];
+    for (let seed = 0; out.length < count && seed < 40; seed += 1) {
+      const a = levelController(d6Game, random, 10, seed);
+      const b = levelController(d6Game, random, 10, seed + 99);
+      const tap = {
+        decide(s: D6State, side: Side, tick: number): Buttons {
+          if (
+            side === 1 &&
+            s.phase === 'choose' &&
+            s.idle === 0 &&
+            s.round >= 2 &&
+            s.round % 3 === 0
+          ) {
+            out.push(s);
+          }
+          return b.decide(s, side, tick);
+        },
+      };
+      playMatch(d6Game, seed, CONFIG, a, tap);
+    }
+    return out.slice(0, count);
+  }
+  const states = sampleStates(40);
+  /** 一步看的 (gain, danger)：和三個一步看的性格看到的一樣（對手做 actions()[0]）。 */
+  function oneStep(s: D6State, action: Buttons): { gain: number; danger: number } {
+    const theirs = d6Game.actions(s, 0)[0]!;
+    return d6Game.evaluate(d6Game.step(s, [theirs, action]), 1);
+  }
+  const index = (s: D6State, buttons: Buttons): number =>
+    d6Game.actions(s, 1).findIndex((a) => sameButtons(a, buttons));
+
+  it('取到足夠多的局面，而且有存貨的局面不少（否則下面的機制測試是空的）', () => {
+    expect(states.length).toBeGreaterThanOrEqual(30);
+    expect(
+      states.filter((s) => (s.inv[1] as readonly number[]).some((n) => n > 0)).length,
+    ).toBeGreaterThan(5);
+  });
+
+  it('貪心型：一步看 gain 最高的，完全不看 danger', () => {
+    for (const s of states) {
+      const acts = d6Game.actions(s, 1);
+      const gains = acts.map((a) => oneStep(s, a).gain);
+      const press = decideAtDepth(s, 1, 1, 'greedy');
+      expect(gains[index(s, press)]).toBeCloseTo(Math.max(...gains), 9);
+    }
+  });
+
+  it('精準型：先排除 danger 超過 0.3 的動作，剩下選 gain 最高的', () => {
+    for (const s of states) {
+      const acts = d6Game.actions(s, 1);
+      const scored = acts.map((a) => oneStep(s, a));
+      const safe = scored.filter((x) => x.danger <= 0.3);
+      const chosen = scored[index(s, decideAtDepth(s, 1, 1, 'precise'))]!;
+      if (safe.length > 0) {
+        expect(chosen.danger).toBeLessThanOrEqual(0.3);
+        expect(chosen.gain).toBeCloseTo(Math.max(...safe.map((x) => x.gain)), 9);
+      }
+    }
+  });
+
+  it('貪心型與精準型在「該不該再買」上真的會分開：鐵已經 5 件、好價回合只剩 5 個，再買一件 danger 超過 0.3，精準型不買、貪心型買', () => {
+    const hoard = choosing({
+      round: 13,
+      inv: [
+        [0, 0, 0],
+        [0, 0, 5],
+      ],
+    });
+    expect(oneStep(hoard, TRADE_BUTTONS[BUY(2)]!).danger).toBeGreaterThan(0.3);
+    const buys = (b: Buttons): boolean =>
+      [BUY(0), BUY(1), BUY(2)].some((t) => sameButtons(b, TRADE_BUTTONS[t]!));
+    expect(buys(decideAtDepth(hoard, 1, 1, 'greedy'))).toBe(true);
+    expect(buys(decideAtDepth(hoard, 1, 1, 'precise'))).toBe(false);
+  });
+
+  it('搜尋型（深度 6）：選的是「開牌之後的評價」最高的那個動作（走得到 result）', () => {
+    for (const s of states.slice(0, 20)) {
+      const acts = d6Game.actions(s, 1);
+      const values = acts.map((a) => {
+        let x = d6Game.step(s, [d6Game.actions(s, 0)[0]!, a]);
+        for (let i = 0; i < 5; i += 1) {
+          x = d6Game.step(x, [d6Game.actions(x, 0)[0]!, d6Game.actions(x, 1)[0]!]);
+        }
+        return d6Game.evaluate(x, 1).gain;
+      });
+      expect(values[index(s, decideAtDepth(s, 1, 6))]).toBeCloseTo(Math.max(...values), 9);
+    }
   });
 });
