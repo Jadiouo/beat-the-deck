@@ -1397,6 +1397,134 @@ describe('JK-B｜evaluate：準備項（只在預告期、寫死的習慣）', (
   });
 });
 
+describe('JK-B｜evaluate：量測之後加的幾項（先有數字再有測試，docs/cards/JK-B.md「我做的決定」）', () => {
+  const exchange = (ruleTick: number, scores: [number, number], me: [number, number]): number =>
+    evaluate(
+      makeState({
+        phase: 1,
+        rule: 'exchange',
+        next: 'normal',
+        ruleTick,
+        scores,
+        avatars: [
+          { x: me[0], y: me[1] },
+          { x: 28, y: 22 },
+        ],
+        coins: [cell(10, 10)],
+      }),
+      0,
+    ).gain;
+
+  it('分數互換：最後 8 個 tick（兩個走格的 tick）之前，領先只算 0.5%——落後時撿金幣沒有誘因，待在離金幣 1 格的地方等；最後 8 個 tick 才全額', () => {
+    const lead = (ruleTick: number): number =>
+      exchange(ruleTick, [3, 0], [9, 10]) - exchange(ruleTick, [0, 0], [9, 10]);
+    expect(lead(300)).toBeGreaterThan(0);
+    expect(lead(300)).toBeLessThan(0.1 * 3 * 100);
+    expect(lead(530)).toBeLessThan(0.1 * 3 * 100);
+    // 最後 1 秒的時間項（對手搆不到金幣、領先 ＋30）另外算：這裡只看 0.5% 與全額的差別
+    expect(lead(591)).toBeLessThan(0.1 * 3 * 100 + 30 + 1e-9);
+    expect(lead(592)).toBeGreaterThanOrEqual(300 - 1e-9);
+    // 前面：站在金幣旁（離 1 格）比踩上去（離 0 格）好；最後 8 個 tick：踩上去比較好
+    expect(exchange(300, [0, 0], [9, 10])).toBeGreaterThan(exchange(300, [0, 0], [10, 10]));
+    expect(exchange(592, [0, 0], [10, 10])).toBeGreaterThan(exchange(592, [0, 0], [9, 10]));
+  });
+
+  it('actions 與 evaluate 一致（分數互換的前面）：已經在金幣旁（1 格）沒有目標，全放開排第一，不會被排成「踩上去」', () => {
+    const near = makeState({
+      phase: 1,
+      rule: 'exchange',
+      ruleTick: 300,
+      avatars: [
+        { x: 9, y: 10 },
+        { x: 28, y: 22 },
+      ],
+      coins: [cell(10, 10)],
+    });
+    expect(jkbGame.actions(near, 0)[0]).toEqual(NONE);
+    const far = makeState({
+      phase: 1,
+      rule: 'exchange',
+      ruleTick: 300,
+      avatars: [
+        { x: 5, y: 10 },
+        { x: 28, y: 22 },
+      ],
+      coins: [cell(10, 10)],
+    });
+    expect(jkbGame.actions(far, 0)[0]).toEqual(KEY[RIGHT]);
+  });
+
+  it('搶劫期間站著不動（沒按方向，或按了被牆擋住）而對手在 8 格以內：gain 少 30；對手更遠就沒有這一項', () => {
+    const g = (want: number, opp: number): number =>
+      evaluate(
+        makeState({
+          phase: 1,
+          rule: 'rob',
+          ruleTick: 100,
+          avatars: [
+            { x: 10, y: 10, shoveCd: 5, want: want as never },
+            { x: opp, y: 10, shoveCd: 5 },
+          ],
+          coins: [],
+        }),
+        0,
+      ).gain;
+    // 往上走（離對手距離不變）對上站著：差 30
+    expect(g(UP, 14) - g(-1, 14)).toBeGreaterThanOrEqual(30 - 1e-9);
+    // 對手在 9 格以上：不扣（兩者只差走一格改變的距離，沒有 30 的那一項）
+    expect(Math.abs(g(UP, 20) - g(-1, 20))).toBeLessThan(30);
+    // 被牆擋住的按鍵也算站著
+    const wall = evaluate(
+      makeState({
+        phase: 1,
+        rule: 'rob',
+        ruleTick: 100,
+        avatars: [
+          { x: 10, y: 0, shoveCd: 5, want: UP },
+          { x: 14, y: 0, shoveCd: 5 },
+        ],
+        coins: [],
+      }),
+      0,
+    ).gain;
+    const still = evaluate(
+      makeState({
+        phase: 1,
+        rule: 'rob',
+        ruleTick: 100,
+        avatars: [
+          { x: 10, y: 0, shoveCd: 5, want: -1 },
+          { x: 14, y: 0, shoveCd: 5 },
+        ],
+        coins: [],
+      }),
+      0,
+    ).gain;
+    expect(wall).toBe(still);
+  });
+
+  it('補金幣兩邊各用各的亂數：我撿了之後補在哪，與對手有沒有在同一個 tick 或之前撿金幣無關', () => {
+    const coins = [cell(6, 5), cell(25, 20), cell(20, 3), cell(10, 18), cell(3, 20)];
+    const mine = (opp: boolean): number[] => {
+      const s = makeState({
+        avatars: [
+          { x: 5, y: 5 },
+          { x: 26, y: 20 },
+        ],
+        coins,
+      });
+      const n = step(s, go(RIGHT, opp ? LEFT : undefined));
+      return n.coins.filter((c) => !coins.includes(c));
+    };
+    const alone = mine(false);
+    const both = mine(true);
+    expect(alone).toHaveLength(1);
+    // 兩邊同時撿：新金幣兩顆，我的那顆和我單獨撿時補的一樣
+    expect(both).toHaveLength(2);
+    expect(both).toContain(alone[0]);
+  });
+});
+
 describe('JK-B｜evaluate：danger', () => {
   it('搶劫期間相鄰、對手可以推而且我後面有格子：danger = 1；對手在冷卻、或我背後是牆：0', () => {
     const d = (opp: object, me: object = { x: 10, y: 10 }, dist = 1): number =>
