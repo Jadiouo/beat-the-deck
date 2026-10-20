@@ -430,7 +430,8 @@ function samplePickStates(count: number): SKState[] {
     let tick = 0;
     while (!skGame.isOver(state)) {
       if (state.phase === 'pick' && state.phaseTick === 0 && state.picker !== null) {
-        samples.push(state);
+        // 還沒放開鍵的 tick 挑牌人只有「全放開」；取樣的是「已經可以挑」的同一個局面
+        samples.push({ ...state, armed: true });
       }
       state = skGame.step(state, [
         copyButtons(c0.decide(state, 0, tick)),
