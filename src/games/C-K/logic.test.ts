@@ -294,7 +294,7 @@ describe('C-K 梅花馬拉松｜委派：每一段的 step 就是那張牌的 st
     const dead = ckGame.step(state, IDLE);
     expect(dead.snakes[0].alive).toBe(false);
     expect(dead.over).toBe(false);
-    const frozen = run(dead, 58);
+    const frozen = run(dead, 59);
     expect(frozen.over).toBe(false);
     const done = ckGame.step(frozen, IDLE);
     expect(done.over).toBe(true);
@@ -398,7 +398,9 @@ describe('C-K 梅花馬拉松｜換段的轉接（enter／exit）', () => {
     expect([...after.foods].sort((a, b) => a - b)).toEqual([cell(20, 3), cell(25, 20)]);
     expect(after.snakes[0].score).toBe(-4);
     expect(after.snakes[1].score).toBe(6);
-    expect(after.sub).toEqual({});
+    expect(Object.keys(after.sub).sort()).toEqual(
+      ['ateAt', 'endAt', 'memory', 'pendingWinner', 'prevDir'].sort(),
+    );
   });
 
   it('離開 C-3：正確顏色的食物不足 2 顆時，補上格子編號小的錯誤顏色食物，結果決定性（重算兩次相同）', () => {
