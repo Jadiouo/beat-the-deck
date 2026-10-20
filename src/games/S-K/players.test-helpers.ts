@@ -239,11 +239,24 @@ export function strongOn(cardId: string): (seed: number) => Controller<SKState> 
   return (seed) => wrapPolicy(game, precise, NO_BLUNDER, seed) as unknown as Controller<SKState>;
 }
 
-/** 對每張池裡的牌量一次 `cardMargin`，回傳 id → 數字。 */
-export function marginTable(rivalLevel: number, seeds: readonly number[]): Record<string, number> {
+/** 以某個等級的精準型單打那張牌（綁在那張牌自己的 Game 上）。 */
+export function levelOn(cardId: string, lvl: number): (seed: number) => Controller<SKState> {
+  const game = poolEntry(cardId).game;
+  return (seed) => levelController(game, precise, lvl, seed) as unknown as Controller<SKState>;
+}
+
+/**
+ * 對每張池裡的牌量一次 `cardMargin`，回傳 id → 數字。
+ * `mine` 預設是 `strongOn`（人類節奏、不亂按）；量中等技術的玩家時傳 `(id) => levelOn(id, 8)`。
+ */
+export function marginTable(
+  rivalLevel: number,
+  seeds: readonly number[],
+  mine: (cardId: string) => (seed: number) => Controller<SKState> = strongOn,
+): Record<string, number> {
   const table: Record<string, number> = {};
   for (const card of POOL) {
-    table[card.id] = cardMargin(card.id, strongOn(card.id), rivalLevel, seeds);
+    table[card.id] = cardMargin(card.id, mine(card.id), rivalLevel, seeds);
   }
   return table;
 }

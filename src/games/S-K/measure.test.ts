@@ -19,6 +19,7 @@ import {
   ai,
   humanModel,
   level,
+  levelOn,
   marginTable,
   mean,
   playOne,
@@ -161,6 +162,37 @@ describe('S-K 劇本玩家｜打的時候都一樣（精準型、人類節奏、
   );
 });
 
+describe('S-K 劇本玩家（同技術）｜打的時候都是等級 10 的精準型，只差挑牌規則；對等級 10 的 AI（它用自己的挑牌規則）', () => {
+  it(
+    '各種固定的挑牌規則的勝率：離 50 多遠、有沒有超過 90%（支配策略）',
+    () => {
+      const rival = level(10);
+      const table = marginTable(10, seeds(24 * N, 6000), (id) => levelOn(id, 10));
+      report(
+        `同技術單打對等級 10 的平均 m：${POOL.map((p) => `${p.id} ${(table[p.id] as number).toFixed(2)}`).join('、')}`,
+      );
+      const rules: [string, MakeController][] = [
+        ['AI 自己的規則（基準，鏡像必為 50）', (seed) => ai(10, seed)],
+        ['永遠第一張', (seed) => scripted(ai(10, seed), ruleFirst)],
+        ['永遠最穩', (seed) => scripted(ai(10, seed), ruleStable)],
+        ['永遠最險', (seed) => scripted(ai(10, seed), ruleRisky)],
+        ['我成績最好的家族', (seed) => scripted(ai(10, seed), ruleOwnBestFamily)],
+        ['我單打最強的那張', (seed) => scripted(ai(10, seed), ruleTable(table))],
+      ];
+      const wins: number[] = [];
+      for (const [name, make] of rules) {
+        const win = winPercent(make, rival, seeds(60 * N));
+        wins.push(win);
+        report(`同技術劇本玩家 ${name}：${win.toFixed(1)}%（${60 * N} 場）`);
+      }
+      for (const win of wins) {
+        expect(win).toBeLessThan(90);
+      }
+    },
+    LONG,
+  );
+});
+
 // ---------------------------------------------------------------------------
 // 探針 A（10.20、10.24、10.35）：三組玩家只差「知道多少」，單位是勝率
 // ---------------------------------------------------------------------------
@@ -266,6 +298,86 @@ describe('S-K 放水｜故意輸掉第一段，換 AI 後來挑錯家族，划�
   );
 });
 
+describe('S-K 探針 A（中等技術的玩家）｜玩家是等級 8，對等級 10；表也用等級 8 單打量，避免地板', () => {
+  it(
+    '(c) 的表是對真正的對手（等級 10）量的，不是鏡像（玩家等級 8、對手等級 10，打法不同）；(b) 是對弱對手（等級 1）量的泛用先驗',
+    () => {
+      const tableB = marginTable(1, seeds(24 * N, 5000), (id) => levelOn(id, 8));
+      const tableC = marginTable(10, seeds(24 * N, 6000), (id) => levelOn(id, 8));
+      const rival = level(10);
+      const count = 100 * N;
+      const play = (seed: number) => ai(8, seed);
+      const a = winPercent((seed) => scripted(play(seed), ruleFirst), rival, seeds(count));
+      const b = winPercent((seed) => scripted(play(seed), ruleTable(tableB)), rival, seeds(count));
+      const c = winPercent((seed) => scripted(play(seed), ruleTable(tableC)), rival, seeds(count));
+      report(
+        `探針 A（等級 8 的玩家，${count} 場）：(a) ${a.toFixed(1)}、(b) ${b.toFixed(1)}、(c) ${c.toFixed(1)}、(c)−(b) ${(c - b).toFixed(1)}、(c)−(a) ${(c - a).toFixed(1)}`,
+      );
+      report(
+        `  表 (b)：${POOL.map((p) => `${p.id} ${(tableB[p.id] as number).toFixed(2)}`).join('、')}`,
+      );
+      report(
+        `  表 (c)：${POOL.map((p) => `${p.id} ${(tableC[p.id] as number).toFixed(2)}`).join('、')}`,
+      );
+      for (const v of [a, b, c]) {
+        expect(v).toBeGreaterThanOrEqual(0);
+        expect(v).toBeLessThanOrEqual(100);
+      }
+    },
+    LONG,
+  );
+
+  it(
+    '放水（中等技術）：第一段不玩，期望分差與勝率差；不是負的就要回頭改小規格',
+    () => {
+      const tableC = marginTable(10, seeds(24 * N, 6000), (id) => levelOn(id, 8));
+      const honest: MakeController = (seed) => scripted(ai(8, seed), ruleTable(tableC));
+      const sandbagged: MakeController = (seed) => {
+        const inner = scripted(ai(8, seed), ruleTable(tableC));
+        return {
+          decide(state: SKState, side: Side, tick: number): Buttons {
+            const pressed = inner.decide(state, side, tick);
+            return state.phase === 'play' && state.seg === 0 ? { ...NEUTRAL } : pressed;
+          },
+        };
+      };
+      const rival = level(10);
+      const count = 100 * N;
+      const stats = (
+        make: MakeController,
+      ): { diff: number; win: number; same: number; picks: number } => {
+        const diffs: number[] = [];
+        let points = 0;
+        let same = 0;
+        let picks = 0;
+        for (const seed of seeds(count)) {
+          const r = playSeated(seed, make, rival);
+          diffs.push(r.scoreDiff);
+          points += r.points;
+          const aiSide: Side = r.side === 0 ? 1 : 0;
+          const ledger = r.played.final.ledger;
+          for (let i = 1; i < 4; i += 1) {
+            if (ledger[i]?.picker === aiSide) {
+              picks += 1;
+              if (ledger[i]?.family === ledger[0]?.family) {
+                same += 1;
+              }
+            }
+          }
+        }
+        return { diff: mean(diffs), win: (100 * points) / count, same, picks };
+      };
+      const h = stats(honest);
+      const s = stats(sandbagged);
+      report(
+        `放水（等級 8 的玩家，${count} 場，600 分制）：誠實 平均分差 ${h.diff.toFixed(1)}、勝率 ${h.win.toFixed(1)}、AI 後來挑到第一段同家族 ${h.same}/${h.picks}；放水 平均分差 ${s.diff.toFixed(1)}、勝率 ${s.win.toFixed(1)}、同家族 ${s.same}/${s.picks}；期望分差（放水 − 誠實）${(s.diff - h.diff).toFixed(1)}、勝率差 ${(s.win - h.win).toFixed(1)}`,
+      );
+      expect(s.diff - h.diff).toBeLessThanOrEqual(0);
+    },
+    LONG,
+  );
+});
+
 // ---------------------------------------------------------------------------
 // 反應速度（10.51 的四格）
 // ---------------------------------------------------------------------------
@@ -294,7 +406,9 @@ describe('S-K 反應速度｜合併值與三個維度分開（快的一方勝率
       report(
         `反應速度四格（${count} 場）：合併 ${combined.toFixed(1)}、只差反應延遲 ${delay.toFixed(1)}、只差決定頻率 ${every.toFixed(1)}、只差搜尋深度 ${depth.toFixed(1)}`,
       );
-      expect(depth).toBe(50);
+      // 精準型不用 depth，兩邊是同一個控制器；S-K 的座位不是鏡像（第一個挑牌人由種子決定、候選牌兩邊不同），
+      // 所以不像 S-9 逐場平手，只是雜訊（30 場的標準誤約 9 個百分點）。
+      expect(Math.abs(depth - 50)).toBeLessThan(25);
     },
     LONG,
   );
@@ -304,7 +418,7 @@ describe('S-K 反應速度｜合併值與三個維度分開（快的一方勝率
 // 性格指紋（10.48：測機制，不測症狀）
 // ---------------------------------------------------------------------------
 
-/** 從真實對局取樣：每個挑牌階段的第 20 個 tick（挑牌人一定還沒鎖定）取一次，記下挑牌人。 */
+/** 從真實對局取樣：每個挑牌階段的第 0 個 tick（挑牌人還沒鎖定）取一次，記下挑牌人。 */
 function samplePickStates(count: number): SKState[] {
   const samples: SKState[] = [];
   for (const seed of seeds(count)) {
@@ -315,7 +429,7 @@ function samplePickStates(count: number): SKState[] {
     let state = skGame.init(seed, CONFIG);
     let tick = 0;
     while (!skGame.isOver(state)) {
-      if (state.phase === 'pick' && state.phaseTick === 20 && state.picker !== null) {
+      if (state.phase === 'pick' && state.phaseTick === 0 && state.picker !== null) {
         samples.push(state);
       }
       state = skGame.step(state, [
