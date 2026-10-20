@@ -1422,6 +1422,21 @@ const keyThenDoor = (state: PursuitState): readonly number[] => {
   }
   return c9.keyHolder === null ? [c9.key] : [(c9.layouts[c9.round >> 1] as { door: number }).door];
 };
+/**
+ * C-K：目前這一段是 C-3 時只算現在的正確顏色，其他段（C-A、C-2、C-4）算全部食物。
+ * state 欄位是 `src/games/C-K/logic.ts` 的 `CKState`（`phases`、`phase`、`sub`）。霧段的食物照樣算（看不見也是目標）。
+ */
+const marathonFoods = (state: PursuitState): readonly number[] => {
+  const k = state as unknown as {
+    readonly phases: readonly string[];
+    readonly phase: number;
+    readonly sub: { readonly foodColors?: readonly number[]; readonly correct?: number };
+  };
+  if (k.phases[k.phase] !== 'C-3') {
+    return state.foods;
+  }
+  return state.foods.filter((_cell, i) => k.sub.foodColors?.[i] === k.sub.correct);
+};
 const foodsAndBait = (state: PursuitState): readonly number[] =>
   state.bait === null || state.bait === undefined ? state.foods : [...state.foods, state.bait.cell];
 
@@ -1442,6 +1457,8 @@ export const PURSUIT: Readonly<Record<string, PursuitDeclaration | PursuitNotApp
   'C-9': { targets: keyThenDoor, minTakesPerMinute: 5, minMedianSeconds: 30 },
   // C-Q 的目標是食物（沿用貪食蛇；僚機不吃東西）。下限的量測與理由見 docs/cards/C-Q.md「追目標」。
   'C-Q': { targets: clubFoods, minTakesPerMinute: 8, minMedianSeconds: 30 },
+  // C-K 是包裝牌（互動借自被包的牌，10.27），目標就是各段那張牌的食物。量測與下限的理由見 docs/cards/C-K.md「追目標」。
+  'C-K': { targets: marathonFoods, minTakesPerMinute: 12, minMedianSeconds: 30 },
   'C-8': { notApplicable: '光軌沒有可追的目標：先撞到牆的輸，贏的是活得久，不是拿到東西' },
   'C-10': {
     notApplicable: '追與逃：目標是對手的蛇頭，不是場上的東西；普查 60 個回合全部由追的抓到逃的',
