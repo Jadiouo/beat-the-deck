@@ -36,9 +36,9 @@ export const LADDERS = 5;
 /** 兩邊都選好之後，鎖定幾個 tick 才揭示。 */
 export const LOCK_TICKS = 2;
 /** 揭示之後停幾個 tick 才入帳（讓人看清楚結果）。 */
-export const RESULT_TICKS = 30;
+export const RESULT_TICKS = 60;
 /** 新的一座梯子開始之前多等幾個 tick（讓人看清楚上一座公開的雙方 q 與結果）。 */
-export const LADDER_PAUSE = 90;
+export const LADDER_PAUSE = 180;
 const MIN_P = 0.05;
 const MAX_P = 0.95;
 

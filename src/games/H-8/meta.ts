@@ -14,4 +14,6 @@ export const h8Meta: CardMeta = {
   baseLevel: 3,
   symmetric: true,
   luckHeavy: true,
+  /** 5 座梯子約 35 到 45 秒；慢的人（每個決定想 3 秒）也要打得完，所以給 90 秒。 */
+  defaultMaxTicks: 5400,
 };
