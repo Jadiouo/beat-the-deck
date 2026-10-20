@@ -71,7 +71,15 @@ export interface JKBState {
   /** 金幣雨的額外金幣（撿了不補，這一段結束就消失）。 */
   readonly extra: readonly number[];
   readonly scores: readonly [number, number];
+  /** 標記格與額外金幣用的亂數。 */
   readonly rng: RngState;
+  /**
+   * 補金幣用的亂數，兩邊各一條：撿金幣的那一邊用自己的那條補。
+   * 為什麼不共用一條：AI 看到的世界是 12 個 tick 以前的，再用自己的輸入重播到現在（`wrapPolicy`）；
+   * 共用一條時，重播裡「我撿了之後補在哪」會被對手這 12 個 tick 內撿金幣的次數弄亂，AI 會朝一顆不存在的金幣走。
+   * 各用各的，重播出來的新金幣和真的一樣（除非那一格剛好被佔了）。
+   */
+  readonly fill: readonly [RngState, RngState];
   /** 現在是第幾段（0 到 5）與段內第幾個 tick（0 到 599）。 */
   readonly phase: number;
   readonly ruleTick: number;
@@ -154,7 +162,8 @@ export function initState(seed: number, config: GameConfig): JKBState {
     coins,
     extra: [],
     scores: [0, 0],
-    rng,
+    rng: rngStateFor(seed, 'rain'),
+    fill: [rngStateFor(seed, 'fill-0'), rngStateFor(seed, 'fill-1')],
     phase: 0,
     ruleTick: 0,
     schedule,
@@ -348,6 +357,7 @@ export function step(state: JKBState, inputs: Inputs): JKBState {
   let coins = state.coins;
   let extra = state.extra;
   let rng = state.rng;
+  let fill = state.fill;
 
   // 1. 走格與推擠
   if (tick % MOVE_EVERY === 0 && (w0 >= 0 || w1 >= 0)) {
@@ -376,14 +386,14 @@ export function step(state: JKBState, inputs: Inputs): JKBState {
     const picks: [number, number] = [0, 0];
     let regular = coins;
     let bonus = extra;
-    let refill = 0;
+    const refill: [number, number] = [0, 0];
     for (const side of [0, 1] as const) {
       const c = side === 0 ? y0 * WIDTH + x0 : y1 * WIDTH + x1;
       const ri = regular.indexOf(c);
       if (ri >= 0) {
         regular = regular.filter((_v, i) => i !== ri);
         picks[side] += 1;
-        refill += 1;
+        refill[side] += 1;
       }
       const ei = bonus.indexOf(c);
       if (ei >= 0) {
@@ -403,14 +413,16 @@ export function step(state: JKBState, inputs: Inputs): JKBState {
     scores = [a, b];
     const here = [y0 * WIDTH + x0, y1 * WIDTH + x1];
     const placed: number[] = [...regular];
-    for (let i = 0; i < refill; i += 1) {
-      const free = pickFree(
-        rng,
-        (c) => here.includes(c) || placed.includes(c) || bonus.includes(c),
-      );
-      rng = free.rng;
-      if (free.cell >= 0) {
-        placed.push(free.cell);
+    for (const side of [0, 1] as const) {
+      for (let i = 0; i < refill[side]; i += 1) {
+        const free = pickFree(
+          fill[side],
+          (c) => here.includes(c) || placed.includes(c) || bonus.includes(c),
+        );
+        fill = side === 0 ? [free.rng, fill[1]] : [fill[0], free.rng];
+        if (free.cell >= 0) {
+          placed.push(free.cell);
+        }
       }
     }
     coins = placed;
@@ -509,6 +521,7 @@ export function step(state: JKBState, inputs: Inputs): JKBState {
     extra,
     scores,
     rng,
+    fill,
     phase,
     ruleTick: nextTick,
     schedule: state.schedule,
@@ -538,17 +551,143 @@ export function winner(state: JKBState): Side | null {
 // ---------------------------------------------------------------------------
 
 const NO_KEYS: Buttons = { up: false, down: false, left: false, right: false, a: false, b: false };
-const ACTIONS: readonly Buttons[] = [
-  NO_KEYS,
+const KEY_OF: readonly Buttons[] = [
   { ...NO_KEYS, up: true },
   { ...NO_KEYS, right: true },
   { ...NO_KEYS, down: true },
   { ...NO_KEYS, left: true },
 ];
 
-/** 5 個動作，兩邊一樣：全放開排第一（搜尋型假設對手不動），再來上、右、下、左。沒有 a、b。 */
-export function actions(_state: JKBState, _side: Side): readonly Buttons[] {
-  return ACTIONS;
+/** 全放開排第一的固定順序（沒有目標、或已經到了目標的時候）。 */
+const DEFAULT_ORDER: readonly Buttons[] = [NO_KEYS, ...KEY_OF];
+
+/**
+ * 預先排好的動作順序，索引是 (第一偏好 + 1) × 5 + (第二偏好 + 1)：偏好的方向排最前，然後全放開，再來其他方向。
+ * 為什麼「往目標更近的方向排最前」不是裝飾：搜尋型往前看的是逐 tick 的 `step`，而走格每 4 個 tick 才發生一次，
+ * 「現在就按」與「等到走格的那個 tick 才按」得到同一個終點，兩個動作平手；平手取索引最小的，
+ * 全放開排第一就會變成「只在走格的 tick 按一下」，每隔幾個 tick 才決定一次的等級（等級 1 到 9）按一下就放開，幾乎不動。
+ * 偏好的方向排在全放開前面，平手就解成「現在就往目標走」（DESIGN-AI-FUN 10.54 的「actions 的排序必須和 evaluate 的偏好一致」）。
+ */
+const ORDERS: readonly (readonly Buttons[])[] = (() => {
+  const table: Buttons[][] = [];
+  for (let first = -1; first < 4; first += 1) {
+    for (let second = -1; second < 4; second += 1) {
+      const list: Buttons[] = [];
+      const used = new Set<number>();
+      for (const d of [first, second]) {
+        if (d >= 0 && !used.has(d)) {
+          used.add(d);
+          list.push(KEY_OF[d] as Buttons);
+        }
+      }
+      list.push(NO_KEYS);
+      for (let d = 0; d < 4; d += 1) {
+        if (!used.has(d)) {
+          list.push(KEY_OF[d] as Buttons);
+        }
+      }
+      table.push(list);
+    }
+  }
+  return table;
+})();
+
+/**
+ * 這一邊現在「想去哪」：預告期的布局目標 ＞ 搶劫的追（或躲）＞ 離最近的有價值金幣。回傳 [格子, 是不是要躲]；沒有目標 null。
+ * `actions` 用它排順序；`evaluate` 的各項距離扣分用的是同一批目標（準備項、搶劫、最近的金幣）。
+ */
+export function intentOf(
+  state: JKBState,
+  side: Side,
+): { readonly cell: number; readonly flee: boolean } | null {
+  const me = state.avatars[side];
+  const opp = state.avatars[other(side)];
+  const here = me.y * WIDTH + me.x;
+  const theirs = opp.y * WIDTH + opp.x;
+  const { rule, ruleTick } = state;
+  if (ruleTick >= PHASE_TICKS - NOTICE_TICKS && state.next !== 'none') {
+    if (state.next === 'rain' && state.rainCell >= 0) {
+      if (manhattan(here, state.rainCell) * MOVE_EVERY <= PHASE_TICKS - ruleTick + RAIN_SLACK) {
+        return { cell: state.rainCell, flee: false };
+      }
+    } else if (state.next === 'rob' && manhattan(here, theirs) < ROB_PREP_RANGE) {
+      return { cell: theirs, flee: true };
+    } else if (state.next === 'gravity' && me.y > GRAVITY_PREP_ROW) {
+      return { cell: GRAVITY_PREP_ROW * WIDTH + me.x, flee: false };
+    }
+    if (rule === 'poison' || rule === 'gift') {
+      const spot = densestSpot(state.coins, here);
+      return spot >= 0 ? { cell: spot, flee: false } : null;
+    }
+  }
+  if (rule === 'rob') {
+    if (me.shoveCd === 0) {
+      return { cell: theirs, flee: false };
+    }
+    return opp.shoveCd === 0 ? { cell: theirs, flee: true } : null;
+  }
+  if (rule === 'poison' || rule === 'gift') {
+    return null;
+  }
+  let best = -1;
+  let bestCost = Number.POSITIVE_INFINITY;
+  for (const c of state.coins) {
+    const cost = travel(state, here, c);
+    if (cost < bestCost) {
+      bestCost = cost;
+      best = c;
+    }
+  }
+  for (const c of state.extra) {
+    const cost = travel(state, here, c);
+    if (cost < bestCost) {
+      bestCost = cost;
+      best = c;
+    }
+  }
+  if (best < 0) {
+    return null;
+  }
+  // 分數互換的前面不踩金幣：離最近的金幣 1 格就算到了（和 evaluate 的 EXCHANGE_HOVER 一致）
+  if (
+    rule === 'exchange' &&
+    ruleTick < PHASE_TICKS - EXCHANGE_PICK_WINDOW &&
+    bestCost <= EXCHANGE_HOVER
+  ) {
+    return null;
+  }
+  return { cell: best, flee: false };
+}
+
+/** 5 個動作，兩邊一樣的集合（上右下左與全放開，沒有 a、b）；順序見 `ORDERS`。 */
+export function actions(state: JKBState, side: Side): readonly Buttons[] {
+  const intent = intentOf(state, side);
+  if (intent === null) {
+    return DEFAULT_ORDER;
+  }
+  const me = state.avatars[side];
+  const dx = (intent.cell % WIDTH) - me.x;
+  const dy = Math.floor(intent.cell / WIDTH) - me.y;
+  if (intent.flee) {
+    // 躲：離得遠的軸優先（離對手近的那一軸最該拉開）；已經是同一格或同一軸就隨便偏一邊
+    const away: number[] = [];
+    const horizontal = dx > 0 ? 3 : 1;
+    const vertical = dy > 0 ? 0 : 2;
+    if (Math.abs(dx) <= Math.abs(dy)) {
+      away.push(horizontal, vertical);
+    } else {
+      away.push(vertical, horizontal);
+    }
+    return ORDERS[((away[0] as number) + 1) * 5 + (away[1] as number) + 1] as readonly Buttons[];
+  }
+  if (dx === 0 && dy === 0) {
+    return DEFAULT_ORDER;
+  }
+  const horizontal = dx === 0 ? -1 : dx > 0 ? 1 : 3;
+  const vertical = dy === 0 ? -1 : dy > 0 ? 2 : 0;
+  const first = Math.abs(dy) >= Math.abs(dx) ? vertical : horizontal;
+  const second = first === vertical ? horizontal : vertical;
+  return ORDERS[(first + 1) * 5 + second + 1] as readonly Buttons[];
 }
 
 // ---------------------------------------------------------------------------
@@ -569,6 +708,12 @@ export const WIND_AGAINST = 1.5;
 export const ROB_CHASE_W = 2;
 export const ROB_FLEE_W = 2;
 export const ROB_FLEE_RANGE = 8;
+/**
+ * 搶劫期間站著不動（沒按方向，或按了但被牆擋住）而對手在這麼多格以內：扣 `ROB_STILL_W`。
+ * 推擠只對「這一刻沒有走開」的人成立（走開的人被追的人走進空格、不算推），所以在搶劫的時候不動就是被推。
+ */
+export const ROB_STILL_RANGE = 8;
+export const ROB_STILL_W = 30;
 /** 準備項（只在預告期 `ruleTick ≥ 600 − 180` 生效；寫死的、人可以預測的習慣）。 */
 /** next ＝ 金幣雨：離標記格每一格的扣分；來得及（走過去的 tick ≤ 剩餘 tick ＋ 這個寬限）才有。 */
 export const RAIN_PREP_W = 2;
@@ -583,6 +728,16 @@ export const GRAVITY_PREP_ROW = 6;
 export const GRAVITY_PREP_W = 1;
 /** 分數互換最後 1 秒：領先、而且對手搆不到任何金幣時的加成。 */
 export const FINAL_BONUS = 30;
+/**
+ * 分數互換：只有這一段最後的這麼多 tick 內（兩個走格的 tick），領先才全額算數；之前算 `EXCHANGE_EARLY_W` 倍。
+ * 原因（量到的，`docs/cards/JK-B.md`）：互換是整個總分對調，所以這一段結束時「最後撿的人」帶走全部領先；
+ * 落後就馬上撿，對手（或隨機亂走的點）隨時可以撿回去，AI 看到的世界又是 12 個 tick 以前的，來不及撿回去就輸；
+ * 等到最後的走格 tick 才撿，對手沒有時間撿回去。
+ */
+export const EXCHANGE_PICK_WINDOW = 8;
+export const EXCHANGE_EARLY_W = 0.005;
+/** 分數互換的前面（還不是撿的時候）：AI 待在離最近金幣這麼多格的地方等，不踩上去。 */
+export const EXCHANGE_HOVER = 1;
 /** 相鄰、對手能推、我被推走並不致命時的 danger（推走我只是換了位置）。 */
 export const DANGER_PUSH = 0.4;
 /**
@@ -657,7 +812,8 @@ export function evaluate(state: JKBState, side: Side): { gain: number; danger: n
   const { rule, ruleTick } = state;
   const here = projectedCell(me);
   const theirs = opp.y * WIDTH + opp.x;
-  let gain = POINT * lead;
+  const early = rule === 'exchange' && ruleTick < PHASE_TICKS - EXCHANGE_PICK_WINDOW;
+  let gain = POINT * lead * (early ? EXCHANGE_EARLY_W : 1);
 
   // 有價值的金幣：近一格 ＋1。毒藥、送禮、搶劫的金幣沒有價值（撿了不賺）。
   if (rule === 'normal' || rule === 'rain' || rule === 'gravity' || rule === 'exchange') {
@@ -669,7 +825,7 @@ export function evaluate(state: JKBState, side: Side): { gain: number; danger: n
       best = Math.min(best, travel(state, here, c));
     }
     if (best !== Number.POSITIVE_INFINITY) {
-      gain -= COIN_W * best;
+      gain -= COIN_W * (early ? Math.abs(best - EXCHANGE_HOVER) : best);
     }
   }
 
@@ -680,6 +836,9 @@ export function evaluate(state: JKBState, side: Side): { gain: number; danger: n
       gain -= ROB_CHASE_W * d;
     } else if (opp.shoveCd === 0) {
       gain += ROB_FLEE_W * Math.min(d, ROB_FLEE_RANGE);
+    }
+    if (here === me.y * WIDTH + me.x && d <= ROB_STILL_RANGE) {
+      gain -= ROB_STILL_W;
     }
   }
 
@@ -777,6 +936,7 @@ export interface StateOverrides {
   readonly gravity?: 'down' | 'up';
   readonly rainCell?: number;
   readonly rng?: RngState;
+  readonly fill?: readonly [RngState, RngState];
 }
 
 /**
@@ -816,6 +976,7 @@ export function makeState(overrides: StateOverrides = {}): JKBState {
     extra: overrides.extra ?? [],
     scores: overrides.scores ?? [0, 0],
     rng: overrides.rng ?? base.rng,
+    fill: overrides.fill ?? base.fill,
     phase,
     ruleTick,
     schedule,
