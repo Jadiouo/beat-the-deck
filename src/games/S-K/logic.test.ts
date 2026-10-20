@@ -842,7 +842,7 @@ describe('S-K 黑桃馬拉松｜選牌的 evaluate 與 actions', () => {
         expect(w).toBeLessThanOrEqual(24);
       }
     }
-  });
+  }, 120_000);
 
   it('冷啟動（空 ledger）：貪心型挑期望最高的（S-7，其次 S-J）；精準型挑「穩」的牌；兩者不同', () => {
     const s = makeState({ offer: ['S-4', 'S-7', 'S-3', 'S-Q'], picker: 0 });

@@ -86,6 +86,11 @@ export interface SKState {
   /** 候選牌（公開）。 */
   readonly offer: readonly string[];
   readonly cardId: string | null;
+  /**
+   * 挑牌人已經放開過方向鍵：上一段按著的鍵（例如還在往左閃）不會一進挑牌階段就直接鎖定。
+   * 開局的第一次挑牌是 true；之後每次挑牌階段開始是 false，要先有一個 tick 四個方向鍵都放開才變成 true。
+   */
+  readonly armed: boolean;
   /** 這一段傳給被包的牌的 `maxTicks`。 */
   readonly segMax: number;
   /** 被包的牌的 state（純 JSON）；挑牌與 show 階段是 null，rest 階段留著這一段的終局。 */
@@ -228,6 +233,7 @@ function nextSegment(state: SKState): SKState {
       state.ledger.map((entry) => entry.cardId),
     ),
     cardId: null,
+    armed: false,
     inner: null,
   };
 }
@@ -242,8 +248,9 @@ function step(state: SKState, inputs: Inputs): SKState {
   let next: SKState;
   switch (state.phase) {
     case 'pick': {
-      const index =
-        state.picker === null ? -1 : lockedIndex(inputs[state.picker], state.offer.length);
+      const pressed = state.picker === null ? NONE : inputs[state.picker];
+      // 還沒放開過就不算挑牌（先放開一個 tick）；一直按著不放則逾時照樣鎖定第 0 張。
+      const index = state.armed ? lockedIndex(pressed, state.offer.length) : -1;
       if (index >= 0 || state.phaseTick + 1 >= times.pick) {
         next = {
           ...base,
@@ -252,7 +259,11 @@ function step(state: SKState, inputs: Inputs): SKState {
           cardId: state.offer[Math.max(0, index)] as string,
         };
       } else {
-        next = { ...base, phaseTick: state.phaseTick + 1 };
+        next = {
+          ...base,
+          phaseTick: state.phaseTick + 1,
+          armed: state.armed || !KEYS.some((k) => pressed[k]),
+        };
       }
       break;
     }
@@ -344,7 +355,8 @@ function actions(state: SKState, side: Side): readonly Buttons[] {
   if (state.phase === 'play' && state.inner !== null && state.cardId !== null) {
     return poolEntry(state.cardId).game.actions(state.inner, side);
   }
-  if (state.phase !== 'pick' || state.picker !== side) {
+  // 非挑牌人、或挑牌人還沒放開過鍵（這時按什麼都不算）：只有「全放開」，搜尋才不會在原地按著不放。
+  if (state.phase !== 'pick' || state.picker !== side || !state.armed) {
     return IDLE_ACTIONS;
   }
   // 挑牌人：鎖定的動作依 evaluate 的偏好排（gain 高的在前，同分取候選順序），等著（全放開）排最後，
@@ -378,6 +390,7 @@ function init(seed: number, config: GameConfig): SKState {
     picker: first,
     offer: offerFor(seed, 0, []),
     cardId: null,
+    armed: true,
     segMax: 0,
     inner: null,
     ledger: [],
