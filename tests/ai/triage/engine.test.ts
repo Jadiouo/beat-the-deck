@@ -359,6 +359,7 @@ describe('Wilson 區間與分類門檻（量之前固定，10.54）', () => {
         byKind: {},
         byPath: {},
         relaxed: { queries: 0, changed: 0 },
+        world: { queries: 0, changed: 0 },
         self: { queries: 1000, changed: Math.round(selfRate * 1000) },
         nullChanged: 0,
       };
@@ -378,12 +379,25 @@ describe('Wilson 區間與分類門檻（量之前固定，10.54）', () => {
   it('分類：零 / 值得排 / 灰色 / 常數策略', () => {
     const zero = classify(fake({ 'precise@10': 0, 'precise@5': 0, 'pathfinder@10': 0.004 }, 0.5));
     expect(zero.verdict).toBe('structural-zero');
+    expect(zero.rDefault).toBe(0);
     const worth = classify(fake({ 'precise@10': 0.2, 'pathfinder@10': 0.01 }, 0.5));
     expect(worth.verdict).toBe('worth-probe-a');
+    expect(worth.rDefault).toBeCloseTo(0.2); // 預設性格是 precise
+    const offDefault = classify(fake({ 'precise@10': 0.001, 'pathfinder@10': 0.3 }, 0.5));
+    expect(offDefault.verdict).toBe('worth-probe-a'); // 判定類別照原規則（三個性格取最大）
+    expect(offDefault.rDefault).toBeCloseTo(0.001); // 但預設性格的改變率另外報
     const grey = classify(fake({ 'precise@10': 0.03, 'pathfinder@10': 0.02 }, 0.5));
     expect(grey.verdict).toBe('grey');
     const constant = classify(fake({ 'precise@10': 0, 'pathfinder@10': 0 }, 0));
     expect(constant.verdict).toBe('constant-policy');
+    // 自我為 0 但整個世界一換決策就變：AI 只讀共用環境，是結構零，不是常數策略。
+    const readsWorld = fake({ 'precise@10': 0, 'pathfinder@10': 0 }, 0);
+    const withWorld = {
+      ...readsWorld,
+      cells: readsWorld.cells.map((c) => ({ ...c, world: { queries: 100, changed: 60 } })),
+    };
+    expect(classify(withWorld).verdict).toBe('structural-zero');
+    expect(classify(withWorld).wMax).toBeCloseTo(0.6);
   });
 
   it('分類：乾淨為零但放寬很高 → 無法乾淨篩檢（AI 讀的是糾纏欄位）；放寬也低 → 結構零', () => {
