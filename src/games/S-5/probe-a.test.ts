@@ -159,6 +159,44 @@ describe('(c) 真的讀了對手（換掉它讀的東西，想落的位置會變
   );
 });
 
+describe('(c) 沒有惰性成員：每個成員在相當比例的局面真的選了落點，而且 c-wrongfoot 速度看不到時退化成 c-away', () => {
+  // 零延遲才看得到對手的速度；延遲 12 時重播把對手的速度抹成 0（wrapPolicy 的語意），所以取樣用 T0。
+  const states = sampleStates().filter(
+    ({ state, side }) =>
+      state.phase === 'play' && (side === 0 ? state.ball.vy > 0 : state.ball.vy < 0),
+  );
+  it.each(C_FAMILY.map((name) => [name]))('%s：至少 15% 的局面選了落點（不是直打）', (name) => {
+    const chosen = states.filter(
+      ({ state, side }) => chooseLanding(name, state, side, 7) !== null,
+    ).length;
+    expect(chosen / states.length).toBeGreaterThanOrEqual(0.15);
+  });
+
+  it('對手板子不動時 c-wrongfoot ＝ c-away；板子在動時兩者在某些局面不同', () => {
+    let differ = 0;
+    for (const { state, side } of states) {
+      const opp = side === 0 ? 1 : 0;
+      const still = {
+        ...state,
+        paddles: [state.paddles[0], state.paddles[1]] as typeof state.paddles,
+      };
+      (still.paddles as unknown as { x: number; vx: number; target: number }[])[opp] = {
+        ...state.paddles[opp],
+        vx: 0,
+      };
+      expect(chooseLanding('c-wrongfoot', still, side, 7)).toBe(
+        chooseLanding('c-away', still, side, 7),
+      );
+      if (
+        chooseLanding('c-wrongfoot', state, side, 7) !== chooseLanding('c-away', state, side, 7)
+      ) {
+        differ += 1;
+      }
+    }
+    expect(differ).toBeGreaterThan(0);
+  });
+});
+
 describe('成員是決定性的、不改動傳進來的 state、按鍵合法', () => {
   it.each([...B_FAMILY, ...C_FAMILY].map((name) => [name]))(
     '%s：同一個種子跑兩次結果相同；深度凍結的 state 不丟錯',

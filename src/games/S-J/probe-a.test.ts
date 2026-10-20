@@ -21,6 +21,7 @@ import {
   makePlayer,
   playCell,
   selectBest,
+  shotImminent,
   sjSpec,
   trainTable,
 } from './probe-a.test-helpers';
@@ -78,6 +79,8 @@ function perturbShooter(s: SJState, side: Side, variant: number): SJState {
       return { ...s, cursor: s.px, ammo: 5, cooldown: 0 };
     case 1:
       return { ...s, cursor: 140, ammo: 0, regen: 10, cooldown: 0 };
+    case 5:
+      return { ...s, cursor: s.px + 3, ammo: 0, regen: 70, cooldown: 0 };
     case 2:
       return { ...s, cursor: s.px + 6, ammo: 1, cooldown: 15, regen: 80 };
     case 3:
@@ -123,7 +126,7 @@ describe('(b) 不讀射手的任何狀態（游標、彈藥、補充倒數、冷
   it.each(B_FAMILY.map((name) => [name]))('%s：換掉射手的公開狀態，想去的地方不變', (name) => {
     for (const { state, side, tick } of samples) {
       const plain = chooseGoal(name, state, side, tick);
-      for (let variant = 0; variant < 5; variant += 1) {
+      for (let variant = 0; variant < 6; variant += 1) {
         expect(chooseGoal(name, perturbShooter(state, side, variant), side, tick)).toEqual(plain);
       }
     }
@@ -138,7 +141,7 @@ describe('(c) 真的讀了射手（換掉它讀的東西，想去的地方會變
       let changed = 0;
       for (const { state, side, tick } of samples) {
         const plain = chooseGoal(name, state, side, tick);
-        for (let variant = 0; variant < 5; variant += 1) {
+        for (let variant = 0; variant < 6; variant += 1) {
           const moved = chooseGoal(name, perturbShooter(state, side, variant), side, tick);
           if (JSON.stringify(moved) !== JSON.stringify(plain)) {
             changed += 1;
@@ -148,6 +151,28 @@ describe('(c) 真的讀了射手（換掉它讀的東西，想去的地方會變
       expect(changed).toBeGreaterThan(0);
     },
   );
+});
+
+describe('(c) 沒有惰性成員：每個成員在相當比例的躲的局面選的地方和 b-y62 不同', () => {
+  const samples = dodgerSamples();
+  it.each(C_FAMILY.map((name) => [name]))('%s：至少 5% 的局面想去的地方與 b-y62 不同', (name) => {
+    const differs = samples.filter(
+      ({ state, side, tick }) =>
+        JSON.stringify(chooseGoal(name, state, side, tick)) !==
+        JSON.stringify(chooseGoal('b-y62', state, side, tick)),
+    ).length;
+    expect(differs / samples.length).toBeGreaterThanOrEqual(0.05);
+  });
+
+  it('射手的補充倒數也是承諾：彈藥 0 時倒數 ≤ 15 與 > 15，(c) 的 c-regen-depth 想去的地方不同', () => {
+    const base = firstSample(samples).state;
+    const soon = { ...base, ammo: 0, regen: 10, cooldown: 0 };
+    const later = { ...base, ammo: 0, regen: 70, cooldown: 0 };
+    const side: Side = base.shooter === 0 ? 1 : 0;
+    expect(chooseGoal('c-regen-depth', soon, side, 0)).not.toEqual(
+      chooseGoal('c-regen-depth', later, side, 0),
+    );
+  });
 });
 
 describe('成員是決定性的、不改動傳進來的 state', () => {
@@ -185,15 +210,18 @@ describe('核心夠強（零延遲下 (b) 的 b-y62 贏得了低等級 AI）', (
 });
 
 describe('決策點與探針串接', () => {
-  it('isPoint 只在玩家在躲、射手有彈藥且不在冷卻、而且游標離我 20 以內時成立', () => {
+  it('isPoint 只在玩家在躲、射手隨時會開火（shotImminent）、而且游標離我 20 以內時成立', () => {
     const samples = dodgerSamples(1);
     const points = samples.filter(({ state, side, tick }) => isPoint(state, side, tick));
     expect(points.length).toBeGreaterThan(0);
     for (const { state } of points) {
-      expect(state.ammo).toBeGreaterThan(0);
-      expect(state.cooldown).toBe(0);
+      expect(shotImminent(state)).toBe(true);
       expect(Math.abs(state.px - state.cursor)).toBeLessThanOrEqual(20);
     }
+    // 沒有彈藥、補充倒數還很長：不是決策點。
+    const quiet = { ...firstSample(samples).state, ammo: 0, regen: 80 };
+    const side: Side = quiet.shooter === 0 ? 1 : 0;
+    expect(isPoint({ ...quiet, cursor: quiet.px }, side, 0)).toBe(false);
     // 射手的回合不算決策點。
     const asShooter = { ...firstSample(samples).state };
     expect(isPoint(asShooter, asShooter.shooter, 0)).toBe(false);
