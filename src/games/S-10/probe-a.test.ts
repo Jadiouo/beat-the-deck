@@ -9,6 +9,7 @@ import {
   C_FAMILY,
   makeRule,
   pairedStats,
+  playMulti,
   playPair,
   selectBest,
 } from './probe-a.test-helpers';
@@ -220,4 +221,16 @@ describe('影子不影響對局', () => {
       }
     }
   });
+});
+
+describe('playMulti', () => {
+  it('多個影子與逐個 playPair 的分歧完全一致，驅動者的對局不變', () => {
+    const multi = playMulti('b-habit', ['b-wait3', 'c-reader'], 3, { level: 5 });
+    const a = playPair('b-habit', 'b-wait3', 3, { level: 5 });
+    const b = playPair('b-habit', 'c-reader', 3, { level: 5 });
+    expect(multi.shadows[0]).toEqual({ points: a.points, diffPoints: a.diffPoints, firstDiffTick: a.firstDiffTick });
+    expect(multi.shadows[1]).toEqual({ points: b.points, diffPoints: b.diffPoints, firstDiffTick: b.firstDiffTick });
+    expect(multi.margin).toBe(a.margin);
+    expect(multi.margin).toBe(b.margin);
+  }, 120_000);
 });
