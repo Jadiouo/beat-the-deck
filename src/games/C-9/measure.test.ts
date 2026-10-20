@@ -9,6 +9,9 @@ import { precise } from '../../ai/policies/precise';
 import { playMatch } from '../../core/match';
 import type { Buttons, Controller, Side } from '../../core/types';
 import type { LevelParams, Policy } from '../../ai/types';
+import { measureA4 } from '../../../tests/contract/checks';
+import { blockSeeds } from '../_clubs/ai-blocks.test-helpers';
+import { findEntry } from '../registry';
 import { c9Game } from './logic';
 import type { C9State } from './logic';
 import { median, p10, playTracked, scripted, scriptedWinRate } from './players.test-helpers';
@@ -404,4 +407,28 @@ describe('C-9 鑰匙與門｜小規格的預測「AI 會在門口繞圈守、等
     // 預測是「AI 會乾等」：若成立，AI 拿到鑰匙的局會很少。實測 76%（見小規格），所以預測不成立；門檻放在 60%，低於它代表 AI 真的開始守著不動。
     expect(aiTookKey / rounds, `AI 拿到鑰匙的局 ${aiTookKey}/${rounds}`).toBeGreaterThan(0.6);
   }, 120_000);
+});
+
+/**
+ * A4（人類模型對預設性格等級 10，門檻 ≤ 35%）的穩定度（DESIGN-AI-FUN 10.57）。
+ * 官方 `tests/ai/a-checks.*` 只跑種子 0..99；那 100 個種子剛好落在好的一側（量測 commit 2924262：
+ * 0..99 29.0%、100..299 38.3%、300..499 34.8%、500 場合併 35.0%）。門檻 35% 與官方種子都沒動；
+ * 這裡守的是另外兩個沒用過的區塊（各 200 場），以及 500 場合併要離門檻至少 6 點（10.57 的 ±6 規則）。
+ */
+describe('C-9 鑰匙與門｜A4 的餘裕（10.57）', () => {
+  const entry = findEntry('C-9');
+  it.each([100, 300])(
+    '種子 %i..+199 的 A4 ≤ 35%',
+    (start) => {
+      const rate = measureA4(entry!, blockSeeds(start));
+      expect(rate, `A4 ${start}..${start + 199}：${(100 * rate).toFixed(1)}%`).toBeLessThanOrEqual(
+        0.35,
+      );
+    },
+    600_000,
+  );
+  it('500 場（種子 0..499）合併的 A4 離門檻至少 6 點（≤ 29%）', () => {
+    const rate = measureA4(entry!, blockSeeds(0, 500));
+    expect(rate, `A4 0..499：${(100 * rate).toFixed(1)}%`).toBeLessThanOrEqual(0.29);
+  }, 900_000);
 });
