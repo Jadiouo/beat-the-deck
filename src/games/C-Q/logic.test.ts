@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { pathfinder } from '../../ai/policies/pathfinder';
 import type { Buttons, Inputs } from '../../core/types';
 import {
   asRenderingContext,
@@ -590,16 +591,30 @@ describe('C-Q 兩條蛇｜tailCost 版本（DESIGN-AI-FUN 10.19 的改法：放�
 });
 
 describe('C-Q 兩條蛇｜actions', () => {
-  it('可以放：基底動作是 C-A 的 orderedActions（5 個，兩個轉向在前），後面再接一個「全放開＋a」', () => {
+  it('可以放：「全放開＋a」排在最前面（平手時放），後面是 C-A 的 orderedActions（5 個，兩個轉向在前）', () => {
     const state = makeState();
     const actions = cqGame.actions(state, 0);
     const base = orderedActions(state, 0);
     expect(base).toHaveLength(5);
     expect(actions).toHaveLength(6);
-    expect(actions.slice(0, 5)).toEqual(base);
-    expect(actions[5]).toEqual(A);
-    // 不放的在前、放的在後（平手時搜尋型取排前面的＝不放）
-    expect(actions.slice(0, 5).every((b) => !b.a)).toBe(true);
+    expect(actions[0]).toEqual(A);
+    expect(actions.slice(1)).toEqual(base);
+    expect(base.every((b) => !b.a)).toBe(true);
+  });
+
+  it('放的排前面的理由（平手時放）：搜尋型看 6 個 tick，「現在放」與「晚一點放」的終點一樣好，平手若取不放就會永遠拖延（量測：等級 10 的決定頻率降到每 4 個 tick 一次、深度 6 時，每場只放 0.1 次，深度 1 的卻放 3.4 次）', () => {
+    // 局面：人的蛇尾離對手的蛇身 2 格，現在放與六個 tick 之後放，終點的 gain 相同 → 搜尋型必須選現在放
+    const state = makeState({
+      tick: 0,
+      snakes: [
+        { body: [cell(10, 12), cell(9, 12), cell(8, 12), cell(7, 12)], dir: RIGHT },
+        { body: [cell(7, 14), cell(8, 14), cell(9, 14), cell(10, 14)], dir: LEFT },
+      ],
+      foods: [cell(30, 2), cell(30, 21)],
+    });
+    const game = createCQGame({ tailCost: true });
+    const picked = pathfinder.decide(game, state, 0, 0, { depth: 6, seed: 0 });
+    expect(picked.a).toBe(true);
   });
 
   it('冷卻中、僚機在場上、aHeld、死亡、結束：沒有帶 a 的動作', () => {
@@ -623,7 +638,7 @@ describe('C-Q 兩條蛇｜actions', () => {
     const turned = makeState({
       snakes: [{ body: [cell(5, 12), cell(4, 12), cell(3, 12)], dir: RIGHT, turn: UP }, {}],
     });
-    expect(cqGame.actions(turned, 0)).toEqual([NONE, A]);
+    expect(cqGame.actions(turned, 0)).toEqual([A, NONE]);
     const cooling = makeState({
       reload: [9, 0],
       snakes: [{ body: [cell(5, 12), cell(4, 12), cell(3, 12)], dir: RIGHT, turn: UP }, {}],
@@ -634,8 +649,7 @@ describe('C-Q 兩條蛇｜actions', () => {
   it('被鎖定：只有全放開（可放時再加全放開＋a）', () => {
     const locked = makeState({ lock: [2, 0] });
     const actions = cqGame.actions(locked, 0);
-    expect(actions[0]).toEqual(NONE);
-    expect(actions[actions.length - 1]).toEqual(A);
+    expect(actions).toEqual([A, NONE]);
     const lockedCool = makeState({ lock: [2, 0], reload: [9, 0] });
     expect(cqGame.actions(lockedCool, 0).some((b) => b.a)).toBe(false);
   });
