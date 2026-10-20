@@ -281,28 +281,47 @@ export interface PairResult {
  * 驅動者是 (b*) 時，這就是真正的 (b) 對局，第一個分歧的 tick 就是 (b)、(c) 兩條對局真正分開的地方。
  */
 export function playPair(driver: string, shadow: string, seed: number, options: PairOptions): PairResult {
+  const { shadows, ...result } = playMulti(driver, [shadow], seed, options);
+  return { ...result, ...(shadows[0] as ShadowStat) };
+}
+
+export interface ShadowStat {
+  readonly points: number;
+  readonly diffPoints: number;
+  readonly firstDiffTick: number;
+}
+
+export interface MultiResult extends Omit<PairResult, keyof ShadowStat> {
+  /** 每個影子各自的決策點與分歧（與 `shadows` 參數同順序）。 */
+  readonly shadows: readonly ShadowStat[];
+}
+
+/** 同一場對局配多個影子（影子的回答不被採用，所以驅動者的對局與影子的數量無關）。 */
+export function playMulti(driver: string, shadowNames: readonly string[], seed: number, options: PairOptions): MultiResult {
   const me: Side = seed % 2 === 0 ? 0 : 1;
   const opp = other(me);
   const drive = makeRule(driver, seed);
-  const shade = makeRule(shadow, seed);
+  const shades = shadowNames.map((n) => makeRule(n, seed));
+  const stats = shadowNames.map(() => ({ points: 0, diffPoints: 0, firstDiffTick: -1 }));
   const ai = levelController(s10Game, policyByName(options.policy ?? 'precise'), options.level, seed + TRAINING_SEED_OFFSET);
   let state = s10Game.init(seed, { maxTicks: 3600, params: {} });
-  let points = 0;
-  let diffPoints = 0;
-  let firstDiffTick = -1;
   const clears: { who: 'me' | 'ai' | 'both'; n: number; tick: number }[] = [];
   for (let tick = 0; !s10Game.isOver(state); tick += 1) {
     const pd = drive.press(state, me, tick);
-    const ps = shade.press(state, me, tick);
-    if (canClear(state) && state.lock[me] === 0) {
-      points += 1;
-      if (pd !== ps) {
-        diffPoints += 1;
-        if (firstDiffTick < 0) {
-          firstDiffTick = tick;
+    const decisionPoint = canClear(state) && state.lock[me] === 0;
+    shades.forEach((shade, i) => {
+      const ps = shade.press(state, me, tick);
+      const stat = stats[i] as { points: number; diffPoints: number; firstDiffTick: number };
+      if (decisionPoint) {
+        stat.points += 1;
+        if (pd !== ps) {
+          stat.diffPoints += 1;
+          if (stat.firstDiffTick < 0) {
+            stat.firstDiffTick = tick;
+          }
         }
       }
-    }
+    });
     const move = precise.decide(MOVE_GAME, state, me, tick, { depth: 1, seed });
     const mine: Buttons = pd ? { ...move, b: true } : move;
     const theirs = ai.decide(state, opp, tick);
@@ -324,9 +343,7 @@ export function playPair(driver: string, shadow: string, seed: number, options: 
     side: me,
     win: winner === null ? 0.5 : winner === me ? 1 : 0,
     margin: me === 0 ? s0 - s1 : s1 - s0,
-    points,
-    diffPoints,
-    firstDiffTick,
+    shadows: stats,
     hitsMe: state.players[me].hits,
     hitsAi: state.players[opp].hits,
     clears,
