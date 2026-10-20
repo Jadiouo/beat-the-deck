@@ -260,6 +260,22 @@ describe('C-K 梅花馬拉松｜委派：每一段的 step 就是那張牌的 st
     expect(after.tick).toBe(1500);
   });
 
+  it('外殼把按鍵轉回世界方向時讀的是 state 最上層的 viewRotation：C-2 段跟著 sub 走，別的段永遠是 0，換段時歸零', () => {
+    const c2 = makeState({ phase: 1, phaseTick: 599, phases: ORDER });
+    expect(c2.viewRotation).toBe(0);
+    expect(ckGame.step(c2, IDLE).viewRotation).toBe(1);
+    for (const phase of [0, 2, 3] as const) {
+      const other = ckGame.step(makeState({ phase, phaseTick: 700, phases: ORDER }), IDLE);
+      expect(other.viewRotation).toBe(0);
+    }
+    // C-2 在第 3 段、phaseTick 600 之後轉成 1，段結束（時間到）前都維持；換進 C-2 時從 0 開始。
+    const late = makeState({ phase: 3, phaseTick: 700, phases: ['C-A', 'C-3', 'C-4', 'C-2'] });
+    expect(late.viewRotation).toBe(1);
+    const entering = ckGame.step(makeState({ phase: 0, phaseTick: 899, phases: ORDER }), IDLE);
+    expect(entering.phases[entering.phase]).toBe('C-2');
+    expect(entering.viewRotation).toBe(0);
+  });
+
   it('C-4 段：每 6 個 tick 掃視一次，吃到的食物從自己的記憶拿掉（用段內 tick）', () => {
     const state = makeState({ phase: 3, phaseTick: 5, phases: ORDER });
     const after = ckGame.step(state, IDLE);
