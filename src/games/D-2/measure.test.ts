@@ -47,6 +47,8 @@ const CELLS: Readonly<Record<string, Cell>> = {
   g10d0: { policy: 'greedy', level: 10, delay: 0 },
   g5d12: { policy: 'greedy', level: 5, delay: 12 },
   g5d0: { policy: 'greedy', level: 5, delay: 0 },
+  p9d12: { policy: 'precise', level: 9, delay: 12 },
+  g9d12: { policy: 'greedy', level: 9, delay: 12 },
   gm10d12: { policy: 'gambler', level: 10, delay: 12 },
   s10d12: { policy: 'pathfinder', level: 10, delay: 12 },
 };
