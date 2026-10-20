@@ -1,6 +1,7 @@
 import { intFrom, rngStateFor } from '../../core/rng';
 import type { RngState } from '../../core/rng';
-import type { Buttons, Game, GameConfig, Inputs, Side } from '../../core/types';
+import type { Buttons, GameConfig, Inputs, Side } from '../../core/types';
+import type { GameWithSelfFromPresent } from '../types';
 import { CELLS, HEIGHT, WIDTH, cell, cellX, cellY } from '../_clubs/logic';
 
 /**
@@ -895,7 +896,7 @@ export function evaluate(state: JKBState, side: Side): { gain: number; danger: n
   return { gain, danger };
 }
 
-export const jkbGame: Game<JKBState> = {
+export const jkbGame: GameWithSelfFromPresent<JKBState> = {
   id: 'JK-B',
   init: initState,
   step,
@@ -904,6 +905,17 @@ export const jkbGame: Game<JKBState> = {
   winner,
   actions,
   evaluate,
+  /**
+   * 外力造成的自身位移無法用重播重現（DESIGN-AI-FUN 10.56）：`wrapPolicy` 把世界退回 12 個 tick 以前，再用我自己的輸入重播，
+   * 重播時對手當作放開、停在舊的位置——我的點會撞上（或推到）一個真實世界裡早就走開的對手，重播出來的自己就是錯的
+   * （量到的占比見 `src/ai/self-present.test.ts` 與 `docs/cards/JK-B.md`）。所以宣告：自己的點（位置、冷卻、按著的方向）取真實的現在，
+   * 對手、金幣、分數、亂數維持重播的樣子。分數不換：互換與搶劫的分數變化會洩漏對手最近 12 個 tick 做了什麼，那是反應延遲該藏起來的。
+   */
+  selfFromPresent(replayed: JKBState, present: JKBState, side: Side): JKBState {
+    const avatars: [JKBAvatar, JKBAvatar] = [replayed.avatars[0], replayed.avatars[1]];
+    avatars[side] = present.avatars[side];
+    return { ...replayed, avatars };
+  },
 };
 
 // ---------------------------------------------------------------------------
