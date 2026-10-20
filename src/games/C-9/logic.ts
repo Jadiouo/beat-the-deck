@@ -78,6 +78,21 @@ export const RESULT_BONUS = 1_000_000;
  * （搜尋型對打的僵局 27.8%，1 是 18.2%、0 是 18.0%，見小規格「實作與量測」），所以取 1。
  */
 export const STALE_MOVES = 1;
+/**
+ * 對手可能比我先到下一格的 danger：頭對頭或差 1 步以內是 `DANGER_NEAR`，差 2 到 3 步是 `DANGER_FAR`；更遠是 0。
+ * 原本是 0.8／0.5／0.3。
+ *
+ * 為什麼縮小（機制與量測見小規格「A4 的餘裕」）：搜尋型把 danger 乘上「這一層 gain 範圍」的 2 倍扣掉，
+ * 而 C-9 一局只有 1 分、gain 的範圍天生很小（距離差幾步），0.8 的 danger 等於否決那一條路（10.54）。
+ * 在 1 格寬的走廊裡，這讓持鑰匙的人看到守門的就繞路、守門的人看到持鑰匙的就讓路；等級 10 的 AI 每個 tick 都重新決定，
+ * 比每 6 個 tick 才決定一次的人類模型更常讓路，把競速讓給對方。頭對頭兩邊都死是平手（不是輸），不值得為它放棄路線。
+ *
+ * 為什麼是 0.4 與 0.31，不是整體乘 0.5：精準型的門檻是 0.3（`PRECISE_DANGER_LIMIT`），整體乘 0.5 會讓差 2 到 3 步
+ * 的威脅（0.25、0.15）掉到門檻以下，精準型把它們當安全，「精準型幾乎總是選最安全的」的指紋測試因此紅
+ * （選最危險的占比 40.9%，要 < 15%）。0.31 剛好讓所有真的有威脅的情況都在門檻以上。
+ */
+export const DANGER_NEAR = 0.4;
+export const DANGER_FAR = 0.31;
 
 export type RoundOutcome = 'side0' | 'side1' | 'draw' | 'stalemate';
 
@@ -1045,10 +1060,10 @@ function scoreMove(state: C9State, side: Side, dir: Dir, pre: number = -1): Scor
     const here = fromOpp[head] as number;
     const there = fromOpp[first] as number;
     if (oppNext === first) {
-      danger = 0.8;
+      danger = DANGER_NEAR;
     } else if (there < here) {
       const gap = there - STALE_MOVES;
-      danger = gap <= 1 ? 0.8 : gap === 2 ? 0.5 : gap === 3 ? 0.3 : 0;
+      danger = gap <= 1 ? DANGER_NEAR : gap <= 3 ? DANGER_FAR : 0;
     }
   }
   return { gain, danger, lethal: false };
