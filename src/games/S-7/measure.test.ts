@@ -22,7 +22,7 @@ import type { Cell } from './probe-a.test-helpers';
  *   S7_PROBE_CELLS（`primary`｜`all`｜用逗號分隔的格子編號，預設 `primary`）、
  *   S7_PROBE_TRAIN（訓練場數，預設 2，種子 1000 起）、S7_PROBE_TEST（量測場數，預設 4，種子 5000 起）、
  *   S7_PROBE_OUT（把完整結果寫成 JSON 的路徑）、S7_PROBE_VERBOSE（印出一行報告）、
- *   S7_PROBE_SWEEP（等待曲線的場數，預設 0 ＝ 不跑；種子 3000 起）。
+ *   S7_PROBE_PAIRS（設了就把每個 (c) 對自己的基底量一遍，敏感度分析）、S7_PROBE_SWEEP（等待曲線的場數，預設 0 ＝ 不跑；種子 3000 起）。
  * 訓練種子 1000.. 與量測種子 5000.. 與掃描種子 2000..、等待曲線 3000.. 都不重疊（場數 < 1000）。
  */
 const TRAIN = Number(process.env.S7_PROBE_TRAIN ?? 2);
@@ -31,6 +31,21 @@ const SWEEP = Number(process.env.S7_PROBE_SWEEP ?? 0);
 const TRAIN_FROM = 1000;
 const TEST_FROM = 5000;
 const SWEEP_FROM = 3000;
+
+/**
+ * 敏感度分析（不是標籤數字）：每個 (c) 成員對它**自己的基底** (b)（小規格第 4 節表的「基底」欄）。
+ * 這是最小對照：兩者只差讀對手的那一條規則。c-baited 與 c-combo 的基底沒有假動作，最接近的 (b) 是 b-guard105-f1（近似）。
+ */
+const PAIRS: readonly (readonly [string, string])[] = [
+  ['b-guard105', 'c-hist-nof'],
+  ['b-guard105-f2', 'c-hist-f2'],
+  ['b-guard105-f2', 'c-quota'],
+  ['b-guard105-f1', 'c-baited'],
+  ['b-guard105-f2', 'c-gunshot'],
+  ['b-guard105-f2', 'c-lead'],
+  ['b-guard105-f1', 'c-combo'],
+  ['b-wait30-f2', 'c-hist-wait'],
+];
 
 const seedsOf = (from: number, n: number): number[] =>
   Array.from({ length: n }, (_v, i) => from + i);
@@ -79,13 +94,25 @@ describe(`S-7 探針 A 完整版（訓練 ${String(TRAIN)} 場、量測 ${String
       const seat = bySeat(b, c, seeds, cell);
       // (d) 上限：AI 的同一個引擎當玩家（不是 (c)；看上限與鏡像）。
       const engine = compareBC(s7Spec(b, 'd-engine', seeds, cell, 'press'));
-      results.push({ cell, b, c, bRows, cRows, probe, feint, seat, engine });
+      // 敏感度分析：每個 (c) 成員對自己的基底。
+      const pairs =
+        process.env.S7_PROBE_PAIRS === undefined
+          ? []
+          : PAIRS.map(([base, member]) => ({
+              base,
+              member,
+              probe: compareBC(s7Spec(base, member, seeds, cell, 'press')),
+            }));
+      results.push({ cell, b, c, bRows, cRows, probe, feint, seat, engine, pairs });
       if (process.env.S7_PROBE_VERBOSE !== undefined) {
         console.log(formatProbeA(`S-7 ${cellLabel(cell)} ${b} vs ${c}`, probe));
         console.log(
           `  假動作點 ${String(feint.pointsDiff)}/${String(feint.points)}（場級 ${String(feint.gamesDiffer)}/${String(feint.games)}）`,
         );
         console.log(formatProbeA(`  (d) ${b} vs d-engine`, engine));
+        for (const row of pairs) {
+          console.log(formatProbeA(`  [敏感度] ${row.base} vs ${row.member}`, row.probe));
+        }
       }
       expect(B_FAMILY).toContain(b);
       expect(C_FAMILY).toContain(c);
