@@ -104,6 +104,13 @@ describe(`S-7 探針 A 完整版（訓練 ${String(TRAIN)} 場、量測 ${String
               probe: compareBC(s7Spec(base, member, seeds, cell, 'press')),
             }));
       results.push({ cell, b, c, bRows, cRows, probe, feint, seat, engine, pairs });
+      // 每量完一格就寫一次，長時間的量測中途也看得到已經完成的格子。
+      if (process.env.S7_PROBE_OUT !== undefined) {
+        writeFileSync(
+          process.env.S7_PROBE_OUT,
+          JSON.stringify({ train: TRAIN, test: TEST, results }, null, 1),
+        );
+      }
       if (process.env.S7_PROBE_VERBOSE !== undefined) {
         console.log(formatProbeA(`S-7 ${cellLabel(cell)} ${b} vs ${c}`, probe));
         console.log(
@@ -124,12 +131,6 @@ describe(`S-7 探針 A 完整版（訓練 ${String(TRAIN)} 場、量測 ${String
         expect(probe.win.diff.mean).toBe(0);
         expect(probe.margin.diff.mean).toBe(0);
       }
-    }
-    if (process.env.S7_PROBE_OUT !== undefined) {
-      writeFileSync(
-        process.env.S7_PROBE_OUT,
-        JSON.stringify({ train: TRAIN, test: TEST, results }, null, 1),
-      );
     }
   }, 7_200_000);
 
