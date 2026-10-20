@@ -130,12 +130,12 @@ describe('D-K｜第 1 段：圈地與分數', () => {
 
   it('分數 = ⌊顏色格數 ÷ 10⌋：9 格是 0 分、10 格是 1 分（邊界）', () => {
     // 已經有 8 格，再走一格變 9 格 → 0 分
-    const eight = makeState({ tick: 60, paint0: row(22, 0, 8) });
+    const eight = makeState({ tick: 60, paint0: [BASE_0, ...row(22, 0, 7)] });
     const nine = run(dKGame, eight, 5, RIGHT_ONLY);
     expect(nine.turfCells[0]).toBe(9);
     expect(nine.players[0].score).toBe(0);
     // 已經有 9 格，再走一格變 10 格 → 1 分
-    const nineNow = makeState({ tick: 60, paint0: row(22, 0, 9) });
+    const nineNow = makeState({ tick: 60, paint0: [BASE_0, ...row(22, 0, 8)] });
     const ten = run(dKGame, nineNow, 5, RIGHT_ONLY);
     expect(ten.turfCells[0]).toBe(10);
     expect(ten.players[0].score).toBe(1);
@@ -149,7 +149,7 @@ describe('D-K｜第 1 段：圈地與分數', () => {
   });
 
   it('第 1 段結束（tick 1080）以及之後的過場：score 仍是 ⌊格數 ÷ 10⌋，turfCells 凍結，不被重算', () => {
-    const state = makeState({ tick: 1075, paint0: row(20, 0, 24), paint1: row(2, 8, 12) });
+    const state = makeState({ tick: 1075, paint0: row(20, 0, 24), paint1: [BASE_1, ...row(2, 8, 11)] });
     // 1075 → 1080：最後一個走格 tick（1080）人往右走一格
     const end = run(dKGame, state, 5, RIGHT_ONLY);
     expect(end.tick).toBe(1080);
