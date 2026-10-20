@@ -11,6 +11,9 @@ import type { Buttons, Game, GameConfig, Inputs, Side } from '../../core/types';
  * 軌道 0 到 3 對應 left、down、up、right；按鍵遮罩 `1 << 軌道`。
  * `phrases[s]` 是 s 編的曲子，s 的對手打它；`hits[s][i]` 是 s 打的第 i 個音（對手曲子的第 i 個音）被按住的 tick 數。
  *
+ * 選用的「共用拍位」（`config.params.sharedBeat = 1`，預設關；小規格第 11 節的提案，量測結果見小規格）：
+ * 兩邊的曲子放在同一條 8 格的軸上，同一格兩邊都有音就「撞拍」，撞拍的格要同時按兩條軌道。
+ *
  * 純模擬層：沒有時鐘、沒有全域亂數；亂數只來自 state 裡的 `rng`，時間只有 tick。
  */
 
@@ -61,6 +64,12 @@ export interface Note {
 
 /** 一個人一回合「打」的準度（公開，畫面畫成準度條）。間隔：0 ＝ 短（24 tick），1 ＝ 長。 */
 export interface Skill {
+  /** 以下四個欄位只在共用拍位開啟時才有：這個人自己編的曲子放在哪幾格（0／1）。 */
+  readonly placed?: readonly number[];
+  /** 這個人打「難的撞拍」（兩條軌道不同）的音：E 的總和、個數、零分個數。 */
+  readonly chordE?: number;
+  readonly chordN?: number;
+  readonly chordZ?: number;
   readonly laneE: readonly number[];
   readonly laneN: readonly number[];
   readonly laneZ: readonly number[];
@@ -81,6 +90,8 @@ export interface Settled {
 export type Phase = 'compose' | 'play' | 'rest' | 'over';
 
 export interface S6State {
+  /** 共用拍位（選項，預設關）。 */
+  readonly sharedBeat: boolean;
   readonly tick: number;
   readonly maxTicks: number;
   readonly round: number;
@@ -118,6 +129,25 @@ const ACTIONS: readonly Buttons[] = Object.freeze([
   Object.freeze({ ...NONE, right: true }),
 ]);
 const REST_ACTIONS: readonly Buttons[] = Object.freeze([NONE]);
+/** 共用拍位的對打階段多的六個動作：兩條軌道一起按（撞拍的格要用）。接在原本五個後面。 */
+const PAIR_ACTIONS: readonly Buttons[] = Object.freeze(
+  [
+    [0, 1],
+    [0, 2],
+    [0, 3],
+    [1, 2],
+    [1, 3],
+    [2, 3],
+  ].map(([a, b]) => {
+    const keys = ['left', 'down', 'up', 'right'] as const;
+    return Object.freeze({
+      ...NONE,
+      [keys[a as number] as string]: true,
+      [keys[b as number] as string]: true,
+    });
+  }),
+);
+const SHARED_PLAY_ACTIONS: readonly Buttons[] = Object.freeze([...ACTIONS, ...PAIR_ACTIONS]);
 
 function maskOf(b: Buttons): number {
   return (b.left ? 1 : 0) | (b.down ? 2 : 0) | (b.up ? 4 : 0) | (b.right ? 8 : 0);
@@ -161,11 +191,42 @@ function passingIndex(phrase: readonly Note[], p: number): number {
   return -1;
 }
 
+function popcount(mask: number): number {
+  let n = 0;
+  for (let m = mask; m !== 0; m &= m - 1) {
+    n += 1;
+  }
+  return n;
+}
+
+/** s 自己編的曲子在第 `slot` 格的音（撞拍用），沒有是 undefined。 */
+function noteAt(phrase: readonly Note[], slot: number): Note | undefined {
+  return phrase.find((n) => n.slot === slot);
+}
+
+/**
+ * `side` 打對手曲子的第 `idx` 個音時，要同時按住的軌道遮罩：那個音的軌道；
+ * 共用拍位開啟而且自己的曲子在同一格也有音時，再加上自己那個音的軌道。
+ */
+function requiredMask(state: S6State, side: Side, idx: number): number {
+  const opp: Side = side === 0 ? 1 : 0;
+  const n = state.phrases[opp][idx] as Note;
+  let mask = 1 << n.lane;
+  if (state.sharedBeat) {
+    const own = noteAt(state.phrases[side], n.slot);
+    if (own !== undefined) {
+      mask |= 1 << own.lane;
+    }
+  }
+  return mask;
+}
+
 const EMPTY_SKILL_SIDE: readonly Skill[] = [];
 
 /** 測試用：直接構造局面。 */
 export function makeState(overrides: Partial<S6State> = {}): S6State {
   return {
+    sharedBeat: false,
     tick: 0,
     maxTicks: 3300,
     round: 0,
@@ -256,28 +317,20 @@ function playStep(
   for (const side of [0, 1] as const) {
     const phrase = state.phrases[side === 0 ? 1 : 0];
     const idx = passingIndex(phrase, p);
-    const passingLane = idx >= 0 ? (phrase[idx] as Note).lane : -1;
-    let counted = 0;
-    let wrong = 0;
-    for (let l = 0; l < 4; l += 1) {
-      if ((masks[side] & (1 << l)) === 0) {
-        continue;
-      }
-      if (l === passingLane) {
-        counted = 1;
-      } else {
-        wrong += 1;
-      }
-    }
-    if (counted === 1) {
+    const required = idx >= 0 ? requiredMask(state, side, idx) : 0;
+    if (idx >= 0 && (masks[side] & required) === required) {
       hits[side] = state.hits[side].map((h, i) => (i === idx ? h + 1 : h));
     }
-    over[side] += wrong;
+    over[side] += popcount(masks[side] & ~required);
   }
   return { hits, over };
 }
 
-function skillOf(played: readonly Note[], e: readonly number[]): Skill {
+function skillOf(
+  played: readonly Note[],
+  e: readonly number[],
+  shared?: { own: readonly Note[] },
+): Skill {
   const kinds = gapKinds(played);
   const laneE = [0, 0, 0, 0];
   const laneN = [0, 0, 0, 0];
@@ -298,7 +351,27 @@ function skillOf(played: readonly Note[], e: readonly number[]): Skill {
     gapZ[kind] = (gapZ[kind] as number) + zero;
     zeros += zero;
   });
-  return { laneE, laneN, laneZ, gapE, gapN, gapZ, zeros, notes: played.length };
+  const base = { laneE, laneN, laneZ, gapE, gapN, gapZ, zeros, notes: played.length };
+  if (shared === undefined) {
+    return base;
+  }
+  // 共用拍位：記下自己編的曲子放在哪幾格，以及「難的撞拍」（兩條軌道不同）打得怎麼樣。
+  const placed = Array.from({ length: SLOTS }, () => 0);
+  for (const n of shared.own) {
+    placed[n.slot] = 1;
+  }
+  let chordE = 0;
+  let chordN = 0;
+  let chordZ = 0;
+  played.forEach((n, i) => {
+    const mine = noteAt(shared.own, n.slot);
+    if (mine !== undefined && mine.lane !== n.lane) {
+      chordN += 1;
+      chordE += e[i] as number;
+      chordZ += (e[i] as number) === 0 ? 1 : 0;
+    }
+  });
+  return { ...base, placed, chordE, chordN, chordZ };
 }
 
 function settle(state: S6State): S6State {
@@ -317,7 +390,12 @@ function settle(state: S6State): S6State {
     state.points[0] + sum(e[0]) - penalty[0] + bonus[0],
     state.points[1] + sum(e[1]) - penalty[1] + bonus[1],
   ];
-  const skills: [Skill, Skill] = [skillOf(state.phrases[1], e[0]), skillOf(state.phrases[0], e[1])];
+  const skills: [Skill, Skill] = state.sharedBeat
+    ? [
+        skillOf(state.phrases[1], e[0], { own: state.phrases[0] }),
+        skillOf(state.phrases[0], e[1], { own: state.phrases[1] }),
+      ]
+    : [skillOf(state.phrases[1], e[0]), skillOf(state.phrases[0], e[1])];
   const history: [readonly Skill[], readonly Skill[]] = [
     [...state.history[0], skills[0]].slice(-HISTORY_ROUNDS),
     [...state.history[1], skills[1]].slice(-HISTORY_ROUNDS),
@@ -346,6 +424,12 @@ interface Pool {
   readonly e: number;
   readonly n: number;
   readonly z: number;
+  /** 共用拍位：對手每一格放過音的回合數、有 `placed` 紀錄的回合數、難的撞拍的準度。 */
+  readonly placed: readonly number[];
+  readonly rounds: number;
+  readonly chordE: number;
+  readonly chordN: number;
+  readonly chordZ: number;
 }
 
 function pool(history: readonly Skill[]): Pool {
@@ -358,7 +442,21 @@ function pool(history: readonly Skill[]): Pool {
   let e = 0;
   let n = 0;
   let z = 0;
+  const placed = Array.from({ length: SLOTS }, () => 0);
+  let rounds = 0;
+  let chordE = 0;
+  let chordN = 0;
+  let chordZ = 0;
   for (const h of history) {
+    if (h.placed !== undefined) {
+      rounds += 1;
+      h.placed.forEach((x, k) => {
+        placed[k] = (placed[k] as number) + x;
+      });
+      chordE += h.chordE ?? 0;
+      chordN += h.chordN ?? 0;
+      chordZ += h.chordZ ?? 0;
+    }
     for (let l = 0; l < 4; l += 1) {
       laneE[l] = (laneE[l] as number) + (h.laneE[l] as number);
       laneN[l] = (laneN[l] as number) + (h.laneN[l] as number);
@@ -373,7 +471,7 @@ function pool(history: readonly Skill[]): Pool {
     n += h.notes;
     z += h.zeros;
   }
-  return { laneE, laneN, laneZ, gapE, gapN, gapZ, e, n, z };
+  return { laneE, laneN, laneZ, gapE, gapN, gapZ, e, n, z, placed, rounds, chordE, chordN, chordZ };
 }
 
 function smoothedE(sum: number, count: number): number {
@@ -402,7 +500,50 @@ export function estimateNote(p: Pool, lane: number, kind: number): { e: number; 
   return { e: Math.min(3, Math.max(0, e)), z: Math.min(1, Math.max(0, z)) };
 }
 
+/** 對手在第 k 格放音的先驗機率（平均 2.5 個音 ÷ 8 格），強度兩回合。 */
+export const CLASH_PRIOR = 0.3125;
+export const CLASH_PRIOR_COUNT = 2;
+/** 兩條軌道不同的機率（對手的軌道事先不知道，均勻時是 3/4）：撞拍時只有這個比例是「難的撞拍」。 */
+export const HARD_CHORD_SHARE = 0.75;
+
+function estimateSharedFrom(
+  p: Pool,
+  slot: number,
+  lane: number,
+  kind: number,
+): { e: number; z: number; clash: number } {
+  const base = estimateNote(p, lane, kind);
+  const clash =
+    ((p.placed[slot] as number) + CLASH_PRIOR_COUNT * CLASH_PRIOR) / (p.rounds + CLASH_PRIOR_COUNT);
+  const hard = clash * HARD_CHORD_SHARE;
+  const eChord = smoothedE(p.chordE, p.chordN);
+  const zChord = smoothedZ(p.chordZ, p.chordN);
+  return {
+    e: Math.min(3, Math.max(0, (1 - hard) * base.e + hard * eChord)),
+    z: Math.min(1, Math.max(0, (1 - hard) * base.z + hard * zChord)),
+    clash,
+  };
+}
+
+/**
+ * 共用拍位：我把一個音放在第 `slot` 格、軌道 `lane`、間隔 `kind`，對手打它的預期得分 E 與零分機率 P0。
+ * 對手放同一格的機率 `clash` 由它最近 5 回合放過的格子估（先驗兩回合）；撞拍時它打的是難的撞拍，
+ * 用它最近難的撞拍的準度估；沒撞拍時和原本一樣（軌道與間隔）。
+ */
+export function estimateShared(
+  history: readonly Skill[],
+  slot: number,
+  lane: number,
+  kind: number,
+): { e: number; z: number; clash: number } {
+  return estimateSharedFrom(pool(history), slot, lane, kind);
+}
+
 interface NoteTable {
+  /** 共用拍位：依格子的 gain／danger／最大 gain（`[slot][kind][lane]`、`[slot][kind]`）。 */
+  readonly slotGain?: readonly (readonly (readonly number[])[])[];
+  readonly slotDanger?: readonly (readonly (readonly number[])[])[];
+  readonly slotBest?: readonly (readonly number[])[];
   /** gain[kind][lane]：放這個音預期從零分獎勵拿到的分數（加一點口味）。 */
   readonly gain: readonly (readonly number[])[];
   /** danger[kind][lane]：對手預期拿到的準度比例（E ÷ 3）。 */
@@ -411,8 +552,39 @@ interface NoteTable {
   readonly best: readonly number[];
 }
 
-function noteTable(history: readonly Skill[], taste: readonly number[]): NoteTable {
+function sharedTable(p: Pool, taste: readonly number[]): NoteTable {
+  const slotGain: number[][][] = [];
+  const slotDanger: number[][][] = [];
+  const slotBest: number[][] = [];
+  for (let slot = 0; slot < SLOTS; slot += 1) {
+    const gain: number[][] = [[], []];
+    const danger: number[][] = [[], []];
+    for (let k = 0; k < 2; k += 1) {
+      for (let l = 0; l < 4; l += 1) {
+        const est = estimateSharedFrom(p, slot, l, k);
+        (gain[k] as number[])[l] = 2 * est.z + TASTE_WEIGHT * (taste[l] as number);
+        (danger[k] as number[])[l] = est.e / 3;
+      }
+    }
+    slotGain.push(gain);
+    slotDanger.push(danger);
+    slotBest.push(gain.map((row) => Math.max(...row)));
+  }
+  return {
+    gain: slotGain[0] as number[][],
+    danger: slotDanger[0] as number[][],
+    best: slotBest[0] as number[],
+    slotGain,
+    slotDanger,
+    slotBest,
+  };
+}
+
+function noteTable(history: readonly Skill[], taste: readonly number[], shared = false): NoteTable {
   const p = pool(history);
+  if (shared) {
+    return sharedTable(p, taste);
+  }
   const gain: number[][] = [[], []];
   const danger: number[][] = [[], []];
   for (let k = 0; k < 2; k += 1) {
@@ -430,8 +602,9 @@ function futureGain(table: NoteTable, prev: number, from: number): number {
   let best = 0;
   for (let s = Math.max(from, prev < 0 ? 0 : prev + MIN_SLOT_GAP); s < SLOTS; s += 1) {
     const kind = prev >= 0 && s - prev === MIN_SLOT_GAP ? 0 : 1;
-    const g =
-      SLOT_DISCOUNT ** s * (table.best[kind] as number) + futureGain(table, s, s + MIN_SLOT_GAP);
+    const top =
+      table.slotBest === undefined ? table.best : (table.slotBest[s] as readonly number[]);
+    const g = SLOT_DISCOUNT ** s * (top[kind] as number) + futureGain(table, s, s + MIN_SLOT_GAP);
     if (g > best) {
       best = g;
     }
@@ -446,15 +619,25 @@ function composedValue(notes: readonly Note[], table: NoteTable): { gain: number
   let danger = 0;
   notes.forEach((n, i) => {
     const kind = kinds[i] as number;
-    gain += SLOT_DISCOUNT ** n.slot * ((table.gain[kind] as readonly number[])[n.lane] as number);
-    danger = Math.max(danger, (table.danger[kind] as readonly number[])[n.lane] as number);
+    const gains =
+      table.slotGain === undefined ? table.gain : (table.slotGain[n.slot] as NoteTable['gain']);
+    const dangers =
+      table.slotDanger === undefined
+        ? table.danger
+        : (table.slotDanger[n.slot] as NoteTable['danger']);
+    gain += SLOT_DISCOUNT ** n.slot * ((gains[kind] as readonly number[])[n.lane] as number);
+    danger = Math.max(danger, (dangers[kind] as readonly number[])[n.lane] as number);
   });
   return { gain, danger: Math.min(1, danger) };
 }
 
 function evaluateCompose(state: S6State, side: Side): { gain: number; danger: number } {
   const opp: Side = side === 0 ? 1 : 0;
-  const table = noteTable(state.history[opp], state.taste[side] as readonly number[]);
+  const table = noteTable(
+    state.history[opp],
+    state.taste[side] as readonly number[],
+    state.sharedBeat,
+  );
   const draft = state.composing[side];
   const value = composedValue(draft, table);
   const prev = draft.length === 0 ? -1 : (draft[draft.length - 1] as Note).slot;
@@ -476,13 +659,7 @@ function evaluatePlay(state: S6State, side: Side): { gain: number; danger: numbe
   // 剛走完的那個 tick 上，哪一軌有音符通過；按著其他軌道就是多按。
   const q = state.phaseTick - 1;
   const idx = q >= 0 ? passingIndex(phrase, q) : -1;
-  const passingLane = idx >= 0 ? (phrase[idx] as Note).lane : -1;
-  let wrong = 0;
-  for (let l = 0; l < 4; l += 1) {
-    if ((mask & (1 << l)) !== 0 && l !== passingLane) {
-      wrong += 1;
-    }
-  }
+  const wrong = popcount(mask & ~(idx >= 0 ? requiredMask(state, side, idx) : 0));
   // 搶拍：音符快到線（還沒開始）時按著那一軌，貪心型會被誘惑；精準型被 danger 擋下。
   if (idx < 0 && q >= 0) {
     for (const n of phrase) {
@@ -497,7 +674,11 @@ function evaluatePlay(state: S6State, side: Side): { gain: number; danger: numbe
   if (state.phaseTick === 0) {
     // 編曲剛結束的那一個 tick：最後一格的決定（第 95 個 tick）要看得到自己編的曲子，
     // 否則編曲階段最後一個 tick 的按放在評估裡沒有價值。只讀自己編的曲子與公開的歷史。
-    const table = noteTable(state.history[opp], state.taste[side] as readonly number[]);
+    const table = noteTable(
+      state.history[opp],
+      state.taste[side] as readonly number[],
+      state.sharedBeat,
+    );
     const value = composedValue(state.phrases[side], table);
     gain += value.gain;
     danger = Math.max(danger, value.danger);
@@ -521,7 +702,12 @@ export const s6Game: Game<S6State> = {
         (taste[side] as number[]).push(value);
       }
     }
-    return makeState({ maxTicks: config.maxTicks, taste, rng });
+    return makeState({
+      sharedBeat: (config.params.sharedBeat ?? 0) !== 0,
+      maxTicks: config.maxTicks,
+      taste,
+      rng,
+    });
   },
 
   step(state: S6State, inputs: Inputs): S6State {
@@ -592,6 +778,9 @@ export const s6Game: Game<S6State> = {
   },
 
   actions(state: S6State, _side: Side): readonly Buttons[] {
+    if (state.phase === 'play' && state.sharedBeat) {
+      return SHARED_PLAY_ACTIONS;
+    }
     return state.phase === 'compose' || state.phase === 'play' ? ACTIONS : REST_ACTIONS;
   },
 
