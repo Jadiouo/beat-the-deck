@@ -3,18 +3,26 @@ import type { Buttons, Game, GameConfig, Inputs, Side } from '../../core/types';
 import {
   CELLS,
   GAIN_PER_POINT,
+  MOVE_EVERY,
   START_CELLS,
+  UNREACHABLE,
   WIN_BONUS,
+  actionsToward,
+  bfsDistances,
   cellX,
   cellY,
+  clamp01,
+  contestDanger,
+  distanceFields,
   generateWalls,
+  nextCell,
   pickEmptyCells,
   winnerByScore,
 } from '../_diamonds/logic';
 import type { BaseOverrides, DiamondsBase, Walker } from '../_diamonds/logic';
-import { BAG_LIMIT } from '../D-2/logic';
+import { BAG_LIMIT, BAG_WEIGHT } from '../D-2/logic';
 import { COIN_COUNT } from '../D-A/logic';
-import { GEM_COUNT } from '../D-3/logic';
+import { CONTEST_PENALTY, GEM_COUNT, GEM_PULL, LIFETIME, gemValue } from '../D-3/logic';
 import type { Gem } from '../D-3/logic';
 import { d3Game } from '../D-3/logic';
 import { d8Game, makeState as makeD8State } from '../D-8/logic';
@@ -387,19 +395,228 @@ export const dKGame: Game<DKState> = {
     return state.over ? state.winner : null;
   },
 
-  actions(_state: DKState, _side: Side): readonly Buttons[] {
-    return [NONE_BUTTONS];
+  actions(state: DKState, side: Side): readonly Buttons[] {
+    const stage = stageOf(state.tick);
+    if (state.over || stage === 0) {
+      return [NONE_BUTTONS];
+    }
+    if (stage === 1) {
+      // D-8 的目標（最近的無主格或可塗回來的對手格）；D-8 的 `actions` 不讀 score，不需要投影。
+      return d8Game.actions(state as unknown as D8State, side);
+    }
+    if (stage === 2) {
+      return actionsToward(state.walls, state.players[side], side, gemFocus(state, side));
+    }
+    return dJGame.actions(projectSteal(state, side), side);
   },
 
   evaluate(state: DKState, side: Side): { gain: number; danger: number } {
-    const difference = state.players[side].score - state.players[side === 0 ? 1 : 0].score;
-    const sign = difference === 0 ? 0 : difference > 0 ? 1 : -1;
-    return {
-      gain: GAIN_PER_POINT * difference + (state.over ? sign * WIN_BONUS : 0),
-      danger: 0,
-    };
+    if (state.over) {
+      return finalEvaluate(state, side);
+    }
+    const stage = stageOf(state.tick);
+    if (stage === 1) {
+      return evaluateTurf(state, side);
+    }
+    if (stage === 2) {
+      return evaluateGems(state, side);
+    }
+    if (stage === 3) {
+      return evaluateSteal(state, side);
+    }
+    return finalEvaluate(state, side);
   },
 };
+
+// ---------------------------------------------------------------------------
+// AI：actions 與 evaluate
+// ---------------------------------------------------------------------------
+
+/** AI 用：家的範圍（曼哈頓距離，連結 2 的預算：家附近鋪滿的地盤）。 */
+export const HOME_RADIUS = 10;
+/** AI 用：家附近的顏色格數鋪到這麼多就夠了（再多不加分）。 */
+export const HOME_TARGET = 40;
+/**
+ * AI 用：家附近每一格自己的顏色在 `gain` 裡額外值多少。D-8 的一格是 `GAIN_PER_POINT`（100），
+ * 小規格寫的 1.5 是以「一格 = 1」為單位；搜尋型的分數是 gain 減 2 × gain 範圍 × danger，
+ * 包裝層的項若單位差一個量級就永遠不影響決定（DESIGN-AI-FUN 10.54），所以和 D-8 的格數同單位：多算半格。
+ */
+export const HOME_WEIGHT = GAIN_PER_POINT / 2;
+
+/** 每一邊家附近（曼哈頓距離 ≤ HOME_RADIUS）的格子：清單與查表，開機時算好。 */
+const HOME_LISTS: readonly (readonly number[])[] = START_CELLS.map((base) => {
+  const out: number[] = [];
+  for (let c = 0; c < CELLS; c += 1) {
+    if (manhattan(c, base) <= HOME_RADIUS) {
+      out.push(c);
+    }
+  }
+  return out;
+});
+const HOME_MASKS: readonly Uint8Array[] = HOME_LISTS.map((list) => {
+  const mask = new Uint8Array(CELLS);
+  for (const c of list) {
+    mask[c] = 1;
+  }
+  return mask;
+});
+
+function homeCount(paint: readonly number[], side: Side): number {
+  const list = HOME_LISTS[side] as readonly number[];
+  let n = 0;
+  for (let i = 0; i < list.length; i += 1) {
+    if (paint[list[i] as number] === side + 1) {
+      n += 1;
+    }
+  }
+  return n;
+}
+
+/** 過場與結束：分數差（結束加勝負）。 */
+function finalEvaluate(state: DKState, side: Side): { gain: number; danger: number } {
+  const difference = state.players[side].score - state.players[side === 0 ? 1 : 0].score;
+  const sign = difference === 0 ? 0 : difference > 0 ? 1 : -1;
+  return {
+    gain: GAIN_PER_POINT * difference + (state.over ? sign * WIN_BONUS : 0),
+    danger: 0,
+  };
+}
+
+/**
+ * 第 1 段：D-8 的評估（`TURF_POINTS` 是 1，所以 `players[i].score` 就是顏色格數，D-8 的 `evaluate` 可以直接讀），
+ * 加上家附近的地盤（連結 2 的預算）。`danger` 加一項「家附近太薄」：越接近第 1 段結束、家附近越空越高。
+ */
+function evaluateTurf(state: DKState, side: Side): { gain: number; danger: number } {
+  const base = d8Game.evaluate(state as unknown as D8State, side);
+  const me = state.players[side] as Walker;
+  const myNext = nextCell(state.walls, me);
+  let home = homeCount(state.paint, side);
+  if (
+    myNext !== me.cell &&
+    (HOME_MASKS[side] as Uint8Array)[myNext] === 1 &&
+    state.paint[myNext] !== side + 1
+  ) {
+    home += 1; // 下一步就把家附近的一格塗成我的
+  }
+  const capped = Math.min(HOME_TARGET, home);
+  const progress = clamp01((state.tick - STAGE1_START) / (STAGE1_END - STAGE1_START));
+  const thin = clamp01(1 - capped / HOME_TARGET) * progress;
+  return { gain: base.gain + HOME_WEIGHT * capped, danger: Math.max(base.danger, thin) };
+}
+
+/** 一顆寶石在我的顏色上撿到手時的紅利（連結 1）。 */
+function turfBonus(state: DKState, side: Side, gemCell: number, value: number): number {
+  return state.paint[gemCell] === side + 1 ? Math.ceil(value / 2) : 0;
+}
+
+/**
+ * 第 2 段：D-3 的評估，但每顆寶石的價值加上地盤紅利（寶石在我的顏色上就多 ⌈價值 ÷ 2⌉，格子是固定的，所以紅利是確定的）。
+ * 不是呼叫 `d3Game.evaluate`：它用 `born` 算價值，沒辦法把紅利放進去；這裡是同一個算式加一項，只掃目前這一段的寶石。
+ */
+function evaluateGems(state: DKState, side: Side): { gain: number; danger: number } {
+  const other: Side = side === 0 ? 1 : 0;
+  const me = state.players[side] as Walker;
+  const opponent = state.players[other] as Walker;
+  const difference = me.score - opponent.score;
+  const fields = distanceFields(state.walls, me, opponent);
+  const moving = fields.myNext !== me.cell;
+  const oppMoving = fields.oppNext !== opponent.cell;
+  let virtual = 0;
+  let pull = 0;
+  let danger = 0;
+  for (const gem of state.gems) {
+    if (moving && gem.cell === fields.myNext) {
+      const value = gemValue(state.tick, gem.born);
+      virtual += value + turfBonus(state, side, gem.cell, value);
+      continue;
+    }
+    if (oppMoving && gem.cell === fields.oppNext) {
+      continue;
+    }
+    const mine = fields.mine[gem.cell] as number;
+    if (mine >= UNREACHABLE) {
+      continue;
+    }
+    const arrival = state.tick + MOVE_EVERY * mine;
+    if (arrival - gem.born > LIFETIME) {
+      continue;
+    }
+    const theirs = fields.theirs[gem.cell] as number;
+    const effective = mine + (theirs < mine ? CONTEST_PENALTY : 0);
+    const value = gemValue(arrival - 1, gem.born);
+    const candidate = (GEM_PULL * (value + turfBonus(state, side, gem.cell, value))) / (effective + 2);
+    if (candidate > pull) {
+      pull = candidate;
+      danger = contestDanger(mine, theirs);
+    }
+  }
+  return { gain: GAIN_PER_POINT * (difference + virtual) + pull, danger };
+}
+
+/** 第 2 段 `actions` 的目標：和 `evaluate` 同一個吸引力（價值加紅利、對手比我近要加距離），從我現在的格子算。 */
+function gemFocus(state: DKState, side: Side): number | null {
+  const me = state.players[side] as Walker;
+  const opponent = state.players[side === 0 ? 1 : 0] as Walker;
+  const mineDistance = bfsDistances(state.walls, me.cell);
+  const theirDistance = bfsDistances(state.walls, opponent.cell);
+  let best: number | null = null;
+  let bestPull = 0;
+  for (const gem of state.gems) {
+    const d = mineDistance[gem.cell] as number;
+    const arrival = state.tick + MOVE_EVERY * d;
+    if (d >= UNREACHABLE || arrival - gem.born > LIFETIME) {
+      continue;
+    }
+    const theirs = theirDistance[gem.cell] as number;
+    const effective = d + (theirs < d ? CONTEST_PENALTY : 0);
+    const value = gemValue(arrival - 1, gem.born);
+    const pull = (GEM_PULL * (value + turfBonus(state, side, gem.cell, value))) / (effective + 2);
+    if (pull > bestPull) {
+      bestPull = pull;
+      best = gem.cell;
+    }
+  }
+  return best;
+}
+
+/**
+ * 第 3 段交給 D-J 的 `evaluate`／`actions` 之前的投影：
+ * 1. 分數換成金幣數（÷ `COIN_POINTS`）：D-J 的分數單位是一枚金幣 1 分。
+ * 2. 連結 2：對手現在站在它自己的顏色上，偷不了它——把它的分數當 0（D-J 就不會把「去偷」算進目標），`evaluate` 再把分數差補回來；
+ *    我現在站在自己的顏色上，沒人偷得了我——把對手的背包當滿的（D-J 的「被偷的危險」只在對手背包有空位時才算），`evaluate` 再把背包差補回來。
+ */
+function projectSteal(state: DKState, side: Side): DJState {
+  const other: Side = side === 0 ? 1 : 0;
+  const p0 = state.players[0] as Walker;
+  const p1 = state.players[1] as Walker;
+  const oppSafe = onOwnTurf(state, other);
+  const players: [Walker, Walker] = [
+    { ...p0, score: p0.score / COIN_POINTS },
+    { ...p1, score: p1.score / COIN_POINTS },
+  ];
+  if (oppSafe) {
+    players[other] = { ...(players[other] as Walker), score: 0 };
+  }
+  const bags: [number, number] = onOwnTurf(state, side)
+    ? side === 0
+      ? [state.bags[0], BAG_LIMIT]
+      : [BAG_LIMIT, state.bags[1]]
+    : [state.bags[0], state.bags[1]];
+  return { ...state, players, bags } as unknown as DJState;
+}
+
+function evaluateSteal(state: DKState, side: Side): { gain: number; danger: number } {
+  const other: Side = side === 0 ? 1 : 0;
+  const result = dJGame.evaluate(projectSteal(state, side), side);
+  let gain = result.gain;
+  if (onOwnTurf(state, other)) {
+    gain -= GAIN_PER_POINT * ((state.players[other] as Walker).score / COIN_POINTS);
+  }
+  if (onOwnTurf(state, side)) {
+    gain += BAG_WEIGHT * (BAG_LIMIT - state.bags[other]);
+  }
+  return { gain, danger: result.danger };
+}
 
 const NONE_BUTTONS: Buttons = Object.freeze({
   up: false,

@@ -125,6 +125,13 @@ export const strings = {
     round: (round: number, total: number): string => `第 ${round} / ${total} 輪`,
   },
 
+  /** D-K 方塊馬拉松：三段的名稱與倒數（畫面文字集中在這裡）。 */
+  diamondsMarathon: {
+    stages: ['過場', '圈地', '寶石', '存與偷'],
+    upNext: (name: string): string => `接下來：${name}`,
+    clock: (seconds: number): string => `${seconds}`,
+  },
+
   /** S-K 黑桃馬拉松：挑牌與結算的畫面文字（被包的牌的名稱來自它們自己的 meta）。 */
   spadesMarathon: {
     segment: (n: number, total: number): string => `第 ${n} / ${total} 段`,

@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { levelController } from '../../ai/level';
 import { greedy } from '../../ai/policies/greedy';
 import { precise } from '../../ai/policies/precise';
-import { advance, argMax, lookOneStep } from '../../ai/policies/shared';
+import { advance, lookOneStep } from '../../ai/policies/shared';
 import { copyButtons } from '../../core/match';
 import type { Buttons, Side } from '../../core/types';
 import { cell, START_CELLS } from '../_diamonds/logic';
