@@ -1163,7 +1163,12 @@ describe('D-9 擺放｜獨佔規則 cap／contest', () => {
     for (const extra of [{ cap: 1 }, { cap: 1, contest: 1 }] as const) {
       for (const side of [0, 1] as const) {
         const opp = side === 0 ? 1 : 0;
-        const a = placing({ ...extra, sel: [3, 3], round: 1, coll: [{ dep: 9, owner: 0, round: 0 }] });
+        const a = placing({
+          ...extra,
+          sel: [3, 3],
+          round: 1,
+          coll: [{ dep: 9, owner: 0, round: 0 }],
+        });
         const p1 = [a.pending[0], a.pending[1]] as [number | null, number | null];
         const p2 = [a.pending[0], a.pending[1]] as [number | null, number | null];
         p1[opp] = 8;

@@ -17,7 +17,10 @@ import type { Buttons, Game, GameConfig, Inputs, Side } from '../../core/types';
  */
 
 export const DEPOSITS = 10;
+/** 預設的容量（`config.params.cap` 可給 1：獨佔，見小規格十）。 */
 export const CAP = 2;
+/** 預設：搶同一個空位不夠的礦脈時兩邊都作廢（`config.params.contest = 1`：優先權的一邊拿到）。 */
+export const DEFAULT_CONTEST = 0;
 export const STOCKS: readonly number[] = [6, 8, 8, 10, 10, 12, 12, 14, 16, 20];
 export const JUMP_EVERY = 6;
 /** place 最長多少 tick，超過的那一邊自動不擺。 */
@@ -121,6 +124,10 @@ export interface D9State {
   readonly history: readonly Round[];
   /** 對手收成的權重（`config.params.zs`，量測用）。 */
   readonly zs: number;
+  /** 每個礦脈最多幾個採集器（`config.params.cap`；預設 2，1 ＝ 獨佔）。 */
+  readonly cap: number;
+  /** 搶同一個空位不夠的礦脈：0 ＝ 兩邊作廢；1 ＝ 優先權（第 r 輪在 r % 2 號邊）的一邊拿到。 */
+  readonly contest: number;
   /** AI 的對手模型開關（消融用：`config.params.model = 0` 就不讀歷史，只用先驗）。 */
   readonly model: boolean;
 }
@@ -173,6 +180,8 @@ export function makeState(overrides: Partial<D9State> = {}): D9State {
     last: null,
     history: [],
     zs: DEFAULT_ZS,
+    cap: CAP,
+    contest: DEFAULT_CONTEST,
     model: true,
     ...overrides,
   };
@@ -318,6 +327,8 @@ interface View {
   readonly drawn: readonly [number, number];
   readonly round: number;
   readonly rounds: number;
+  readonly cap: number;
+  readonly contest: number;
 }
 
 function viewOf(state: D9State): View {
@@ -328,6 +339,8 @@ function viewOf(state: D9State): View {
       drawn: state.last.drawn0,
       round: state.round,
       rounds: state.rounds,
+      cap: state.cap,
+      contest: state.contest,
     };
   }
   return {
@@ -336,6 +349,8 @@ function viewOf(state: D9State): View {
     drawn: state.drawn,
     round: state.round,
     rounds: state.rounds,
+    cap: state.cap,
+    contest: state.contest,
   };
 }
 
@@ -355,7 +370,7 @@ function liveOrder(view: View): number[] {
   for (let d = 0; d < DEPOSITS; d += 1) {
     const n = countAt(view.coll, d);
     const stock = view.stocks[d] as number;
-    if (n < CAP && stock > 0) {
+    if (n < view.cap && stock > 0) {
       live.push({ dep: d, key: stock / (1 + n) });
     }
   }
@@ -510,8 +525,11 @@ function reveal(state: D9State): D9State {
     if (p < 0) {
       continue;
     }
-    const free = CAP - countAt(state.coll, p);
-    if ((req[p] as number) <= free) {
+    const free = state.cap - countAt(state.coll, p);
+    const wanted = req[p] as number;
+    // 搶同一個空位不夠的礦脈：contest = 1 時優先權（第 r 輪在 r % 2 號邊）的一邊拿到，其餘作廢。
+    const wins = wanted <= free || (state.contest === 1 && free >= 1 && side === state.round % 2);
+    if (wins) {
       added.push({ dep: p, owner: side, round: state.round });
     } else {
       voided[side] = true;
@@ -718,13 +736,20 @@ function valuate(
   for (let d = 0; d < DEPOSITS; d += 1) {
     const stock = view.stocks[d] as number;
     const ex: Collector[] = view.coll.filter((x) => x.dep === d);
-    free.push(CAP - ex.length);
+    free.push(view.cap - ex.length);
     const v0 = net(stock, ex);
     f0.push(v0);
     base += v0;
     a.push(free[d] >= 1 ? net(stock, [...ex, me]) - v0 : 0);
     b.push(free[d] >= 1 ? net(stock, [...ex, them]) - v0 : 0);
-    c.push(free[d] >= 2 ? net(stock, [...ex, me, them]) - v0 : 0);
+    if (free[d] >= 2) {
+      c.push(net(stock, [...ex, me, them]) - v0);
+    } else if (view.contest === 1 && free[d] >= 1) {
+      // 搶最後一個空位：優先權（這一輪在 round % 2 號邊）的一邊拿到。
+      c.push(view.round % 2 === side ? (a[d] as number) : (b[d] as number));
+    } else {
+      c.push(0);
+    }
     sb += (q[d] as number) * (b[d] as number);
   }
   const lock: number[] = [];
@@ -733,7 +758,8 @@ function valuate(
     const qd = q[d] as number;
     lock.push((1 - qd) * (a[d] as number) + qd * (c[d] as number) + sb - qd * (b[d] as number));
     const dead = (free[d] as number) < 1 || (view.stocks[d] as number) <= 0;
-    danger.push(dead ? 1 : (free[d] as number) >= 2 ? 0 : qd);
+    const safe = (free[d] as number) >= 2 || (view.contest === 1 && view.round % 2 === side);
+    danger.push(dead ? 1 : safe ? 0 : qd);
   }
   return { base, lock, pass: sb, danger };
 }
@@ -795,6 +821,8 @@ export const d9Game: Game<D9State> = {
       rounds,
       deposits: cells.map((cell, i) => ({ cell, stock: stocks[i] as number })),
       zs: config.params['zs'] ?? DEFAULT_ZS,
+      cap: Math.min(CAP, Math.max(1, Math.round(config.params['cap'] ?? CAP))),
+      contest: Math.min(1, Math.max(0, Math.round(config.params['contest'] ?? DEFAULT_CONTEST))),
       model: config.params['model'] !== 0,
     });
   },
