@@ -55,7 +55,9 @@ export const bestEdge: BetRule = (s, side) => {
   }
   let best = s.stageIdx;
   for (let j = s.stageIdx; j < STAGES; j += 1) {
-    if (EDGE[s.stages[j] as keyof typeof EDGE][side] > EDGE[s.stages[best] as keyof typeof EDGE][side]) {
+    if (
+      EDGE[s.stages[j] as keyof typeof EDGE][side] > EDGE[s.stages[best] as keyof typeof EDGE][side]
+    ) {
       best = j;
     }
   }
@@ -68,7 +70,10 @@ export const worstEdge: BetRule = (s, side) => {
   }
   let worst = s.stageIdx;
   for (let j = s.stageIdx; j < STAGES; j += 1) {
-    if (EDGE[s.stages[j] as keyof typeof EDGE][side] < EDGE[s.stages[worst] as keyof typeof EDGE][side]) {
+    if (
+      EDGE[s.stages[j] as keyof typeof EDGE][side] <
+      EDGE[s.stages[worst] as keyof typeof EDGE][side]
+    ) {
       worst = j;
     }
   }
@@ -116,7 +121,11 @@ export function playFrom(
 }
 
 /** 一整場。 */
-export function playFull(c0: Controller<HKState>, c1: Controller<HKState>, seed: number): FullMatch {
+export function playFull(
+  c0: Controller<HKState>,
+  c1: Controller<HKState>,
+  seed: number,
+): FullMatch {
   return playFrom(hkGame.init(seed, CONFIG), c0, c1);
 }
 

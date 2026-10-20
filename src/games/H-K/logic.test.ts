@@ -304,28 +304,31 @@ describe('H-K 紅心馬拉松｜委派：被包的牌原樣跑', () => {
     return [pick(Math.floor(tick / 7)), pick(Math.floor(tick / 5) + 1)];
   };
 
-  it.each(STAGE_POOL)('%s：play 階段每個 tick，H-K 的 sub 都等於那張牌自己跑同樣輸入的 state', (id) => {
-    const stages = [id, ...STAGE_POOL.filter((x) => x !== id).slice(0, 3)] as StageId[];
-    let wrapped = makeState({ stages, stageIdx: 0, phase: 'play', wait: 0 });
-    const game = gameOf(id);
-    let direct = game.init(stageSeedFor(0, 0), { maxTicks: 673, params: {} });
-    expect(wrapped.sub).toEqual(direct);
-    for (let t = 0; t < ticksToCheck && wrapped.phase === 'play'; t += 1) {
-      const inputs = pattern(t);
-      wrapped = hkGame.step(wrapped, inputs);
-      direct = game.step(direct, inputs);
-      if (wrapped.phase !== 'play') {
-        expect(game.isOver(direct)).toBe(true);
-        break;
-      }
-      expect(wrapped.sub, `${id} tick ${t}`).toEqual(direct);
-      if (t % 25 === 0) {
-        for (const side of [0, 1] as const) {
-          expect(hkGame.actions(wrapped, side)).toEqual(game.actions(direct, side));
+  it.each(STAGE_POOL)(
+    '%s：play 階段每個 tick，H-K 的 sub 都等於那張牌自己跑同樣輸入的 state',
+    (id) => {
+      const stages = [id, ...STAGE_POOL.filter((x) => x !== id).slice(0, 3)] as StageId[];
+      let wrapped = makeState({ stages, stageIdx: 0, phase: 'play', wait: 0 });
+      const game = gameOf(id);
+      let direct = game.init(stageSeedFor(0, 0), { maxTicks: 673, params: {} });
+      expect(wrapped.sub).toEqual(direct);
+      for (let t = 0; t < ticksToCheck && wrapped.phase === 'play'; t += 1) {
+        const inputs = pattern(t);
+        wrapped = hkGame.step(wrapped, inputs);
+        direct = game.step(direct, inputs);
+        if (wrapped.phase !== 'play') {
+          expect(game.isOver(direct)).toBe(true);
+          break;
+        }
+        expect(wrapped.sub, `${id} tick ${t}`).toEqual(direct);
+        if (t % 25 === 0) {
+          for (const side of [0, 1] as const) {
+            expect(hkGame.actions(wrapped, side)).toEqual(game.actions(direct, side));
+          }
         }
       }
-    }
-  });
+    },
+  );
 
   it('step 不改動傳進來的 state（play 階段，深度凍結）', () => {
     const state = deepFreeze(makeState({ stages: FOUR, phase: 'play', wait: 0 }));
@@ -411,7 +414,9 @@ describe('H-K 紅心馬拉松｜段與段之間的籌碼結算（方向、金額
   it('平手不動籌碼：被包的牌平手 = delta 0、winner null', () => {
     // H-2 兩邊都不動（鏡像骰子、同樣的輸入）一定平手。
     let state = makeState({ stages: ['H-2', 'H-4', 'H-9', 'H-10'], phase: 'play', wait: 0 });
-    state = run(state, 673);
+    for (let i = 0; i < 700 && state.phase === 'play'; i += 1) {
+      state = hkGame.step(state, IDLE_PAIR);
+    }
     expect(state.phase).toBe('stageResult');
     expect(state.results[0]?.winner).toBeNull();
     expect(state.results[0]?.delta).toBe(0);
@@ -471,7 +476,12 @@ describe('H-K 紅心馬拉松｜evaluate：零和方向與籌碼', () => {
   });
 
   it('最後一場已結算、還沒結束：兩邊的 gain 恰好相反（沒有剩下的場次，不靠 edge 表）', () => {
-    for (const chips of [[110, 90], [90, 110], [100, 100], [130, 70]] as [number, number][]) {
+    for (const chips of [
+      [110, 90],
+      [90, 110],
+      [100, 100],
+      [130, 70],
+    ] as [number, number][]) {
       const state = makeState({ stages: FOUR, stageIdx: 3, phase: 'stageResult', wait: 10, chips });
       const g0 = hkGame.evaluate(state, 0).gain;
       const g1 = hkGame.evaluate(state, 1).gain;
@@ -605,7 +615,13 @@ describe('H-K 紅心馬拉松｜資訊限制：AI 看不到對方的 pending，�
           const reveal = (theirs: 0 | 1): HKState => {
             const pending: [0 | 1 | null, 0 | 1 | null] = [null, null];
             pending[opp] = theirs;
-            const start = makeState({ stages: FOUR, stageIdx, phase: 'bet', pending, chips: [92, 108] });
+            const start = makeState({
+              stages: FOUR,
+              stageIdx,
+              phase: 'bet',
+              pending,
+              chips: [92, 108],
+            });
             const mine = move === 1 ? PRESS_A : PRESS_B;
             const next = hkGame.step(start, side === 0 ? [mine, IDLE] : [IDLE, mine]);
             return run(next, LOCK_TICKS);
@@ -623,7 +639,11 @@ describe('H-K 紅心馬拉松｜資訊限制：AI 看不到對方的 pending，�
   it('黑箱：只有對方 pending 不同，深度 1、3、6 的 decide 回傳同一個按鍵', () => {
     for (const depth of [1, 3, 6]) {
       for (const stageIdx of [0, 1, 2, 3] as const) {
-        for (const chips of [[100, 100], [80, 120], [120, 80]] as [number, number][]) {
+        for (const chips of [
+          [100, 100],
+          [80, 120],
+          [120, 80],
+        ] as [number, number][]) {
           for (const side of [0, 1] as const) {
             const opp = side === 0 ? 1 : 0;
             const make = (theirs: 0 | 1): HKState => {
@@ -798,7 +818,14 @@ describe('H-K 紅心馬拉松｜render', () => {
 
   it('結束的局面也能畫', () => {
     const state = deepFreeze(
-      makeState({ stages: FOUR, stageIdx: 3, phase: 'stageResult', over: true, winner: 0, chips: [120, 80] }),
+      makeState({
+        stages: FOUR,
+        stageIdx: 3,
+        phase: 'stageResult',
+        over: true,
+        winner: 0,
+        chips: [120, 80],
+      }),
     );
     const context = createFakeContext();
     expect(() => hkRender(asRenderingContext(context), state)).not.toThrow();
