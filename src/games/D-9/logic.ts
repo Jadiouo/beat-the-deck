@@ -30,8 +30,11 @@ export const END_TICKS = 60;
 export const MAX_ROUNDS = 8;
 /** 預設輪數（SPEC 原文 5；老闆授權改 8，量測見小規格）。 */
 export const DEFAULT_ROUNDS = 8;
-/** 對手收成的權重：0 ＝ 只算自己的期望收成（小規格原文）；1 ＝ 算兩邊的差（零和）。 */
-export const DEFAULT_ZS = 0;
+/**
+ * 對手收成的權重：0 ＝ 只算自己的期望收成（小規格原文：量到被「一直挑最肥」打 100%）；
+ * 1 ＝ 算兩邊的差（零和，預設）。見小規格「我做的決定」。
+ */
+export const DEFAULT_ZS = 1;
 /** `predictOpponent` 只看對手最近這麼多輪。 */
 export const WINDOW = 4;
 /** 先驗占幾次觀察：先驗是「名次 1 0.55、名次 2 0.30、其他 0.15」。 */
@@ -730,7 +733,7 @@ function valuate(
     const qd = q[d] as number;
     lock.push((1 - qd) * (a[d] as number) + qd * (c[d] as number) + sb - qd * (b[d] as number));
     const dead = (free[d] as number) < 1 || (view.stocks[d] as number) <= 0;
-    danger.push(dead ? 1 : qd * ((free[d] as number) >= 2 ? 0.5 : 1));
+    danger.push(dead ? 1 : (free[d] as number) >= 2 ? 0 : qd);
   }
   return { base, lock, pass: sb, danger };
 }
