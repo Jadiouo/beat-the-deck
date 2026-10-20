@@ -744,3 +744,108 @@ describe('D-6 市場｜AI 能不能玩', () => {
     expect(r.ticks).toBeLessThanOrEqual(3600);
   });
 });
+
+describe('D-6 市場｜AI 的買賣有道理（深度 ≥ 3 看得到開牌）', () => {
+  /** AI（1 號邊）鎖定 `trade` 之後，開牌那個 state 的評價。 */
+  function valueOf(state: D6State, trade: Trade): number {
+    return d6Game.evaluate(toResult(state, PASS, trade), 1).gain;
+  }
+  const isTrade = (buttons: Buttons, trade: Trade): boolean =>
+    sameButtons(buttons, TRADE_BUTTONS[trade]!);
+
+  it('B1. 第 0 回合：離旺季還遠、現在便宜 → 看得夠深的 AI 買（不是不動、不是賣）', () => {
+    const press = decideAtDepth(choosing({ round: 0 }), 1, 6);
+    expect(isTrade(press, PASS)).toBe(false);
+    expect([BUY(0), BUY(1), BUY(2)].some((t) => isTrade(press, t))).toBe(true);
+  });
+
+  it('B2. 沒錢可買、峰值那一回合手上有一件：賣（之後只會更便宜）；錢夠的時候它寧可先買便宜的、晚一點再賣，因為出口還很多', () => {
+    const broke = choosing({
+      round: 5,
+      cash: [3, 3],
+      inv: [
+        [1, 0, 0],
+        [1, 0, 0],
+      ],
+    });
+    expect(priceOf(broke, 0)).toBe(15);
+    expect(isTrade(decideAtDepth(broke, 1, 6), SELL(0))).toBe(true);
+    const rich = choosing({
+      round: 5,
+      inv: [
+        [1, 0, 0],
+        [1, 0, 0],
+      ],
+    });
+    expect(isTrade(decideAtDepth(rich, 1, 6), SELL(0))).toBe(false);
+  });
+
+  it('B3. 最後一回合：有存貨就賣、不買（買了來不及賣）；沒有存貨就不動', () => {
+    const withStock = choosing({
+      round: ROUNDS - 1,
+      inv: [
+        [0, 0, 0],
+        [0, 0, 2],
+      ],
+    });
+    expect(isTrade(decideAtDepth(withStock, 1, 6), SELL(2))).toBe(true);
+    const empty = choosing({ round: ROUNDS - 1 });
+    expect(isTrade(decideAtDepth(empty, 1, 6), PASS)).toBe(true);
+  });
+
+  it('B4. 不囤賣不掉的貨：只剩 3 回合、手上已有 3 件，再買只會多一件賣不掉的 → 不買', () => {
+    const state = choosing({
+      round: ROUNDS - 3,
+      inv: [
+        [0, 0, 0],
+        [1, 1, 1],
+      ],
+    });
+    const press = decideAtDepth(state, 1, 6);
+    expect([BUY(0), BUY(1), BUY(2)].some((t) => isTrade(press, t))).toBe(false);
+  });
+
+  it('B5. 它在囤什麼會影響我：對手手上有很多某種貨，那種貨之後會被它倒出來壓價，買它的好處變小；模型關掉就沒有這個差別', () => {
+    const base = { round: 2, history: [] as D6State['history'] };
+    const gap = (opp: readonly number[], model: boolean): number => {
+      const state = choosing({ ...base, model, inv: [opp, [0, 0, 0]] }); // AI 是 1 號邊，對手（人）的存貨在 inv[0]
+      return valueOf(state, BUY(0)) - valueOf(state, PASS);
+    };
+    expect(gap([6, 0, 0], true)).toBeLessThan(gap([0, 0, 0], true) - 0.5);
+    expect(gap([6, 0, 0], false)).toBeCloseTo(gap([0, 0, 0], false), 9);
+  });
+
+  it('B6. 它最近在買什麼會影響我：對手連買穀，穀之後會被它推高，我買穀（之後賣）比較划算；模型關掉就沒有這個差別', () => {
+    const buying = Array.from({ length: 6 }, () => [BUY(0), PASS] as const); // [人, AI]：對手（人）連買穀
+    const passing = Array.from({ length: 6 }, () => [PASS, PASS] as const);
+    const gap = (history: D6State['history'], model: boolean): number => {
+      const state = choosing({
+        round: 8,
+        model,
+        history,
+        inv: [
+          [0, 0, 0],
+          [1, 0, 0],
+        ],
+      });
+      return valueOf(state, BUY(0)) - valueOf(state, PASS);
+    };
+    expect(gap(buying, true)).toBeGreaterThan(gap(passing, true) + 0.2);
+    expect(gap(buying, false)).toBeCloseTo(gap(passing, false), 9);
+  });
+
+  it('B7. 淺搜尋與深度 ≥ 3 的差別來自結算流程：鐵已經有 5 件、好價回合只剩 5 個，再買一件 → 貪心型（一步看、不看 danger）買，精準型（排除賣不掉的）和深度 6 的搜尋型不買', () => {
+    const state = choosing({
+      round: 13,
+      inv: [
+        [0, 0, 0],
+        [0, 0, 5],
+      ],
+    });
+    const buys = (buttons: Buttons): boolean =>
+      [BUY(0), BUY(1), BUY(2)].some((t) => isTrade(buttons, t));
+    expect(buys(decideAtDepth(state, 1, 1, 'greedy'))).toBe(true);
+    expect(buys(decideAtDepth(state, 1, 1, 'precise'))).toBe(false);
+    expect(buys(decideAtDepth(state, 1, 6))).toBe(false);
+  });
+});
