@@ -116,6 +116,15 @@ export const strings = {
     round: (round: number, total: number): string => `第 ${round} / ${total} 回合`,
   },
 
+  /** D-9 擺放：狀態文字。 */
+  deposit: {
+    locked: '已鎖定',
+    choosing: '選擇中',
+    passed: '不擺',
+    confidence: 'AI 的把握',
+    round: (round: number, total: number): string => `第 ${round} / ${total} 輪`,
+  },
+
   touch: { up: '上', down: '下', left: '左', right: '右', a: 'A', b: 'B' },
 
   /** 看不見的 DOM 鏡像（給讀螢幕的人與端到端測試）。 */
