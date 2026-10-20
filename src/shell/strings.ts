@@ -125,6 +125,33 @@ export const strings = {
     round: (round: number, total: number): string => `第 ${round} / ${total} 輪`,
   },
 
+  /** JK-B 規則壞掉了：規則名稱、預告與畫面上的短字（畫面文字集中在這裡）。 */
+  brokenRules: {
+    rules: {
+      normal: '正常',
+      poison: '毒藥',
+      gift: '送禮',
+      rain: '金幣雨',
+      gravity: '重力反轉',
+      rob: '搶劫',
+      exchange: '分數互換',
+    },
+    /** 一句話說明，預告時顯示在規則名稱下面。 */
+    blurbs: {
+      normal: '撿金幣 +1',
+      poison: '撿金幣 −1',
+      gift: '撿的人 0 分，對手 +1',
+      rain: '標記格周圍多 8 顆金幣',
+      gravity: '所有人被往箭頭方向飄',
+      rob: '金幣沒分，推到人偷 1 分',
+      exchange: '撿完先 +1，再互換總分',
+    },
+    now: '現在',
+    next: (name: string, seconds: number): string => `${seconds} 秒後：${name}`,
+    you: '你',
+    ai: 'AI',
+  },
+
   touch: { up: '上', down: '下', left: '左', right: '右', a: 'A', b: 'B' },
 
   /** 看不見的 DOM 鏡像（給讀螢幕的人與端到端測試）。 */
