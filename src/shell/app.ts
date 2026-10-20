@@ -17,6 +17,7 @@ import { attachBrowserInput, emptyButtons, framePresses } from './input';
 import type { InputSnapshot } from './input';
 import type { Launch } from './launch';
 import { createLoop } from './loop';
+import { headlineKind, outcomeOf, showScoresOf } from './outcome';
 import {
   createMatchSession,
   createReplaySession,
@@ -92,15 +93,6 @@ const EVOLUTION_MIN_TICKS = 300;
 
 function personalityOf(entry: RegistryEntry): TauntPersonality {
   return entry.meta.defaultPolicy ?? 'pathfinder';
-}
-
-/** 一場對局的結果（從人這一邊看）。鬼牌沒有勝負，玩完就算贏（SPEC 第 11 節：玩過一次就算翻開）。 */
-function outcomeOf(entry: RegistryEntry, state: unknown): Outcome {
-  if (entry.id.startsWith('JK')) {
-    return 'win';
-  }
-  const winner = entry.game.winner(state);
-  return winner === 0 ? 'win' : winner === 1 ? 'loss' : 'draw';
 }
 
 const END_SOUND: Readonly<Record<Outcome, SoundName>> = {
@@ -605,21 +597,15 @@ export function startApp(options: AppOptions): void {
   };
 
   const resultHeadline = (result: FinishedMatch): string =>
-    result.entry.id.startsWith('JK')
-      ? strings.result.jokerDone
-      : result.outcome === 'win'
-        ? strings.result.youWin
-        : result.outcome === 'loss'
-          ? strings.result.aiWins
-          : strings.result.draw;
+    strings.result[headlineKind(result.entry, result.outcome)];
 
   const pngDeps = createBrowserPngDeps();
 
   const resultScene = (result: FinishedMatch): Scene => {
     let cursor = 0;
-    const isJoker = result.entry.id.startsWith('JK');
+    const noWinner = !showScoresOf(result.entry);
     const headline = resultHeadline(result);
-    const headlineColor = isJoker
+    const headlineColor = noWinner
       ? COLOR.accent
       : result.outcome === 'win'
         ? COLOR.clubs
@@ -687,7 +673,7 @@ export function startApp(options: AppOptions): void {
           headline,
           headlineColor,
           scores: result.scores,
-          showScores: !isJoker,
+          showScores: showScoresOf(result.entry),
           seed: result.seed,
           taunt: result.taunt,
           personality: personalityName,
