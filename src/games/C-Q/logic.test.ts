@@ -615,8 +615,20 @@ describe('C-Q 兩條蛇｜actions', () => {
     const dead = makeState({ snakes: [{ alive: false }, {}] });
     expect(cqGame.actions(dead, 0).some((b) => b.a)).toBe(false);
     const over = makeState({ over: true });
-    expect(cqGame.actions(over, 0)).toHaveLength(orderedActions(over, 0).length);
-    expect(cqGame.actions(over, 0).some((b) => b.a)).toBe(false);
+    expect(cqGame.actions(over, 0)).toEqual([NONE]);
+    expect(cqGame.actions(over, 1)).toEqual([NONE]);
+  });
+
+  it('這個走格週期已經鎖定轉向（turn ≠ dir）：只有全放開（可放時再加全放開＋a），不再提供 4 個重複的方向', () => {
+    const turned = makeState({
+      snakes: [{ body: [cell(5, 12), cell(4, 12), cell(3, 12)], dir: RIGHT, turn: UP }, {}],
+    });
+    expect(cqGame.actions(turned, 0)).toEqual([NONE, A]);
+    const cooling = makeState({
+      reload: [9, 0],
+      snakes: [{ body: [cell(5, 12), cell(4, 12), cell(3, 12)], dir: RIGHT, turn: UP }, {}],
+    });
+    expect(cqGame.actions(cooling, 0)).toEqual([NONE]);
   });
 
   it('被鎖定：只有全放開（可放時再加全放開＋a）', () => {
