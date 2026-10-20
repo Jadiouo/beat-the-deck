@@ -126,6 +126,26 @@ describe('JK-B｜基底：init 與賽程', () => {
     expect(seen.size).toBe(7);
   });
 
+  it('分數互換不排在最後一段（小規格決定 9 的觸發條件被量到了：最後一段是互換時 AI 勝率 51.3%，其他段 63.6% 到 93.9%）；種子 0..399 都不會，而且它在第 1 到 4 段都出現過、每一段都有', () => {
+    const at = new Map<number, number>();
+    for (let seed = 0; seed < 400; seed += 1) {
+      const schedule = jkbGame.init(seed, CONFIG).schedule;
+      expect(schedule[5], `seed ${seed}`).not.toBe('exchange');
+      const i = schedule.indexOf('exchange');
+      at.set(i, (at.get(i) ?? 0) + 1);
+    }
+    for (const position of [1, 2, 3, 4]) {
+      expect(at.get(position) ?? 0, `第 ${position} 段`).toBeGreaterThan(40);
+    }
+    expect(at.get(5)).toBeUndefined();
+    // 其他五條規則不受限制：每一條在最後一段都出現過
+    const last = new Set<string>();
+    for (let seed = 0; seed < 400; seed += 1) {
+      last.add(jkbGame.init(seed, CONFIG).schedule[5] as string);
+    }
+    expect([...last].sort()).toEqual(['gift', 'gravity', 'poison', 'rain', 'rob']);
+  });
+
   it('maxTicks 小於 600 丟 RangeError；不是 600 的倍數時最後一段被截斷；超過 3600 以 3600 為準', () => {
     expect(() => jkbGame.init(0, { maxTicks: 599, params: {} })).toThrow(RangeError);
     const s = jkbGame.init(0, { maxTicks: 700, params: {} });
