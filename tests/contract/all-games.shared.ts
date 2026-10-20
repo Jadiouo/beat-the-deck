@@ -12,6 +12,7 @@ import {
   CHECKS,
   CONTRACT_CONFIG,
   CONTRACT_SEEDS,
+  K4_CHUNKS,
   SYMMETRY_CHUNKS,
   SYMMETRY_SEEDS,
   judgeSymmetry,
@@ -57,6 +58,10 @@ export function defineContractChecks(bucket: Bucket): void {
         defineSymmetry(entry, title);
         continue;
       }
+      if (check.code === 'K4') {
+        defineStepPure(entry, check, title);
+        continue;
+      }
       it(
         title,
         () => {
@@ -98,5 +103,31 @@ function defineSymmetry(entry: RegistryEntry, title: string): void {
       points += value;
     }
     judgeSymmetry(points, SYMMETRY_SEEDS.length);
+  });
+}
+
+/**
+ * K4 分段：`CONTRACT_SEEDS`（20 個）切成 `K4_CHUNKS`，每段一個測試案例（各自 60 秒），
+ * 最後一個案例確認每一段都跑完而且都通過。K4 的判準是逐種子的（每個 tick 都不可以違約），
+ * 沒有要加總的分數，所以最後一個案例只做「都跑完了」的檢查；種子與判準都沒動。
+ * 為什麼：D-7 的 K4 本機約 50 秒、CI 約 61 秒（上限 60 秒）。成本九成以上是每個 tick 對整個 state
+ * 雜湊兩次（`softHash` 前後各一次），不是 `step`（D-7 一局 3600 tick 的 step 加選輸入約 0.12 秒）。
+ * 雜湊是 K4 抓「就地改動沒被凍結的東西（Map、Set、型別陣列）」的手段，不能省，所以切段。
+ * 任何一段沒跑完（出錯、逾時）加總的案例就失敗。
+ */
+function defineStepPure(entry: RegistryEntry, check: (typeof CHECKS)[number], title: string): void {
+  const done = new Set<number>();
+  K4_CHUNKS.forEach((chunk, index) => {
+    it(`${title}（第 ${index + 1}/${K4_CHUNKS.length} 段：種子 ${chunk[0]} 到 ${chunk[chunk.length - 1]}）`, () => {
+      const outcome = runCheck(check, entry, chunk);
+      if (typeof outcome === 'object') {
+        throw new Error(outcome.fail);
+      }
+      expect(outcome).toBe('pass');
+      done.add(index);
+    }, 60_000);
+  });
+  it(title, () => {
+    expect([...done].sort(), '有一段沒有跑完或沒有通過').toEqual(K4_CHUNKS.map((_, i) => i));
   });
 }

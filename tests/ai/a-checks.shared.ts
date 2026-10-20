@@ -2,7 +2,16 @@ import { describe, expect, it } from 'vitest';
 
 import { CARD_IDS, registry } from '../../src/games/registry';
 import type { RegistryEntry } from '../../src/games/types';
-import { AI_CHECKS, AI_SEEDS, notApplicableReason, runCheck } from '../contract/checks';
+import {
+  AI_CHECKS,
+  AI_CHUNKS,
+  AI_SEEDS,
+  aiChunkPoints,
+  judgeAiPoints,
+  notApplicableReason,
+  runCheck,
+  type ChunkedAiCode,
+} from '../contract/checks';
 import { counterEntry } from '../fixtures/counter-entry';
 
 /**
@@ -83,6 +92,10 @@ export function defineAChecks(bucket: Bucket): void {
         it.skip(`${title}（不適用：${why}）`, () => undefined);
         continue;
       }
+      if (CHUNKED_CODES.includes(check.code)) {
+        defineChunked(entry, check.code as ChunkedAiCode, title);
+        continue;
+      }
       it(
         title,
         () => {
@@ -95,5 +108,32 @@ export function defineAChecks(bucket: Bucket): void {
         120_000,
       );
     }
+  });
+}
+
+/** 會分段的檢查（A5 量時間，在 tests/timing/ 跑，不在這裡）。 */
+const CHUNKED_CODES: readonly string[] = ['A1', 'A2', 'A3', 'A4'];
+
+/**
+ * A1–A4 分段：100 個種子切成 `AI_CHUNKS`，每段一個測試案例（各自 120 秒），
+ * 最後一個案例把各段得分加總、用同一個判準判一次。種子數與門檻都沒動（見 `check-chunks.test.ts`）。
+ * 為什麼：C-8 的 A4 在 CI 要 134 秒（上限 120 秒），CI 約比本機慢 3 倍；成本在控制器與評估，
+ * 一次跑完的案例只會隨牌變慢。分段後單一案例只有四分之一。
+ * 任何一段沒跑完（出錯、逾時、被 `-t` 濾掉）加總的案例就失敗，不會因為少了一段而假裝通過。
+ */
+function defineChunked(entry: RegistryEntry, code: ChunkedAiCode, title: string): void {
+  const done = new Map<number, number>();
+  AI_CHUNKS.forEach((chunk, index) => {
+    it(`${title}（第 ${index + 1}/${AI_CHUNKS.length} 段：種子 ${chunk[0]} 到 ${chunk[chunk.length - 1]}）`, () => {
+      done.set(index, aiChunkPoints(code, entry, chunk));
+    }, 120_000);
+  });
+  it(title, () => {
+    expect([...done.keys()].sort(), '有一段沒有跑完').toEqual(AI_CHUNKS.map((_, i) => i));
+    let points = 0;
+    for (const value of done.values()) {
+      points += value;
+    }
+    judgeAiPoints(code, entry, points, AI_SEEDS.length);
   });
 }

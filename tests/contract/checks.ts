@@ -62,6 +62,24 @@ export type CheckCode =
 export const CONTRACT_SEEDS: readonly number[] = Array.from({ length: 20 }, (_, i) => i);
 /** K12 用 200 個種子。 */
 export const SYMMETRY_SEEDS: readonly number[] = Array.from({ length: 200 }, (_, i) => i);
+
+/**
+ * 把種子清單連續地切成 `count` 段：不漏不重，段長相差不超過 1。
+ * A1–A4 與 K4 的分段用它（K12 的 `SYMMETRY_CHUNKS` 是更早的、種子數固定可整除的寫法，沒動）。
+ */
+export function splitSeeds(seeds: readonly number[], count: number): (readonly number[])[] {
+  return Array.from({ length: count }, (_, i) =>
+    seeds.slice(
+      Math.floor((i * seeds.length) / count),
+      Math.floor(((i + 1) * seeds.length) / count),
+    ),
+  );
+}
+
+/** K4 分成幾段（每段各自一個測試案例，見 `all-games.shared.ts`）。D-7 的 K4 本機約 50 秒、CI 約 3 倍。 */
+const K4_CHUNK_COUNT = 4;
+/** K4 的分段：連續、不漏不重，合起來恰好是 `CONTRACT_SEEDS`。判準（每個 tick 都不可以違約）是逐種子的，所以不用加總。 */
+export const K4_CHUNKS: readonly (readonly number[])[] = splitSeeds(CONTRACT_SEEDS, K4_CHUNK_COUNT);
 /** SPEC 第 9 節：除非小規格另外寫，一局 3600 tick。 */
 export const CONTRACT_CONFIG: GameConfig = { maxTicks: 3600, params: {} };
 
@@ -842,31 +860,108 @@ function pct(rate: number): string {
   return `${(rate * 100).toFixed(1)}%`;
 }
 
+/** A1–A4 的種子分成幾段（每段各自一個測試案例，見 `a-checks.shared.ts`）。C-8 的 A4 在 CI 要 134 秒，上限 120 秒。 */
+const AI_CHUNK_COUNT = 4;
+/** A1–A4 的分段：連續、不漏不重，合起來恰好是 `AI_SEEDS`。 */
+export const AI_CHUNKS: readonly (readonly number[])[] = splitSeeds(AI_SEEDS, AI_CHUNK_COUNT);
+
+/** 會分段的 A 檢查（A5 量時間，不在這裡）。 */
+export type ChunkedAiCode = 'A1' | 'A2' | 'A3' | 'A4';
+
+/**
+ * A1–A4 在這些種子上的得分（贏一場 1、平手 0.5）。一次只算一個種子的 `winRate`（÷1 不損失精度），
+ * 再依序相加；得分都是 0.5 的倍數，所以任意分段相加的總和與一次跑完逐位元相同。
+ */
+export function aiChunkPoints(
+  code: ChunkedAiCode,
+  entry: RegistryEntry,
+  seeds: readonly number[],
+): number {
+  try {
+    const policy = requirePolicy(entry);
+    let points = 0;
+    for (const seed of seeds) {
+      const one = [seed];
+      switch (code) {
+        case 'A1':
+          points += winRate(entry.game, policy, 5, randomPolicy, 10, one);
+          break;
+        case 'A2':
+          points += winRate(entry.game, policy, 9, policy, 2, one);
+          break;
+        case 'A3':
+          points += winRate(entry.game, humanPolicy, HUMAN_LEVEL, policy, 1, one);
+          break;
+        case 'A4':
+          points += winRate(entry.game, humanPolicy, HUMAN_LEVEL, policy, 10, one);
+          break;
+      }
+    }
+    return points;
+  } catch (error) {
+    if (error instanceof ContractViolation) {
+      throw error;
+    }
+    throw new ContractViolation(code, `遊戲丟出錯誤：${errorText(error)}`);
+  }
+}
+
+/** A1–A4 的判準：勝率（得分 ÷ 場數）對門檻。分段跑與一次跑完共用這一份，訊息逐字相同。 */
+export function judgeAiPoints(
+  code: ChunkedAiCode,
+  entry: RegistryEntry,
+  points: number,
+  matches: number,
+): void {
+  const thresholds = aiThresholds(entry.meta);
+  const rate = points / matches;
+  switch (code) {
+    case 'A1':
+      if (!(rate >= thresholds.a1)) {
+        violation(
+          'A1',
+          `${matches} 場，勝率 ${pct(rate)}，至少要 ${pct(thresholds.a1)}（等級 5 對 random）`,
+        );
+      }
+      break;
+    case 'A2':
+      if (!(rate >= thresholds.a2)) {
+        violation(
+          'A2',
+          `${matches} 場，勝率 ${pct(rate)}，至少要 ${pct(thresholds.a2)}（等級 9 對等級 2）`,
+        );
+      }
+      break;
+    case 'A3':
+      if (!(rate >= thresholds.a3)) {
+        violation(
+          'A3',
+          `${matches} 場，human-model 的勝率 ${pct(rate)}，至少要 ${pct(thresholds.a3)}（對等級 1）`,
+        );
+      }
+      break;
+    case 'A4':
+      if (!(rate <= thresholds.a4)) {
+        violation(
+          'A4',
+          `${matches} 場，human-model 的勝率 ${pct(rate)}，最多只能 ${pct(thresholds.a4)}（對等級 10）`,
+        );
+      }
+      break;
+  }
+}
+
 /** A1 AI 比亂按強：預設性格等級 5 對 random，勝率至少 75%（luckHeavy 60%）。 */
 export function checkAiBeatsRandom(
   entry: RegistryEntry,
   seeds: readonly number[] = AI_SEEDS,
 ): void {
-  const need = aiThresholds(entry.meta).a1;
-  const rate = measureA1(entry, seeds);
-  if (!(rate >= need)) {
-    violation(
-      'A1',
-      `${seeds.length} 場，勝率 ${pct(rate)}，至少要 ${pct(need)}（等級 5 對 random）`,
-    );
-  }
+  judgeAiPoints('A1', entry, aiChunkPoints('A1', entry, seeds), seeds.length);
 }
 
 /** A2 等級有意義：預設性格等級 9 對等級 2，勝率至少 60%（luckHeavy 55%）。 */
 export function checkLevelMatters(entry: RegistryEntry, seeds: readonly number[] = AI_SEEDS): void {
-  const need = aiThresholds(entry.meta).a2;
-  const rate = measureA2(entry, seeds);
-  if (!(rate >= need)) {
-    violation(
-      'A2',
-      `${seeds.length} 場，勝率 ${pct(rate)}，至少要 ${pct(need)}（等級 9 對等級 2）`,
-    );
-  }
+  judgeAiPoints('A2', entry, aiChunkPoints('A2', entry, seeds), seeds.length);
 }
 
 /** A3 人打得贏第一級：human-model 對預設性格等級 1，勝率至少 45%。 */
@@ -874,14 +969,7 @@ export function checkHumanBeatsLevel1(
   entry: RegistryEntry,
   seeds: readonly number[] = AI_SEEDS,
 ): void {
-  const need = aiThresholds(entry.meta).a3;
-  const rate = measureA3(entry, seeds);
-  if (!(rate >= need)) {
-    violation(
-      'A3',
-      `${seeds.length} 場，human-model 的勝率 ${pct(rate)}，至少要 ${pct(need)}（對等級 1）`,
-    );
-  }
+  judgeAiPoints('A3', entry, aiChunkPoints('A3', entry, seeds), seeds.length);
 }
 
 /** A4 人打不太贏第十級：human-model 對預設性格等級 10，勝率最多 35%。 */
@@ -889,14 +977,7 @@ export function checkHumanLosesToLevel10(
   entry: RegistryEntry,
   seeds: readonly number[] = AI_SEEDS,
 ): void {
-  const limit = aiThresholds(entry.meta).a4;
-  const rate = measureA4(entry, seeds);
-  if (!(rate <= limit)) {
-    violation(
-      'A4',
-      `${seeds.length} 場，human-model 的勝率 ${pct(rate)}，最多只能 ${pct(limit)}（對等級 10）`,
-    );
-  }
+  judgeAiPoints('A4', entry, aiChunkPoints('A4', entry, seeds), seeds.length);
 }
 
 /**
