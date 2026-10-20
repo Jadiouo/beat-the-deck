@@ -120,6 +120,8 @@ export function ladderPoints(pot0: number, pot1: number): readonly [number, numb
 
 /** 反射規則的小加分：遠小於任何真正的期望值差。 */
 export const HABIT = 0.01;
+/** 反射規則：自己這層成功率超過這個數就爬（深度 1、2 與一步看的性格）。 */
+export const REFLEX_P = 0.6;
 
 // ---------------------------------------------------------------------------
 // 對手模型（只讀公開資訊）
@@ -609,7 +611,7 @@ function evaluateH8(state: H8State, side: Side): { gain: number; danger: number 
   if (state.phase === 'choose' || state.phase === 'locked') {
     // 淺搜尋（深度 1、2）只走到這裡，所以只剩反射規則：自己這層 p > 0.5 就爬，不管對方是誰、爬到哪。
     const p = successProb(state.level[side], state.q[side]);
-    const reflex: Act = p > 0.5 ? CLIMB : STOP;
+    const reflex: Act = p > REFLEX_P ? CLIMB : STOP;
     return {
       gain: diff + (mine === reflex ? HABIT : 0),
       danger: mine === CLIMB ? 1 - p : 0,
