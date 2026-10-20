@@ -829,10 +829,27 @@ describe('S-6 節拍｜不偷看（evaluate、actions、decide 不讀對手正�
   });
 
   it('黑箱偵測器會紅：故意洩漏的 evaluate 讓精準型的決定隨對手草稿改變', () => {
+    // 對手的歷史要是「不穩」的：精準型在沒有資料（先驗）時本來就不出額外的音（danger 擋下），
+    // 洩漏的 gain 加分也蓋不過它；偵測器要在精準型會出音的局面上才有意義。
+    const shaky: Skill = {
+      ...SKILL0,
+      laneE: [0, 0, 0, 0],
+      laneN: [4, 4, 4, 4],
+      laneZ: [4, 4, 4, 4],
+      gapE: [0, 0],
+      gapN: [8, 8],
+      gapZ: [8, 8],
+      zeros: 16,
+      notes: 16,
+    };
     let changed = false;
     for (const phaseTick of [24, 48, 72]) {
       const presses = VARIANTS.map((v) => {
-        const s = { ...stateWith(1, v, phaseTick), composing: [v[0], []] as const };
+        const s = {
+          ...stateWith(1, v, phaseTick),
+          history: [[shaky, shaky, shaky], []] as const,
+          composing: [v[0], []] as const,
+        };
         return JSON.stringify(
           precise.decide(leaky, s as unknown as S6State, 1, phaseTick, { depth: 1, seed: 1 }),
         );
