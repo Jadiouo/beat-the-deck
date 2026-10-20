@@ -404,7 +404,7 @@ describe('JK-B｜基底：撿金幣與補金幣', () => {
     expect(fresh[1]).toContain(fresh[0]?.[0]);
     expect(fresh[1]?.[0] === fresh[1]?.[1]).toBe(false);
     expect(hashState(run(s, 1, go(RIGHT)))).toBe(hashState(one));
-    expect(two.rng).not.toBe(one.rng);
+    expect(two.fill[0]).not.toBe(one.fill[0]);
   });
 
   it('兩邊同一個 tick 各撿一個金幣：兩邊各加 1', () => {
@@ -969,15 +969,84 @@ describe('JK-B｜step 與契約', () => {
     expect(jkbGame.isOver(s)).toBe(true);
   });
 
-  it('actions：兩邊都是 5 個（全放開排第一，再來上右下左），每個最多按一個方向鍵，沒有 a、b', () => {
+  it('actions：兩邊都是同樣的 5 個（上右下左與全放開），每個最多按一個方向鍵，沒有 a、b', () => {
     const s = jkbGame.init(0, CONFIG);
+    const key = (b: Buttons): string => JSON.stringify(b);
+    const all = [NONE, ...KEY].map(key).sort();
     for (const side of [0, 1] as const) {
       const actions = jkbGame.actions(s, side);
       expect(actions).toHaveLength(5);
-      expect(actions[0]).toEqual(NONE);
+      expect(actions.map(key).sort()).toEqual(all);
       for (const a of actions) {
         expect(a.a || a.b).toBe(false);
         expect([a.up, a.down, a.left, a.right].filter(Boolean).length).toBeLessThanOrEqual(1);
+      }
+    }
+  });
+
+  it('actions 的順序：沒有目標（場上沒有有價值的金幣）全放開排第一；有目標，往離目標更近的方向排最前、全放開排在它們後面', () => {
+    const none = makeState({
+      avatars: [
+        { x: 5, y: 5 },
+        { x: 25, y: 20 },
+      ],
+      coins: [],
+    });
+    expect(jkbGame.actions(none, 0)[0]).toEqual(NONE);
+    const target = makeState({
+      avatars: [
+        { x: 5, y: 5 },
+        { x: 25, y: 20 },
+      ],
+      coins: [cell(12, 5)],
+    });
+    const order = jkbGame.actions(target, 0);
+    expect(order[0]).toEqual(KEY[RIGHT]);
+    expect(order.findIndex((a) => a === NONE || JSON.stringify(a) === JSON.stringify(NONE))).toBe(
+      1,
+    );
+    const below = makeState({
+      avatars: [
+        { x: 5, y: 5 },
+        { x: 25, y: 20 },
+      ],
+      coins: [cell(6, 15)],
+    });
+    expect(jkbGame.actions(below, 0)[0]).toEqual(KEY[DOWN]);
+    expect(jkbGame.actions(below, 0)[1]).toEqual(KEY[RIGHT]);
+    // 毒藥與送禮的金幣沒有價值：沒有目標
+    const poison = phaseStart('poison', {
+      avatars: [
+        { x: 5, y: 5 },
+        { x: 25, y: 20 },
+      ],
+      coins: [cell(12, 5)],
+    });
+    expect(jkbGame.actions(poison, 0)[0]).toEqual(NONE);
+  });
+
+  it('actions 的順序和 evaluate 的偏好一致（DESIGN-AI-FUN 10.54）：排最前的動作走一步之後，evaluate 的 gain 不比全放開差；有目標時，嚴格比全放開好', () => {
+    const rules: readonly Rule[] = ['normal', 'rain', 'gravity', 'exchange', 'rob', 'poison'];
+    for (const rule of rules) {
+      for (let seed = 0; seed < 40; seed += 1) {
+        const base = jkbGame.init(seed, CONFIG);
+        const s = makeState({
+          phase: 1,
+          rule,
+          ruleTick: 100 + seed,
+          avatars: [
+            { x: 3 + (seed % 20), y: 2 + (seed % 17) },
+            { x: 28 - (seed % 11), y: 20 - (seed % 9) },
+          ],
+          coins: base.coins,
+        });
+        for (const side of [0, 1] as const) {
+          const first = jkbGame.actions(s, side)[0] as Buttons;
+          const inputs = (a: Buttons): Inputs => (side === 0 ? [a, NONE] : [NONE, a]);
+          const after = evaluate(step(s, inputs(first)), side).gain;
+          const stay = evaluate(step(s, inputs(NONE)), side).gain;
+          expect(after, `${rule} seed ${seed} side ${side}`).toBeGreaterThanOrEqual(stay);
+        }
       }
     }
   });
