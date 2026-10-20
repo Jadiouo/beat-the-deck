@@ -722,6 +722,50 @@ describe('C-Q 兩條蛇｜evaluate', () => {
   });
 });
 
+describe('C-Q 兩條蛇｜selfFromPresent（反應延遲的重播重現不出「被僚機鎖定」這個外力）', () => {
+  const hook = (
+    cqGame as unknown as {
+      selfFromPresent: (replayed: CQState, present: CQState, side: 0 | 1) => CQState;
+    }
+  ).selfFromPresent;
+
+  it('宣告了 hook；自己的主蛇、鎖定、免疫、僚機、冷卻取現在的，對手的與食物維持重播的樣子', () => {
+    expect(typeof hook).toBe('function');
+    const replayed = makeState({ tick: 50, foods: [cell(1, 1), cell(2, 2)], reload: [7, 8] });
+    const present = makeState({
+      tick: 62,
+      foods: [cell(9, 9), cell(8, 8)],
+      reload: [1, 2],
+      lock: [2, 3],
+      immune: [4, 5],
+      snakes: [{ body: [cell(9, 12), cell(8, 12), cell(7, 12)], score: 3 }, { score: 5 }],
+      drone: [{ cell: cell(3, 3), tail: [], aim: cell(4, 4), ttl: 100, nextAim: 70 }, null],
+      hits: [1, 2],
+      launches: [3, 4],
+    });
+    const believed = hook(replayed, present, 0);
+    expect(believed.snakes[0]).toEqual(present.snakes[0]);
+    expect(believed.lock[0]).toBe(2);
+    expect(believed.immune[0]).toBe(4);
+    expect(believed.reload[0]).toBe(1);
+    expect(believed.drone[0]).toEqual(present.drone[0]);
+    expect(believed.hits[0]).toBe(1);
+    expect(believed.launches[0]).toBe(3);
+    // 對手與世界是重播（舊）的
+    expect(believed.snakes[1]).toEqual(replayed.snakes[1]);
+    expect(believed.lock[1]).toBe(0);
+    expect(believed.reload[1]).toBe(8);
+    expect(believed.foods).toEqual(replayed.foods);
+    expect(believed.tick).toBe(50);
+  });
+
+  it('不改動傳進來的兩個 state', () => {
+    const replayed = deepFreeze(makeState({ tick: 50 }));
+    const present = deepFreeze(makeState({ tick: 62, lock: [2, 0] }));
+    expect(() => hook(replayed, present, 1)).not.toThrow();
+  });
+});
+
 describe('C-Q 兩條蛇｜meta 與畫面', () => {
   it('meta：id、花色、點數、預設性格、對稱、死亡優先', () => {
     expect(cqMeta.id).toBe('C-Q');
