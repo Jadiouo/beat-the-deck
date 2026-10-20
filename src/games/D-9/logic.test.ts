@@ -1050,3 +1050,145 @@ describe('D-9 擺放｜四個性格的機制（10.48：測機制，不測症狀�
     }));
   }
 });
+
+// ---------------------------------------------------------------------------
+// 獨佔規則（小規格十：config.params.cap、config.params.contest；預設值 = 舊規則）
+// ---------------------------------------------------------------------------
+
+describe('D-9 擺放｜獨佔規則 cap／contest', () => {
+  const cfg = (params: Record<string, number>) => ({ maxTicks: 3600, params });
+
+  it('E1. 參數：預設 cap = 2、contest = 0；params 給 1 就是 1；其他值夾回 1 到 2 與 0 到 1', () => {
+    const d = d9Game.init(0, CONFIG);
+    expect([d.cap, d.contest]).toEqual([2, 0]);
+    const e = d9Game.init(0, cfg({ cap: 1, contest: 1 }));
+    expect([e.cap, e.contest]).toEqual([1, 1]);
+    const big = d9Game.init(0, cfg({ cap: 9, contest: 7 }));
+    expect([big.cap, big.contest]).toEqual([2, 1]);
+    const small = d9Game.init(0, cfg({ cap: 0, contest: -3 }));
+    expect([small.cap, small.contest]).toEqual([1, 0]);
+    expect([makeState().cap, makeState().contest]).toEqual([2, 0]);
+  });
+
+  it('E2. cap = 1：礦脈已有 1 個採集器（free = 0），再擺的人作廢；空的礦脈單獨擺成', () => {
+    const held = placing({ cap: 1, round: 1, coll: [{ dep: 9, owner: 0, round: 0 }] });
+    const run = toRun(held, 9, 8);
+    expect(run.last?.voided).toEqual([true, false]);
+    expect(run.coll.filter((c) => c.round === 1)).toEqual([{ dep: 8, owner: 1, round: 1 }]);
+  });
+
+  it('E3.（邊界）cap = 1、contest = 0：同一輪兩邊挑同一個空礦脈 → 兩邊都作廢、沒有採集器；只有一邊挑就擺成；cap = 2 同樣的挑法兩個都擺成（舊規則不變）', () => {
+    const clash = toRun(placing({ cap: 1 }), 9, 9);
+    expect(clash.coll).toEqual([]);
+    expect(clash.last?.voided).toEqual([true, true]);
+    const alone = toRun(placing({ cap: 1 }), 9, 8);
+    expect(alone.coll).toEqual([
+      { dep: 9, owner: 0, round: 0 },
+      { dep: 8, owner: 1, round: 0 },
+    ]);
+    const old = toRun(placing({ cap: 2 }), 9, 9);
+    expect(old.coll).toHaveLength(2);
+    expect(old.last?.voided).toEqual([false, false]);
+  });
+
+  it('E4. cap = 1、contest = 1：搶同一個礦脈時，第 r 輪優先權在 r % 2 號邊——那一邊拿到、另一邊作廢；挑不同的礦脈兩邊都擺成', () => {
+    const r0 = toRun(placing({ cap: 1, contest: 1, round: 0 }), 9, 9);
+    expect(r0.coll).toEqual([{ dep: 9, owner: 0, round: 0 }]);
+    expect(r0.last?.voided).toEqual([false, true]);
+    const r1 = toRun(placing({ cap: 1, contest: 1, round: 1 }), 9, 9);
+    expect(r1.coll).toEqual([{ dep: 9, owner: 1, round: 1 }]);
+    expect(r1.last?.voided).toEqual([true, false]);
+    const r2 = toRun(placing({ cap: 1, contest: 1, round: 2 }), 9, 9);
+    expect(r2.last?.voided).toEqual([false, true]);
+    const apart = toRun(placing({ cap: 1, contest: 1, round: 0 }), 9, 8);
+    expect(apart.last?.voided).toEqual([false, false]);
+    expect(apart.coll).toHaveLength(2);
+  });
+
+  it('E5. 優先權只管「搶同一個」：礦脈已被占（free = 0）時，優先權的一邊也作廢', () => {
+    const held = placing({
+      cap: 1,
+      contest: 1,
+      round: 2,
+      coll: [{ dep: 9, owner: 1, round: 0 }],
+    });
+    const run = toRun(held, 9, 9);
+    expect(run.last?.voided).toEqual([true, true]);
+    expect(run.coll).toHaveLength(1);
+  });
+
+  it('E6. cap = 1 的抽取：一個採集器獨吞，存量夠就每次 1 單位、一輪 8 次；整場 JSON 來回不變、打得完', () => {
+    const run = toRun(placing({ cap: 1 }), 9, PASS);
+    const done = stepN(run, RUN_TICKS);
+    expect(done.drawn).toEqual([8, 0]);
+    expect(done.deposits[9]?.stock).toBe(12);
+    const s = d9Game.init(3, cfg({ cap: 1 }));
+    expect(JSON.parse(JSON.stringify(s))).toEqual(s);
+    const a = levelController(d9Game, pathfinder, 5, 1);
+    const b = levelController(d9Game, pathfinder, 5, 2);
+    const m = playMatch(d9Game, 3, cfg({ cap: 1 }), a, b);
+    expect(m.ticks).toBeLessThanOrEqual(3600);
+  });
+
+  it('E7. 名次：cap = 1 時有 1 個採集器的礦脈就不能擺，排在能擺的後面；cap = 2 仍然能擺', () => {
+    const coll = [{ dep: 9, owner: 0 as const, round: 0 }];
+    const one = ranksOf(placing({ cap: 1, round: 1, coll }));
+    expect(one[9]).toBe(DEPOSITS); // 不能擺的排最後（唯一一個）
+    expect(one[8]).toBe(1); // 剩下最肥的
+    const two = ranksOf(placing({ cap: 2, round: 1, coll }));
+    expect(two[9]).toBeLessThan(DEPOSITS);
+  });
+
+  it('E8. predictOpponent：cap = 1 時被占的礦脈機率是 0，其餘總和是 1', () => {
+    const s = placing({ cap: 1, round: 1, coll: [{ dep: 9, owner: 0, round: 0 }] });
+    const q = predictOpponent(s.history, s, 0);
+    expect(q[9]).toBe(0);
+    expect(q.reduce((x, y) => x + y, 0)).toBeCloseTo(1, 9);
+  });
+
+  it('E9. danger：cap = 1 時每個還能擺的礦脈都是「搶了會雙雙落空」，danger 等於對手也挑它的機率（不是 0）；contest = 1 時有優先權的一邊是 0、沒有的一邊仍是機率', () => {
+    const s = placing({ cap: 1, sel: [9, 9] });
+    const q = predictOpponent(s.history, s, 0);
+    const locked = d9Game.step(s, both(KEY_LOCK, IDLE));
+    expect(q[9]).toBeGreaterThan(0.3);
+    expect(d9Game.evaluate(locked, 0).danger).toBeCloseTo(q[9] as number, 9);
+    // 優先權：第 0 輪在 0 號邊
+    const pr = placing({ cap: 1, contest: 1, sel: [9, 9] });
+    const l0 = d9Game.step(pr, both(KEY_LOCK, KEY_LOCK));
+    expect(d9Game.evaluate(l0, 0).danger).toBe(0);
+    expect(d9Game.evaluate(l0, 1).danger).toBeGreaterThan(0.3);
+  });
+
+  it('E10. 獨佔規則下仍然不偷看：只有對手 sel／pending 不同的 state，evaluate 與 actions 相同（兩邊、cap = 1 與 contest = 1 都測）', () => {
+    for (const extra of [{ cap: 1 }, { cap: 1, contest: 1 }] as const) {
+      for (const side of [0, 1] as const) {
+        const opp = side === 0 ? 1 : 0;
+        const a = placing({ ...extra, sel: [3, 3], round: 1, coll: [{ dep: 9, owner: 0, round: 0 }] });
+        const p1 = [a.pending[0], a.pending[1]] as [number | null, number | null];
+        const p2 = [a.pending[0], a.pending[1]] as [number | null, number | null];
+        p1[opp] = 8;
+        p2[opp] = 2;
+        const sel2 = [a.sel[0], a.sel[1]] as [number, number];
+        sel2[opp] = 5;
+        const x: D9State = { ...a, pending: p1 };
+        const y: D9State = { ...a, pending: p2, sel: sel2 };
+        expect(d9Game.evaluate(x, side)).toEqual(d9Game.evaluate(y, side));
+        expect(d9Game.actions(x, side)).toEqual(d9Game.actions(y, side));
+      }
+    }
+  });
+
+  it('E11. 預設不變：不傳 cap／contest 與傳 cap = 2、contest = 0 的整場結果逐位元相同', () => {
+    for (const seed of [0, 1, 2]) {
+      const run = (params: Record<string, number>) => {
+        const a = levelController(d9Game, pathfinder, 6, seed + 11);
+        const b = levelController(d9Game, pathfinder, 4, seed + 13);
+        return playMatch(d9Game, seed, cfg(params), a, b);
+      };
+      const base = run({});
+      const explicit = run({ cap: 2, contest: 0 });
+      expect(explicit.finalHash).toBe(base.finalHash);
+      expect(explicit.score).toEqual(base.score);
+    }
+  });
+});
