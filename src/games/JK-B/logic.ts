@@ -144,6 +144,14 @@ export function initState(seed: number, config: GameConfig): JKBState {
     pool[j] = keep;
   }
   const schedule: Rule[] = ['normal', ...pool.slice(0, PHASES - 1)];
+  // 分數互換不排在最後一段（小規格決定 9 的觸發條件被量到：最後一段是互換時 AI 勝率 51.3%，其他段 63.6% 到 93.9%）：
+  // 排到最後一段就和前 4 段（第 1 到 4 段）裡的一段對調，那一段由亂數挑，所以互換在第 1 到 4 段各占一樣的機率。
+  if (schedule[PHASES - 1] === 'exchange') {
+    const [pick] = intFrom(shuffle, PHASES - 2);
+    const partner = 1 + pick;
+    schedule[PHASES - 1] = schedule[partner] as Rule;
+    schedule[partner] = 'exchange';
+  }
   const avatars: [JKBAvatar, JKBAvatar] = [
     { x: 6, y: 12, shoveCd: 0, want: -1 },
     { x: 25, y: 11, shoveCd: 0, want: -1 },
