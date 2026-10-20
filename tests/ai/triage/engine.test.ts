@@ -12,6 +12,7 @@ import {
   getAt,
   measureCard,
   perturbOpponent,
+  perturbRelaxed,
   perturbSelf,
   pickQueries,
   sameOutside,
@@ -152,11 +153,12 @@ describe('擾動只動對手（C-A 與 D-A）', { timeout: 60_000 }, () => {
           const before = JSON.stringify(q.state);
           const out = perturbOpponent(spec, q, donors, det, 6);
           expect(JSON.stringify(q.state)).toBe(before); // 輸入沒被改
-          const oppPaths = spec.comp(q.ai === 0 ? 1 : 0);
-          const ownPaths = spec.comp(q.ai);
+          const oppPaths = [...spec.comp(q.ai === 0 ? 1 : 0, q.state), ...(spec.mixed ?? [])];
+          const ownPaths = spec.comp(q.ai, q.state);
           for (const p of out.list) {
             total += 1;
             expect(sameOutside(p.state, q.state, oppPaths)).toBe(true);
+            expect(spec.mixedOk?.(q.state, p.state, q.ai) ?? true).toBe(true);
             for (const path of ownPaths) {
               expect(JSON.stringify(getAt(p.state, path))).toBe(
                 JSON.stringify(getAt(q.state, path)),
@@ -181,7 +183,9 @@ describe('擾動只動對手（C-A 與 D-A）', { timeout: 60_000 }, () => {
         const out = perturbSelf(spec, q, donorsFor(seedCorpus, q), det, 4);
         for (const p of out.list) {
           total += 1;
-          expect(sameOutside(p.state, q.state, spec.comp(q.ai))).toBe(true);
+          expect(
+            sameOutside(p.state, q.state, [...spec.comp(q.ai, q.state), ...(spec.mixed ?? [])]),
+          ).toBe(true);
         }
       }
       expect(total).toBeGreaterThan(3);
@@ -209,6 +213,50 @@ describe('擾動只動對手（C-A 與 D-A）', { timeout: 60_000 }, () => {
       }
     }
     expect(flips).toBeGreaterThanOrEqual(0);
+  });
+});
+
+describe('放寬模式（D-6：對手的歷史與現金和共用價格偏移糾纏）', { timeout: 60_000 }, () => {
+  const { corpus, spec } = smallCorpus('D-6');
+  const det = new Det(31, 'relaxed');
+
+  it('乾淨模式只動 pending；放寬模式另外動糾纏欄位，其餘逐位元不變，且標成 relaxed', () => {
+    let relaxedTotal = 0;
+    for (const seedCorpus of corpus.seeds) {
+      for (const q of pickQueries(spec.game, seedCorpus, 20, det)) {
+        const o = q.ai === 0 ? 1 : 0;
+        const donors = donorsFor(seedCorpus, q);
+        const clean = perturbOpponent(spec, q, donors, det, 4);
+        for (const p of clean.list) {
+          expect(sameOutside(p.state, q.state, spec.comp(o, q.state))).toBe(true);
+        }
+        const relaxed = perturbRelaxed(spec, q, donors, det, 4);
+        const allowed = [...spec.comp(o, q.state), ...(spec.entangled?.(o, q.state) ?? [])];
+        for (const p of relaxed.list) {
+          relaxedTotal += 1;
+          expect(p.kind.startsWith('relaxed')).toBe(true);
+          expect(sameOutside(p.state, q.state, allowed)).toBe(true);
+          // 自己的現金、存貨、歷史裡自己的那一格都不動。
+          for (const path of [`cash.${q.ai}`, `inv.${q.ai}`]) {
+            expect(JSON.stringify(getAt(p.state, path))).toBe(JSON.stringify(getAt(q.state, path)));
+          }
+        }
+      }
+    }
+    expect(relaxedTotal).toBeGreaterThan(0);
+  });
+
+  it('沒有宣告 entangled 的牌，放寬模式不產生任何擾動', () => {
+    const c = smallCorpus('C-A');
+    const q = pickQueries(
+      c.spec.game,
+      c.corpus.seeds[0] as (typeof c.corpus.seeds)[number],
+      3,
+      det,
+    )[0];
+    expect(q).toBeDefined();
+    const out = perturbRelaxed(c.spec, q as Query<never>, { sameTick: [], otherTick: [] }, det, 4);
+    expect(out.list.length).toBe(0);
   });
 });
 
@@ -310,6 +358,7 @@ describe('Wilson 區間與分類門檻（量之前固定，10.54）', () => {
         noflip: { queries: 1000, changed: Math.round(rate * 1000) },
         byKind: {},
         byPath: {},
+        relaxed: { queries: 0, changed: 0 },
         self: { queries: 1000, changed: Math.round(selfRate * 1000) },
         nullChanged: 0,
       };
@@ -335,5 +384,27 @@ describe('Wilson 區間與分類門檻（量之前固定，10.54）', () => {
     expect(grey.verdict).toBe('grey');
     const constant = classify(fake({ 'precise@10': 0, 'pathfinder@10': 0 }, 0));
     expect(constant.verdict).toBe('constant-policy');
+  });
+
+  it('分類：乾淨為零但放寬很高 → 無法乾淨篩檢（AI 讀的是糾纏欄位）；放寬也低 → 結構零', () => {
+    const base = fake({ 'precise@10': 0, 'pathfinder@10': 0 }, 0.5);
+    const withRelaxed = (rate: number): CardMeasure => ({
+      ...base,
+      cells: base.cells.map((c) => ({
+        ...c,
+        relaxed: { queries: 1000, changed: Math.round(rate * 1000) },
+      })),
+    });
+    const entangled = classify(withRelaxed(0.2));
+    expect(entangled.verdict).toBe('not-screenable');
+    expect(entangled.rRelaxed).toBeCloseTo(0.2);
+    expect(classify(withRelaxed(0.003)).verdict).toBe('structural-zero');
+  });
+
+  it('分類：規格宣告 notScreenable 就是無法乾淨篩檢，附理由', () => {
+    const m = { ...fake({ 'precise@10': 0.3 }, 0.5), notScreenable: '沒有對手概念' };
+    const c = classify(m);
+    expect(c.verdict).toBe('not-screenable');
+    expect(c.reason).toContain('沒有對手概念');
   });
 });
