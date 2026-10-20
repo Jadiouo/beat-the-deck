@@ -222,6 +222,7 @@ AI 用的常數：`HOME_RADIUS = 10`、`HOME_TARGET = 40`、`HOME_WEIGHT = GAIN_
 
 - `logic.test.ts`（33 條）：時間表與 `stageOf` 邊界、過場不動、第 1 段分數、換段不重算、紅利（價值 9／8／1）、連結 2（含邊界）、連結 3、金幣分數、`STEAL_EXTRA` 各種邊界、零和方向（兩個方向）、對稱、時間到背包不算、整場可重播且不改動傳入的 state（深度凍結 3600 tick）。
 - `ai.test.ts`（13 條）：`actions` 排序（紅利壓過價值）、連結 1／2／3 進得了 `evaluate`、第 1 段家附近的 gain 與 danger、過場與結束可用、左右鏡像評估相同、`actions` 排序與 `evaluate` 一致（第 1、2、3 段各 ≥ 70%，量到 78.6／99.2／96.4）。
+- **最後一次檢查（工作樹含 `3da58bb`）：** `npx vitest run --project light` 3251 條通過、1 條紅（`registry.test.ts` 的登記順序：D-K 放在 D-Q 前面，已在 `3da58bb` 修好，單獨重跑 19 條全綠）；D-K 的契約（K1–K13、R1–R3）加 A1–A4 官方種子共 26 條通過（`--project heavy`，`-t D-K`）；`--project timing -t D-K`（K11、A5）2 條通過，當時 loadavg 3.9（> 2，機器上有別的 agent；A5 的數字用的是 loadavg 1.7 那一次）。**沒有跑 `npm run check` 全套，沒有跑 e2e。** `tsc --noEmit` 與 `eslint src/games/D-K` 乾淨。
 - `measure.test.ts`：局長、劇本玩家、三段比例、分數不被重算、探針 A′、反應速度（場數縮小，斷言留餘裕）。
 
 ## 為什麼跟 AI 互動起來好玩
