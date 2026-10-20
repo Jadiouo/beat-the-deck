@@ -145,6 +145,12 @@ export type ScriptKind =
    * 分數互換最後一秒看對手搆不搆得到金幣。
    */
   | 'c'
+  /**
+   * (c) 拿掉分數互換的特殊做法（互換時像 (b)）：事後另寫的敏感度分析，不是探針 A 的三組之一。
+   * 原因：(c) 在互換裡落後就馬上撿，而 AI 等到最後的走格 tick 才撿（小規格第 8 小節），所以 (c) 的互換做法是會輸的；
+   * 這一組只留下「讀對手的位置與冷卻」那幾項，看 (c) − (b) 為負是不是互換造成的。
+   */
+  | 'c2'
   /** 搶劫期間一直貼著對手推（其他時候像 (b)）：10.40 的候選支配策略。 */
   | 'chase'
   /** 任何規則下都貼著對手、只要推得動就推（把它推離金幣、推到毒藥上）。 */
@@ -238,7 +244,7 @@ export function wantFor(kind: ScriptKind, state: JKBState, side: Side): Want {
   }
 
   // ---- a / b / c（以及 chase 在搶劫以外的時候像 b）----
-  const level: 'a' | 'b' | 'c' = kind === 'a' ? 'a' : kind === 'c' ? 'c' : 'b';
+  const level: 'a' | 'b' | 'c' = kind === 'a' ? 'a' : kind === 'c' || kind === 'c2' ? 'c' : 'b';
   const avoidPoison = rule === 'poison' || rule === 'gift' ? noCoins : () => false;
 
   // 預告期的布局（預告是公開的，三組都做）
@@ -300,14 +306,14 @@ export function wantFor(kind: ScriptKind, state: JKBState, side: Side): Want {
       const behind = oppScore - myScore;
       const left = Math.min(PHASE_TICKS - ruleTick, state.maxTicks - state.tick);
       const nearest = nearestOf(here, state.coins);
-      if (level === 'c' && ruleTick >= PHASE_TICKS - FINAL_TICKS) {
+      if (kind === 'c' && ruleTick >= PHASE_TICKS - FINAL_TICKS) {
         // 最後 1 秒：落後 ≥ 2 而且對手搶不到就撿；領先而且對手搆得到就貼著金幣擋
         const oppReach = dist(theirs, nearestOf(theirs, state.coins)) * MOVE_EVERY <= left;
         if (behind >= 2 && !oppReach) {
           return nearest < 0 ? -1 : toward(me.x, me.y, nearest);
         }
       }
-      if (behind >= 2 || (level === 'c' && behind >= 1 && ruleTick < PHASE_TICKS - FINAL_TICKS)) {
+      if (behind >= 2 || (kind === 'c' && behind >= 1 && ruleTick < PHASE_TICKS - FINAL_TICKS)) {
         return nearest < 0 ? -1 : toward(me.x, me.y, nearest);
       }
       // 不撿：留在最近的金幣旁（距離 2），不踩到
