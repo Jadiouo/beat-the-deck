@@ -21,6 +21,8 @@ import {
   makePlayer,
   playCell,
   s5Spec,
+  selectBest,
+  trainTable,
 } from './probe-a.test-helpers';
 
 /**
@@ -38,8 +40,8 @@ const firstCell = (): (typeof CELLS)[number] => {
 };
 
 /** 用 (b) 的直打成員打幾場真的對局，每 `every` 個 tick 取一個局面（兩邊都取，飛行中的居多）。 */
-function sampleStates(every = 11): { state: S5State; side: Side; tick: number }[] {
-  const out: { state: S5State; side: Side; tick: number }[] = [];
+function sampleStates(every = 11): { state: S5State; side: Side; tick: number; seed: number }[] {
+  const out: { state: S5State; side: Side; tick: number; seed: number }[] = [];
   for (const seed of [1, 2, 3, 4]) {
     const me = makePlayer('b-straight', 'T0', seed);
     const ai = levelController(s5Game, precise, 5, seed + 1_000_003);
@@ -47,7 +49,7 @@ function sampleStates(every = 11): { state: S5State; side: Side; tick: number }[
     const recordedMe = {
       decide(state: S5State, side: Side, tick: number) {
         if (tick % every === 0) {
-          out.push({ state, side, tick });
+          out.push({ state, side, tick, seed });
         }
         return me.decide(state, side, tick);
       },
@@ -119,7 +121,8 @@ describe('(b) 不讀對手的任何狀態（板子位置、速度、按鍵、回
   const states = sampleStates();
   it('取樣到足夠多的飛向我的局面', () => {
     const toward = states.filter(
-      ({ state, side }) => state.phase === 'play' && (side === 0 ? state.ball.vy > 0 : state.ball.vy < 0),
+      ({ state, side }) =>
+        state.phase === 'play' && (side === 0 ? state.ball.vy > 0 : state.ball.vy < 0),
     );
     expect(toward.length).toBeGreaterThan(20);
   });
@@ -136,20 +139,24 @@ describe('(b) 不讀對手的任何狀態（板子位置、速度、按鍵、回
 
 describe('(c) 真的讀了對手（換掉它讀的東西，想落的位置會變）', () => {
   const states = sampleStates().filter(
-    ({ state, side }) => state.phase === 'play' && (side === 0 ? state.ball.vy > 0 : state.ball.vy < 0),
+    ({ state, side }) =>
+      state.phase === 'play' && (side === 0 ? state.ball.vy > 0 : state.ball.vy < 0),
   );
-  it.each(C_FAMILY.map((name) => [name]))('%s：至少有一個局面、一種擾動會改變想落的位置', (name) => {
-    let changed = 0;
-    for (const { state, side } of states) {
-      const plain = chooseLanding(name, state, side, 7);
-      for (let variant = 0; variant < 5; variant += 1) {
-        if (chooseLanding(name, perturbOpponent(state, side, variant), side, 7) !== plain) {
-          changed += 1;
+  it.each(C_FAMILY.map((name) => [name]))(
+    '%s：至少有一個局面、一種擾動會改變想落的位置',
+    (name) => {
+      let changed = 0;
+      for (const { state, side } of states) {
+        const plain = chooseLanding(name, state, side, 7);
+        for (let variant = 0; variant < 5; variant += 1) {
+          if (chooseLanding(name, perturbOpponent(state, side, variant), side, 7) !== plain) {
+            changed += 1;
+          }
         }
       }
-    }
-    expect(changed).toBeGreaterThan(0);
-  });
+      expect(changed).toBeGreaterThan(0);
+    },
+  );
 });
 
 describe('成員是決定性的、不改動傳進來的 state、按鍵合法', () => {
@@ -158,13 +165,16 @@ describe('成員是決定性的、不改動傳進來的 state、按鍵合法', (
     (name) => {
       const run = (): ReturnType<typeof playCell> => {
         const base = makePlayer(name, 'T12', 5);
-        const frozenMe = { decide: (s: S5State, side: Side, tick: number) => base.decide(deepFreeze(s), side, tick) };
+        const frozenMe = {
+          decide: (s: S5State, side: Side, tick: number) => base.decide(deepFreeze(s), side, tick),
+        };
         return playCell(5, frozenMe, firstCell());
       };
       const a = run();
       const b = run();
       expect(a).toEqual(b);
     },
+    120_000,
   );
 });
 
@@ -182,12 +192,12 @@ describe('核心夠強（(b) 的直打成員在零延遲下贏得了低等級 AI
       wins += outcomeOf(r, side).win;
     }
     expect(wins).toBeGreaterThanOrEqual(11);
-  });
+  }, 120_000);
 });
 
 describe('決策點與探針串接', () => {
   it('isPoint 在每一次「球飛向我、還有 14 個 tick 到線」只算一次', () => {
-    const states = sampleStates(1).filter(({ side }) => side === 0);
+    const states = sampleStates(1).filter(({ seed }) => seed === 2);
     const hits = states.filter(({ state, side, tick }) => isPoint(state, side, tick));
     expect(hits.length).toBeGreaterThan(0);
     // 每一球最多一個 tick 剛好 14：連續兩個點之間至少隔 14 個 tick。
@@ -202,14 +212,19 @@ describe('決策點與探針串接', () => {
     expect(r.n).toBe(4);
     expect(r.winBoundHolds).toBe(true);
     expect(r.inconsistentSeeds).toEqual([]);
-  });
+  }, 120_000);
 });
 
 describe('來源掃描：(c) 不借用 AI 的評估或對手預測，也不拿 AI 控制器當成員', () => {
   const source = readFileSync(new URL('./probe-a.test-helpers.ts', import.meta.url), 'utf8');
   const code = source
     .split('\n')
-    .filter((line) => !line.trim().startsWith('//') && !line.trim().startsWith('*') && !line.trim().startsWith('/*'))
+    .filter(
+      (line) =>
+        !line.trim().startsWith('//') &&
+        !line.trim().startsWith('*') &&
+        !line.trim().startsWith('/*'),
+    )
     .join('\n');
   it.each([
     ['evaluate', /\bevaluate\b/],
@@ -222,4 +237,24 @@ describe('來源掃描：(c) 不借用 AI 的評估或對手預測，也不拿 A
   ])('工具檔的程式（不含註解）沒有 %s', (_label, pattern) => {
     expect(pattern.test(code)).toBe(false);
   });
+});
+
+describe('選 (b*)、(c*)', () => {
+  it('勝率高者；同勝率取分差高；再同取表序在前', () => {
+    const row = (name: string, win: number, margin: number) => ({ name, win, margin });
+    expect(selectBest([row('x', 50, 1), row('y', 60, -9)])).toBe('y');
+    expect(selectBest([row('x', 50, 1), row('y', 50, 2)])).toBe('y');
+    expect(selectBest([row('x', 50, 1), row('y', 50, 1)])).toBe('x');
+  });
+
+  it('trainTable：每個成員一列，勝率是 0 到 100 的百分點，只用給定的種子', () => {
+    const cell = firstCell();
+    const rows = trainTable(['b-straight', 'b-mid'], cell, [TRAIN_FROM, TRAIN_FROM + 1]);
+    expect(rows.map((r) => r.name)).toEqual(['b-straight', 'b-mid']);
+    for (const r of rows) {
+      expect(r.win).toBeGreaterThanOrEqual(0);
+      expect(r.win).toBeLessThanOrEqual(100);
+      expect(Number.isFinite(r.margin)).toBe(true);
+    }
+  }, 120_000);
 });

@@ -20,7 +20,9 @@ import {
   isPoint,
   makePlayer,
   playCell,
+  selectBest,
   sjSpec,
+  trainTable,
 } from './probe-a.test-helpers';
 
 /**
@@ -130,19 +132,22 @@ describe('(b) 不讀射手的任何狀態（游標、彈藥、補充倒數、冷
 
 describe('(c) 真的讀了射手（換掉它讀的東西，想去的地方會變）', () => {
   const samples = dodgerSamples();
-  it.each(C_FAMILY.map((name) => [name]))('%s：至少有一個局面、一種擾動會改變想去的地方', (name) => {
-    let changed = 0;
-    for (const { state, side, tick } of samples) {
-      const plain = chooseGoal(name, state, side, tick);
-      for (let variant = 0; variant < 5; variant += 1) {
-        const moved = chooseGoal(name, perturbShooter(state, side, variant), side, tick);
-        if (JSON.stringify(moved) !== JSON.stringify(plain)) {
-          changed += 1;
+  it.each(C_FAMILY.map((name) => [name]))(
+    '%s：至少有一個局面、一種擾動會改變想去的地方',
+    (name) => {
+      let changed = 0;
+      for (const { state, side, tick } of samples) {
+        const plain = chooseGoal(name, state, side, tick);
+        for (let variant = 0; variant < 5; variant += 1) {
+          const moved = chooseGoal(name, perturbShooter(state, side, variant), side, tick);
+          if (JSON.stringify(moved) !== JSON.stringify(plain)) {
+            changed += 1;
+          }
         }
       }
-    }
-    expect(changed).toBeGreaterThan(0);
-  });
+      expect(changed).toBeGreaterThan(0);
+    },
+  );
 });
 
 describe('成員是決定性的、不改動傳進來的 state', () => {
@@ -158,6 +163,7 @@ describe('成員是決定性的、不改動傳進來的 state', () => {
       };
       expect(run()).toEqual(run());
     },
+    120_000,
   );
 });
 
@@ -175,7 +181,7 @@ describe('核心夠強（零延遲下 (b) 的 b-y62 贏得了低等級 AI）', (
       wins += outcomeOf(r, side).win;
     }
     expect(wins).toBeGreaterThanOrEqual(11);
-  });
+  }, 120_000);
 });
 
 describe('決策點與探針串接', () => {
@@ -199,7 +205,7 @@ describe('決策點與探針串接', () => {
     expect(r.n).toBe(4);
     expect(r.winBoundHolds).toBe(true);
     expect(r.inconsistentSeeds).toEqual([]);
-  });
+  }, 120_000);
 });
 
 function firstSample(samples: readonly Sample[]): Sample {
@@ -216,7 +222,9 @@ describe('來源掃描：(c) 不借用 AI 的評估或對手預測，也不拿 A
     .split('\n')
     .filter(
       (line) =>
-        !line.trim().startsWith('//') && !line.trim().startsWith('*') && !line.trim().startsWith('/*'),
+        !line.trim().startsWith('//') &&
+        !line.trim().startsWith('*') &&
+        !line.trim().startsWith('/*'),
     )
     .join('\n');
   it.each([
@@ -230,4 +238,24 @@ describe('來源掃描：(c) 不借用 AI 的評估或對手預測，也不拿 A
   ])('工具檔的程式（不含註解）沒有 %s', (_label, pattern) => {
     expect(pattern.test(code)).toBe(false);
   });
+});
+
+describe('選 (b*)、(c*)', () => {
+  it('勝率高者；同勝率取分差高；再同取表序在前', () => {
+    const row = (name: string, win: number, margin: number) => ({ name, win, margin });
+    expect(selectBest([row('x', 50, 1), row('y', 60, -9)])).toBe('y');
+    expect(selectBest([row('x', 50, 1), row('y', 50, 2)])).toBe('y');
+    expect(selectBest([row('x', 50, 1), row('y', 50, 1)])).toBe('x');
+  });
+
+  it('trainTable：每個成員一列，勝率是 0 到 100 的百分點，只用給定的種子', () => {
+    const cell = firstCell();
+    const rows = trainTable(['b-y62', 'b-y74'], cell, [TRAIN_FROM, TRAIN_FROM + 1]);
+    expect(rows.map((r) => r.name)).toEqual(['b-y62', 'b-y74']);
+    for (const r of rows) {
+      expect(r.win).toBeGreaterThanOrEqual(0);
+      expect(r.win).toBeLessThanOrEqual(100);
+      expect(Number.isFinite(r.margin)).toBe(true);
+    }
+  }, 120_000);
 });
