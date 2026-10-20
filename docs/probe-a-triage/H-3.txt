@@ -1,0 +1,10 @@
+H-3  判定=grey（主格最大改變率 3.0%）  R_max=3.0%  預設性格=gambler:3.0%  S_max=6.7%  W_max=3.9%  放寬=n/a
+  決策點=331  擾動=1818（嘗試 5801，與原本相同 478）  拒絕={"捐贈者不相容（已略過，不算嘗試）":160835,"年齡超過這一局的 tick 數":2173}
+  precise    L10 改變=0/1818=0.0% [0.0%,0.2%]  有改變的決策點=0/331  領先反轉=0/196  自我=50/945  世界=32/1008  放寬=0/0  null=0  donor-same-tick:0/982 donor-far:0/836  路徑[totals.o:0/526 runners.o:0/642 roundScores.o:0/418]
+  precise    L5  改變=0/1818=0.0% [0.0%,0.2%]  有改變的決策點=0/331  領先反轉=0/196  自我=63/945  世界=38/1008  放寬=0/0  null=0  donor-same-tick:0/982 donor-far:0/836  路徑[totals.o:0/526 runners.o:0/642 roundScores.o:0/418]
+  pathfinder L10 改變=0/1818=0.0% [0.0%,0.2%]  有改變的決策點=0/331  領先反轉=0/196  自我=0/945  世界=0/1008  放寬=0/0  null=0  donor-same-tick:0/982 donor-far:0/836  路徑[totals.o:0/526 runners.o:0/642 roundScores.o:0/418]
+  pathfinder L5  改變=0/1818=0.0% [0.0%,0.2%]  有改變的決策點=0/331  領先反轉=0/196  自我=16/945  世界=8/1008  放寬=0/0  null=0  donor-same-tick:0/982 donor-far:0/836  路徑[totals.o:0/526 runners.o:0/642 roundScores.o:0/418]
+  greedy     L10 改變=0/1818=0.0% [0.0%,0.2%]  有改變的決策點=0/331  領先反轉=0/196  自我=48/945  世界=22/1008  放寬=0/0  null=0  donor-same-tick:0/982 donor-far:0/836  路徑[totals.o:0/526 runners.o:0/642 roundScores.o:0/418]
+  greedy     L5  改變=0/1818=0.0% [0.0%,0.2%]  有改變的決策點=0/331  領先反轉=0/196  自我=61/945  世界=29/1008  放寬=0/0  null=0  donor-same-tick:0/982 donor-far:0/836  路徑[totals.o:0/526 runners.o:0/642 roundScores.o:0/418]
+  gambler    L10 改變=54/1818=3.0% [2.3%,3.9%]  有改變的決策點=17/331  領先反轉=0/196  自我=19/945  世界=32/1008  放寬=0/0  null=0  donor-same-tick:29/982 donor-far:25/836  路徑[totals.o:4/526 runners.o:14/642 roundScores.o:0/418]
+  gambler    L5  改變=50/1818=2.8% [2.1%,3.6%]  有改變的決策點=16/331  領先反轉=0/196  自我=35/945  世界=39/1008  放寬=0/0  null=0  donor-same-tick:27/982 donor-far:23/836  路徑[totals.o:4/526 runners.o:13/642 roundScores.o:0/418]

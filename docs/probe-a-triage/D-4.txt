@@ -1,0 +1,10 @@
+D-4  判定=worth-probe-a（主格最大改變率 19.2%）  R_max=19.2%  預設性格=greedy:15.5%  S_max=76.4%  W_max=74.7%  放寬=n/a
+  決策點=240  擾動=1428（嘗試 4320，與原本相同 243）  拒絕={"捐贈者缺路徑或衝突":79,"撿取物壓在角色腳下":39}
+  precise    L10 改變=274/1428=19.2% [17.2%,21.3%]  有改變的決策點=77/240  領先反轉=103/500  自我=549/719  世界=538/720  放寬=0/0  null=0  donor-far:60/369 donor-same-tick:214/1059  路徑[players.o:59/419 battery.o:36/480 trickle.o:0/455 stuck.o:0/479]
+  precise    L5  改變=254/1428=17.8% [15.9%,19.9%]  有改變的決策點=72/240  領先反轉=96/500  自我=528/719  世界=512/720  放寬=0/0  null=0  donor-far:52/369 donor-same-tick:202/1059  路徑[players.o:53/419 battery.o:31/480 trickle.o:0/455 stuck.o:0/479]
+  pathfinder L10 改變=116/1428=8.1% [6.8%,9.7%]  有改變的決策點=40/240  領先反轉=49/500  自我=526/719  世界=516/720  放寬=0/0  null=0  donor-far:18/369 donor-same-tick:98/1059  路徑[players.o:27/419 battery.o:14/480 trickle.o:1/455 stuck.o:0/479]
+  pathfinder L5  改變=144/1428=10.1% [8.6%,11.8%]  有改變的決策點=44/240  領先反轉=61/500  自我=511/719  世界=503/720  放寬=0/0  null=0  donor-far:25/369 donor-same-tick:119/1059  路徑[players.o:31/419 battery.o:21/480 trickle.o:0/455 stuck.o:0/479]
+  greedy     L10 改變=222/1428=15.5% [13.8%,17.5%]  有改變的決策點=64/240  領先反轉=83/500  自我=537/719  世界=537/720  放寬=0/0  null=0  donor-far:52/369 donor-same-tick:170/1059  路徑[players.o:50/419 battery.o:34/480 trickle.o:0/455 stuck.o:0/479]
+  greedy     L5  改變=202/1428=14.1% [12.4%,16.0%]  有改變的決策點=59/240  領先反轉=76/500  自我=518/719  世界=515/720  放寬=0/0  null=0  donor-far:44/369 donor-same-tick:158/1059  路徑[players.o:46/419 battery.o:31/480 trickle.o:0/455 stuck.o:0/479]
+  gambler    L10 改變=266/1428=18.6% [16.7%,20.7%]  有改變的決策點=81/240  領先反轉=110/500  自我=537/719  世界=533/720  放寬=0/0  null=0  donor-far:70/369 donor-same-tick:196/1059  路徑[players.o:61/419 battery.o:41/480 trickle.o:0/455 stuck.o:0/479]
+  gambler    L5  改變=243/1428=17.0% [15.2%,19.1%]  有改變的決策點=75/240  領先反轉=100/500  自我=517/719  世界=510/720  放寬=0/0  null=0  donor-far:60/369 donor-same-tick:183/1059  路徑[players.o:57/419 battery.o:37/480 trickle.o:0/455 stuck.o:0/479]

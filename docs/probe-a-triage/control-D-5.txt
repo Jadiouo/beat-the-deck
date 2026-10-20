@@ -1,0 +1,10 @@
+D-5  判定=grey（主格最大改變率 4.8%）  R_max=4.8%  預設性格=greedy:4.1%  S_max=71.3%  W_max=64.7%  放寬=n/a
+  決策點=240  擾動=1426（嘗試 4320，與原本相同 137）  拒絕={"撿取物壓在角色腳下":19}
+  precise    L10 改變=68/1426=4.8% [3.8%,6.0%]  有改變的決策點=28/240  領先反轉=25/495  自我=509/720  世界=456/720  放寬=0/0  null=0  donor-same-tick:50/1067 donor-far:18/359  路徑[players.o:8/480 carry.o:28/480 delivered.o:0/480 waited.o:0/480]
+  precise    L5  改變=60/1426=4.2% [3.3%,5.4%]  有改變的決策點=26/240  領先反轉=25/495  自我=488/720  世界=439/720  放寬=0/0  null=0  donor-same-tick:42/1067 donor-far:18/359  路徑[players.o:7/480 carry.o:27/480 delivered.o:0/480 waited.o:0/480]
+  pathfinder L10 改變=53/1426=3.7% [2.9%,4.8%]  有改變的決策點=22/240  領先反轉=22/495  自我=508/720  世界=466/720  放寬=0/0  null=0  donor-same-tick:40/1067 donor-far:13/359  路徑[players.o:6/480 carry.o:24/480 delivered.o:0/480 waited.o:0/480]
+  pathfinder L5  改變=48/1426=3.4% [2.5%,4.4%]  有改變的決策點=22/240  領先反轉=24/495  自我=488/720  世界=449/720  放寬=0/0  null=0  donor-same-tick:35/1067 donor-far:13/359  路徑[players.o:5/480 carry.o:24/480 delivered.o:0/480 waited.o:0/480]
+  greedy     L10 改變=58/1426=4.1% [3.2%,5.2%]  有改變的決策點=23/240  領先反轉=23/495  自我=510/720  世界=461/720  放寬=0/0  null=0  donor-same-tick:44/1067 donor-far:14/359  路徑[players.o:6/480 carry.o:24/480 delivered.o:0/480 waited.o:0/480]
+  greedy     L5  改變=50/1426=3.5% [2.7%,4.6%]  有改變的決策點=21/240  領先反轉=23/495  自我=489/720  世界=444/720  放寬=0/0  null=0  donor-same-tick:36/1067 donor-far:14/359  路徑[players.o:5/480 carry.o:23/480 delivered.o:0/480 waited.o:0/480]
+  gambler    L10 改變=57/1426=4.0% [3.1%,5.1%]  有改變的決策點=26/240  領先反轉=24/495  自我=513/720  世界=462/720  放寬=0/0  null=0  donor-same-tick:46/1067 donor-far:11/359  路徑[players.o:6/480 carry.o:26/480 delivered.o:0/480 waited.o:0/480]
+  gambler    L5  改變=50/1426=3.5% [2.7%,4.6%]  有改變的決策點=25/240  領先反轉=24/495  自我=492/720  世界=445/720  放寬=0/0  null=0  donor-same-tick:39/1067 donor-far:11/359  路徑[players.o:5/480 carry.o:24/480 delivered.o:0/480 waited.o:0/480]

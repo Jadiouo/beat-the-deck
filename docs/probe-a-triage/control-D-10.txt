@@ -1,0 +1,10 @@
+D-10  判定=worth-probe-a（主格最大改變率 15.4%）  R_max=15.4%  預設性格=precise:15.4%  S_max=71.4%  W_max=75.6%  放寬=n/a
+  決策點=238  擾動=1341（嘗試 1440，與原本相同 72）  拒絕={}
+  precise    L10 改變=206/1341=15.4% [13.5%,17.4%]  有改變的決策點=77/238  領先反轉=50/295  自我=501/702  世界=544/720  放寬=0/0  null=0  donor-same-tick:206/1341  路徑[players.o:67/469 bag.o:11/445 taken.o:0/452 takenW.o:0/453 takenV.o:0/453 ship.o:26/270 ships.o:0/431]
+  precise    L5  改變=196/1341=14.6% [12.8%,16.6%]  有改變的決策點=72/238  領先反轉=50/295  自我=491/702  世界=535/720  放寬=0/0  null=0  donor-same-tick:196/1341  路徑[players.o:63/469 bag.o:13/445 taken.o:0/452 takenW.o:0/453 takenV.o:0/453 ship.o:24/270 ships.o:0/431]
+  pathfinder L10 改變=129/1341=9.6% [8.2%,11.3%]  有改變的決策點=57/238  領先反轉=25/295  自我=423/702  世界=472/720  放寬=0/0  null=0  donor-same-tick:129/1341  路徑[players.o:37/469 bag.o:10/445 taken.o:0/452 takenW.o:0/453 takenV.o:0/453 ship.o:16/270 ships.o:0/431]
+  pathfinder L5  改變=159/1341=11.9% [10.2%,13.7%]  有改變的決策點=64/238  領先反轉=34/295  自我=434/702  世界=498/720  放寬=0/0  null=0  donor-same-tick:159/1341  路徑[players.o:50/469 bag.o:10/445 taken.o:0/452 takenW.o:0/453 takenV.o:0/453 ship.o:22/270 ships.o:0/431]
+  greedy     L10 改變=155/1341=11.6% [10.0%,13.4%]  有改變的決策點=58/238  領先反轉=35/295  自我=496/702  世界=544/720  放寬=0/0  null=0  donor-same-tick:155/1341  路徑[players.o:50/469 bag.o:9/445 taken.o:0/452 takenW.o:0/453 takenV.o:0/453 ship.o:22/270 ships.o:0/431]
+  greedy     L5  改變=147/1341=11.0% [9.4%,12.7%]  有改變的決策點=54/238  領先反轉=35/295  自我=488/702  世界=535/720  放寬=0/0  null=0  donor-same-tick:147/1341  路徑[players.o:46/469 bag.o:11/445 taken.o:0/452 takenW.o:0/453 takenV.o:0/453 ship.o:21/270 ships.o:0/431]
+  gambler    L10 改變=209/1341=15.6% [13.7%,17.6%]  有改變的決策點=77/238  領先反轉=45/295  自我=492/702  世界=539/720  放寬=0/0  null=0  donor-same-tick:209/1341  路徑[players.o:67/469 bag.o:9/445 taken.o:0/452 takenW.o:0/453 takenV.o:0/453 ship.o:33/270 ships.o:0/431]
+  gambler    L5  改變=201/1341=15.0% [13.2%,17.0%]  有改變的決策點=72/238  領先反轉=45/295  自我=485/702  世界=529/720  放寬=0/0  null=0  donor-same-tick:201/1341  路徑[players.o:63/469 bag.o:11/445 taken.o:0/452 takenW.o:0/453 takenV.o:0/453 ship.o:32/270 ships.o:0/431]

@@ -1,0 +1,10 @@
+H-Q  判定=not-screenable（乾淨擾動量不到（0.0%），但放寬模式（連糾纏欄位一起換）64.3%：AI 讀的是與環境糾纏的欄位）  R_max=0.0%  預設性格=pathfinder:0.0%  S_max=22.7%  W_max=78.8%  放寬=64.3%
+  決策點=190  擾動=192（嘗試 312，與原本相同 120）  拒絕={"捐贈者不相容（已略過，不算嘗試）":6212}
+  precise    L10 改變=0/192=0.0% [0.0%,2.0%]  有改變的決策點=0/190  領先反轉=n/a  自我=2/260  世界=715/1008  放寬=180/280  null=0  donor-same-tick:0/155 donor-far:0/37  路徑[pending.o:0/188 raised.o:0/8]
+  precise    L5  改變=0/192=0.0% [0.0%,2.0%]  有改變的決策點=0/190  領先反轉=n/a  自我=2/260  世界=684/1008  放寬=173/280  null=0  donor-same-tick:0/155 donor-far:0/37  路徑[pending.o:0/188 raised.o:0/8]
+  pathfinder L10 改變=0/192=0.0% [0.0%,2.0%]  有改變的決策點=0/190  領先反轉=n/a  自我=59/260  世界=794/1008  放寬=151/280  null=0  donor-same-tick:0/155 donor-far:0/37  路徑[pending.o:0/188 raised.o:0/8]
+  pathfinder L5  改變=0/192=0.0% [0.0%,2.0%]  有改變的決策點=0/190  領先反轉=n/a  自我=55/260  世界=759/1008  放寬=142/280  null=0  donor-same-tick:0/155 donor-far:0/37  路徑[pending.o:0/188 raised.o:0/8]
+  greedy     L10 改變=0/192=0.0% [0.0%,2.0%]  有改變的決策點=0/190  領先反轉=n/a  自我=2/260  世界=715/1008  放寬=180/280  null=0  donor-same-tick:0/155 donor-far:0/37  路徑[pending.o:0/188 raised.o:0/8]
+  greedy     L5  改變=0/192=0.0% [0.0%,2.0%]  有改變的決策點=0/190  領先反轉=n/a  自我=2/260  世界=684/1008  放寬=173/280  null=0  donor-same-tick:0/155 donor-far:0/37  路徑[pending.o:0/188 raised.o:0/8]
+  gambler    L10 改變=0/192=0.0% [0.0%,2.0%]  有改變的決策點=0/190  領先反轉=n/a  自我=2/260  世界=715/1008  放寬=180/280  null=0  donor-same-tick:0/155 donor-far:0/37  路徑[pending.o:0/188 raised.o:0/8]
+  gambler    L5  改變=0/192=0.0% [0.0%,2.0%]  有改變的決策點=0/190  領先反轉=n/a  自我=2/260  世界=684/1008  放寬=173/280  null=0  donor-same-tick:0/155 donor-far:0/37  路徑[pending.o:0/188 raised.o:0/8]

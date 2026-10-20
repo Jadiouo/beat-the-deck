@@ -1,0 +1,10 @@
+C-4  判定=not-screenable（AI 只讀自己的 memory；對手的資訊經由 AI 自己的狀態（memory）進來，按定義不動，所以乾淨擾動只剩視野外與一步內的位置）  R_max=3.3%  預設性格=pathfinder:3.3%  S_max=37.0%  W_max=36.3%  放寬=n/a
+  決策點=213  擾動=699（嘗試 951，與原本相同 113）  拒絕={"蛇身重疊":49,"食物壓在蛇身上":27,"局沒結束但蛇死了":12,"AI 記得的對手位置離真實位置太遠":34,"對手在視野內但 AI 的 memory 說沒看到":11}
+  precise    L10 改變=0/699=0.0% [0.0%,0.5%]  有改變的決策點=0/213  領先反轉=0/80  自我=92/546  世界=137/720  放寬=0/0  null=0  donor-same-tick:0/699  路徑[snakes.o:0/391 memory.o:0/435 prevDir.o:0/386 ateAt.o:0/385]
+  precise    L5  改變=0/699=0.0% [0.0%,0.5%]  有改變的決策點=0/213  領先反轉=0/80  自我=98/546  世界=143/720  放寬=0/0  null=0  donor-same-tick:0/699  路徑[snakes.o:0/391 memory.o:0/435 prevDir.o:0/386 ateAt.o:0/385]
+  pathfinder L10 改變=23/699=3.3% [2.2%,4.9%]  有改變的決策點=18/213  領先反轉=3/80  自我=202/546  世界=261/720  放寬=0/0  null=0  donor-same-tick:23/699  路徑[snakes.o:18/391 memory.o:0/435 prevDir.o:0/386 ateAt.o:0/385]
+  pathfinder L5  改變=0/699=0.0% [0.0%,0.5%]  有改變的決策點=0/213  領先反轉=0/80  自我=98/546  世界=142/720  放寬=0/0  null=0  donor-same-tick:0/699  路徑[snakes.o:0/391 memory.o:0/435 prevDir.o:0/386 ateAt.o:0/385]
+  greedy     L10 改變=0/699=0.0% [0.0%,0.5%]  有改變的決策點=0/213  領先反轉=0/80  自我=93/546  世界=139/720  放寬=0/0  null=0  donor-same-tick:0/699  路徑[snakes.o:0/391 memory.o:0/435 prevDir.o:0/386 ateAt.o:0/385]
+  greedy     L5  改變=0/699=0.0% [0.0%,0.5%]  有改變的決策點=0/213  領先反轉=0/80  自我=100/546  世界=147/720  放寬=0/0  null=0  donor-same-tick:0/699  路徑[snakes.o:0/391 memory.o:0/435 prevDir.o:0/386 ateAt.o:0/385]
+  gambler    L10 改變=0/699=0.0% [0.0%,0.5%]  有改變的決策點=0/213  領先反轉=0/80  自我=96/546  世界=150/720  放寬=0/0  null=0  donor-same-tick:0/699  路徑[snakes.o:0/391 memory.o:0/435 prevDir.o:0/386 ateAt.o:0/385]
+  gambler    L5  改變=0/699=0.0% [0.0%,0.5%]  有改變的決策點=0/213  領先反轉=0/80  自我=103/546  世界=158/720  放寬=0/0  null=0  donor-same-tick:0/699  路徑[snakes.o:0/391 memory.o:0/435 prevDir.o:0/386 ateAt.o:0/385]

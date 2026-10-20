@@ -55,12 +55,28 @@ export const H_A: CardSpec = defineSpec<GreedWorld>('H-A', {
     { name: '總分無效', state: setAt(s, `totals.${other(ai)}`, -5) },
     { name: 'AI 已到 50 但局沒結束', state: setAt(s, 'totals.1', 60) },
   ],
-  // 特殊狀態：對手剛起步／逼近終點（可達但罕見：一回合內連擲很多次沒爆）。
+  // 特殊狀態：對手剛起步、逼近終點（可達但罕見：一回合內連擲很多次沒爆），
+  // 以及「人已經到 50、AI 正在打最後一個回合」——這時 AI 必須贏過對手的總分才能贏，是 evaluate 裡
+  // 唯一會讀對手總分的分支（終局的勝負加成）。人到 50 與 finalTurn 旗標是同一件事的兩面，所以一起改。
   special: (s: GreedWorld, ai: Side) => {
     const o = other(ai);
-    return o === 1
-      ? [0, 25, 45].map((v) => ({ name: `opp-total-${v}`, state: setAt(s, `totals.${o}`, v) }))
-      : [0, 25].map((v) => ({ name: `opp-total-${v}`, state: setAt(s, `totals.${o}`, v) }));
+    const out: { name: string; state: GreedWorld }[] = [0, 25, 45].map((v) => ({
+      name: `opp-total-${v}`,
+      state: setAt(s, `totals.${o}`, v),
+    }));
+    if (o === 0) {
+      for (const v of [50, 54, 58]) {
+        out.push({
+          name: `opp-final-turn-${v}`,
+          state: setAt(setAt(s, 'totals.0', v), 'finalTurn', true),
+        });
+      }
+    }
+    return out.filter((x) =>
+      o === 0
+        ? (x.state.totals[0] as number) < 50 || x.state.finalTurn
+        : (x.state.totals[1] as number) < 50,
+    );
   },
 });
 

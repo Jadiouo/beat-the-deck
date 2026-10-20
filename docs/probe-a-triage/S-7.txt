@@ -1,0 +1,10 @@
+S-7  判定=worth-probe-a（主格最大改變率 33.9%）  R_max=33.9%  預設性格=greedy:12.6%  S_max=27.2%  W_max=50.9%  放寬=n/a
+  決策點=126  擾動=605（嘗試 1807，與原本相同 1006）  拒絕={"捐贈者不相容（已略過，不算嘗試）":67009,"假動作超過上限 6":13}
+  precise    L10 改變=192/605=31.7% [28.2%,35.5%]  有改變的決策點=61/126  領先反轉=n/a  自我=42/360  世界=82/468  放寬=0/0  null=0  donor-far:173/555 donor-same-tick:19/50  路徑[spent.o:0/119 history.*.baited.o:204/403 history.*.twitchAt.o:0/38]
+  precise    L5  改變=182/605=30.1% [26.6%,33.9%]  有改變的決策點=58/126  領先反轉=n/a  自我=44/360  世界=88/468  放寬=0/0  null=0  donor-far:165/555 donor-same-tick:17/50  路徑[spent.o:0/119 history.*.baited.o:196/403 history.*.twitchAt.o:0/38]
+  pathfinder L10 改變=205/605=33.9% [30.2%,37.7%]  有改變的決策點=65/126  領先反轉=n/a  自我=29/360  世界=33/468  放寬=0/0  null=0  donor-far:184/555 donor-same-tick:21/50  路徑[spent.o:0/119 history.*.baited.o:230/403 history.*.twitchAt.o:0/38]
+  pathfinder L5  改變=198/605=32.7% [29.1%,36.6%]  有改變的決策點=62/126  領先反轉=n/a  自我=31/360  世界=42/468  放寬=0/0  null=0  donor-far:179/555 donor-same-tick:19/50  路徑[spent.o:0/119 history.*.baited.o:232/403 history.*.twitchAt.o:0/38]
+  greedy     L10 改變=76/605=12.6% [10.2%,15.4%]  有改變的決策點=20/126  領先反轉=n/a  自我=98/360  世界=236/468  放寬=0/0  null=0  donor-far:72/555 donor-same-tick:4/50  路徑[spent.o:0/119 history.*.baited.o:10/403 history.*.twitchAt.o:0/38]
+  greedy     L5  改變=73/605=12.1% [9.7%,14.9%]  有改變的決策點=19/126  領先反轉=n/a  自我=95/360  世界=233/468  放寬=0/0  null=0  donor-far:69/555 donor-same-tick:4/50  路徑[spent.o:0/119 history.*.baited.o:10/403 history.*.twitchAt.o:0/38]
+  gambler    L10 改變=29/605=4.8% [3.4%,6.8%]  有改變的決策點=7/126  領先反轉=n/a  自我=58/360  世界=238/468  放寬=0/0  null=0  donor-far:28/555 donor-same-tick:1/50  路徑[spent.o:0/119 history.*.baited.o:8/403 history.*.twitchAt.o:0/38]
+  gambler    L5  改變=29/605=4.8% [3.4%,6.8%]  有改變的決策點=7/126  領先反轉=n/a  自我=55/360  世界=235/468  放寬=0/0  null=0  donor-far:28/555 donor-same-tick:1/50  路徑[spent.o:0/119 history.*.baited.o:8/403 history.*.twitchAt.o:0/38]

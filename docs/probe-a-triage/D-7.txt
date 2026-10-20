@@ -1,0 +1,10 @@
+D-7  判定=structural-zero（AI 讀自己、不讀對手）  R_max=0.6%  預設性格=greedy:0.5%  S_max=72.6%  W_max=57.6%  放寬=n/a
+  決策點=238  擾動=1270（嘗試 4320，與原本相同 401）  拒絕={"人站在岩石裡":1550}
+  precise    L10 改變=0/1270=0.0% [0.0%,0.3%]  有改變的決策點=0/238  領先反轉=0/449  自我=501/690  世界=415/720  放寬=0/0  null=0  donor-far:0/663 donor-same-tick:0/607  路徑[players.o:0/465 bag.o:0/480 dug.o:0/480 rode.o:0/8]
+  precise    L5  改變=0/1270=0.0% [0.0%,0.3%]  有改變的決策點=0/238  領先反轉=0/449  自我=498/690  世界=406/720  放寬=0/0  null=0  donor-far:0/663 donor-same-tick:0/607  路徑[players.o:0/465 bag.o:0/480 dug.o:0/480 rode.o:0/8]
+  pathfinder L10 改變=8/1270=0.6% [0.3%,1.2%]  有改變的決策點=2/238  領先反轉=3/449  自我=474/690  世界=396/720  放寬=0/0  null=0  donor-far:1/663 donor-same-tick:7/607  路徑[players.o:0/465 bag.o:3/480 dug.o:0/480 rode.o:0/8]
+  pathfinder L5  改變=8/1270=0.6% [0.3%,1.2%]  有改變的決策點=2/238  領先反轉=3/449  自我=472/690  世界=387/720  放寬=0/0  null=0  donor-far:1/663 donor-same-tick:7/607  路徑[players.o:0/465 bag.o:3/480 dug.o:0/480 rode.o:0/8]
+  greedy     L10 改變=6/1270=0.5% [0.2%,1.0%]  有改變的決策點=2/238  領先反轉=4/449  自我=474/690  世界=397/720  放寬=0/0  null=0  donor-far:1/663 donor-same-tick:5/607  路徑[players.o:2/465 bag.o:3/480 dug.o:0/480 rode.o:0/8]
+  greedy     L5  改變=6/1270=0.5% [0.2%,1.0%]  有改變的決策點=2/238  領先反轉=4/449  自我=472/690  世界=388/720  放寬=0/0  null=0  donor-far:1/663 donor-same-tick:5/607  路徑[players.o:2/465 bag.o:3/480 dug.o:0/480 rode.o:0/8]
+  gambler    L10 改變=6/1270=0.5% [0.2%,1.0%]  有改變的決策點=2/238  領先反轉=4/449  自我=483/690  世界=404/720  放寬=0/0  null=0  donor-far:1/663 donor-same-tick:5/607  路徑[players.o:2/465 bag.o:3/480 dug.o:0/480 rode.o:0/8]
+  gambler    L5  改變=6/1270=0.5% [0.2%,1.0%]  有改變的決策點=2/238  領先反轉=4/449  自我=481/690  世界=394/720  放寬=0/0  null=0  donor-far:1/663 donor-same-tick:5/607  路徑[players.o:2/465 bag.o:3/480 dug.o:0/480 rode.o:0/8]

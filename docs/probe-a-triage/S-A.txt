@@ -1,0 +1,10 @@
+S-A  判定=structural-zero（AI 讀自己、不讀對手）  R_max=0.0%  預設性格=precise:0.0%  S_max=81.2%  W_max=67.5%  放寬=n/a
+  決策點=156  擾動=1026（嘗試 936，與原本相同 229）  拒絕={}
+  precise    L10 改變=0/1026=0.0% [0.0%,0.4%]  有改變的決策點=0/156  領先反轉=0/9  自我=365/452  世界=304/468  放寬=0/0  null=0  donor-same-tick:0/707 special:opp-invuln-60:0/156 special:opp-hits+3:0/156 special:opp-invuln-0:0/7  路徑[fields.o:0/312]
+  precise    L5  改變=0/1026=0.0% [0.0%,0.4%]  有改變的決策點=0/156  領先反轉=0/9  自我=349/452  世界=291/468  放寬=0/0  null=0  donor-same-tick:0/707 special:opp-invuln-60:0/156 special:opp-hits+3:0/156 special:opp-invuln-0:0/7  路徑[fields.o:0/312]
+  pathfinder L10 改變=0/1026=0.0% [0.0%,0.4%]  有改變的決策點=0/156  領先反轉=0/9  自我=318/452  世界=294/468  放寬=0/0  null=0  donor-same-tick:0/707 special:opp-invuln-60:0/156 special:opp-hits+3:0/156 special:opp-invuln-0:0/7  路徑[fields.o:0/312]
+  pathfinder L5  改變=0/1026=0.0% [0.0%,0.4%]  有改變的決策點=0/156  領先反轉=0/9  自我=329/452  世界=298/468  放寬=0/0  null=0  donor-same-tick:0/707 special:opp-invuln-60:0/156 special:opp-hits+3:0/156 special:opp-invuln-0:0/7  路徑[fields.o:0/312]
+  greedy     L10 改變=0/1026=0.0% [0.0%,0.4%]  有改變的決策點=0/156  領先反轉=0/9  自我=365/452  世界=304/468  放寬=0/0  null=0  donor-same-tick:0/707 special:opp-invuln-60:0/156 special:opp-hits+3:0/156 special:opp-invuln-0:0/7  路徑[fields.o:0/312]
+  greedy     L5  改變=0/1026=0.0% [0.0%,0.4%]  有改變的決策點=0/156  領先反轉=0/9  自我=349/452  世界=291/468  放寬=0/0  null=0  donor-same-tick:0/707 special:opp-invuln-60:0/156 special:opp-hits+3:0/156 special:opp-invuln-0:0/7  路徑[fields.o:0/312]
+  gambler    L10 改變=9/1026=0.9% [0.5%,1.7%]  有改變的決策點=6/156  領先反轉=9/9  自我=367/452  世界=316/468  放寬=0/0  null=0  donor-same-tick:3/707 special:opp-invuln-60:0/156 special:opp-hits+3:6/156 special:opp-invuln-0:0/7  路徑[fields.o:1/312]
+  gambler    L5  改變=9/1026=0.9% [0.5%,1.7%]  有改變的決策點=6/156  領先反轉=9/9  自我=351/452  世界=303/468  放寬=0/0  null=0  donor-same-tick:3/707 special:opp-invuln-60:0/156 special:opp-hits+3:6/156 special:opp-invuln-0:0/7  路徑[fields.o:1/312]
