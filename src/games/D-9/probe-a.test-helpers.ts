@@ -115,6 +115,8 @@ export function familyB(fitted: Weights): Named[] {
     ['B6 一直挑名次2', P.alwaysRank(2)],
     ['B7 一直挑名次3', P.alwaysRank(3)],
     ['B8 名次1／2輪流亂挑', mixRank12],
+    // B9：事後補上（第一輪量完才發現 B1 的先驗是錯的，B4 與讀的人目標不同）：和 C1 同一個目標（自己收成）、信念擬合。
+    ['B9 自己收成·擬合的信念', planFrom('own', priorBelief(fitted))],
   ];
 }
 export function familyC(): Named[] {
@@ -157,6 +159,8 @@ export interface Played {
   readonly ticks: number[];
   /** AI 挑的名次平均。 */
   readonly aiRank: number[];
+  /** 每場最後的分差（我 − AI，單位數）。 */
+  readonly margins: number[];
 }
 
 export function mean(xs: readonly number[]): number {
@@ -179,6 +183,7 @@ export function runGame(
   config: GameConfig,
   delay = 0,
   opponent: P.Make = P.L10,
+  observe?: (state: D9State, mine: Side) => void,
 ): { final: D9State; mine: Side } {
   const mine: Side = seed % 2 === 0 ? 0 : 1;
   const ai = opponent(seed + 1_000_003);
@@ -186,6 +191,9 @@ export function runGame(
   let s = d9Game.init(seed, config);
   let t = 0;
   while (!s.over) {
+    if (observe !== undefined && s.phase === 'place' && s.idle === 0 && s.pending[mine] === null) {
+      observe(s, mine);
+    }
     const km = P.copyButtons(me.decide(s, mine, t));
     const ka = P.copyButtons(ai.decide(s, otherSide(mine), t));
     s = d9Game.step(s, mine === 0 ? [km, ka] : [ka, km]);
@@ -210,6 +218,7 @@ export function play(
     deadRounds: [],
     ticks: [],
     aiRank: [],
+    margins: [],
   };
   for (const seed of seeds) {
     const { final: fin, mine } = runGame(plan, seed, config, delay, opponent);
@@ -217,6 +226,7 @@ export function play(
     out.points.push(fin.winner === null ? 0.5 : fin.winner === mine ? 1 : 0);
     out.seats.push(mine);
     out.ticks.push(fin.tick);
+    out.margins.push(fin.drawn[mine] - fin.drawn[ais]);
     out.aiVoids.push(fin.history.filter((h) => h.voided[ais]).length);
     out.myVoids.push(fin.history.filter((h) => h.voided[mine]).length);
     out.deadRounds.push(fin.history.filter((h) => h.picks[0] < 0 && h.picks[1] < 0).length);
@@ -252,10 +262,15 @@ export function diffOf(c: Rate, b: Rate): Diff {
 }
 
 /** 用 `plan` 打 AI，數 AI 挑的名次（1、2、3+）分佈；擬合 (b) 的信念用。 */
-export function aiRankShare(plan: P.Plan, seeds: readonly number[], config: GameConfig): Weights {
+export function aiRankShare(
+  plan: P.Plan,
+  seeds: readonly number[],
+  config: GameConfig,
+  opponent: P.Make = P.L10,
+): Weights {
   const count: [number, number, number] = [0, 0, 0];
   for (const seed of seeds) {
-    const { final, mine } = runGame(plan, seed, config);
+    const { final, mine } = runGame(plan, seed, config, 0, opponent);
     for (const h of final.history) {
       const r = h.ranks[otherSide(mine)];
       if (r >= 1) {
@@ -266,4 +281,59 @@ export function aiRankShare(plan: P.Plan, seeds: readonly number[], config: Game
   }
   const total = count[0] + count[1] + count[2];
   return total === 0 ? P.PRIOR_WEIGHTS : [count[0] / total, count[1] / total, count[2] / total];
+}
+
+export interface Divergence {
+  /** 對局數；其中 (b)、(c) 在同一個局面做出不同決定的場數。 */
+  readonly games: number;
+  readonly gamesDiffer: number;
+  /** 決策點（每輪擺放開始一個）總數、有選項（至少一個能擺的礦脈）的決策點數、其中決定不同的數。 */
+  readonly points: number;
+  readonly livePoints: number;
+  readonly pointsDiffer: number;
+}
+
+/**
+ * 決策分歧率（前置檢查，S-6 紅方帶來的第四個陷阱）：在 (b)、(c) 兩邊各自對局時走到的每一個局面上，
+ * 同時問 (b) 與 (c) 的計畫「你會挑哪個」，數不同的。局面相同，所以差別只來自策略有沒有用到對手的狀態。
+ */
+export function divergence(
+  planB: P.Plan,
+  planC: P.Plan,
+  seeds: readonly number[],
+  config: GameConfig,
+  opponent: P.Make = P.L10,
+): Divergence {
+  let gamesDiffer = 0;
+  let points = 0;
+  let livePoints = 0;
+  let pointsDiffer = 0;
+  for (const seed of seeds) {
+    let differ = false;
+    for (const driver of [planB, planC]) {
+      runGame(driver, seed, config, 0, opponent, (s, mine) => {
+        points += 1;
+        if (P.livePool(s).length > 0) {
+          livePoints += 1;
+        }
+        if (planB(s, mine) !== planC(s, mine)) {
+          pointsDiffer += 1;
+          differ = true;
+        }
+      });
+    }
+    if (differ) {
+      gamesDiffer += 1;
+    }
+  }
+  return { games: seeds.length, gamesDiffer, points, livePoints, pointsDiffer };
+}
+
+/** 同種子配對的分差 (c) − (b)：平均與配對標準誤。 */
+export function pairedMargin(
+  c: readonly number[],
+  b: readonly number[],
+): { mean: number; se: number } {
+  const d = c.map((x, i) => x - (b[i] as number));
+  return { mean: mean(d), se: se(d) };
 }

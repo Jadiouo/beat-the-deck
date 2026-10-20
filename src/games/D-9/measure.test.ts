@@ -7,6 +7,7 @@ import type { GameConfig } from '../../core/types';
 import { d9Game } from './logic';
 import type { D9State, Round } from './logic';
 import * as P from './players.test-helpers';
+import * as Q from './probe-a.test-helpers';
 
 /**
  * D-9 的量測（小規格「實作與量測」）。真實規則、真實 AI、固定種子，所以數字是確定的；斷言寫在量到的值附近
@@ -308,6 +309,80 @@ describe('D-9 性格指紋、等級曲線、反應速度', () => {
       expect(rate(precise, L(12, 1, 1), L(12, 12, 1))).toBe(0.5);
       expect(rate(precise, L(12, 1, 6), L(12, 1, 1))).toBe(0.5);
       expect(rate(pathfinder, L(12, 1, 6), L(12, 1, 1))).toBeLessThanOrEqual(0.1);
+    },
+    LONG,
+  );
+});
+
+describe('D-9 獨佔規則（小規格十）：探針 A 的前置檢查與結果（精準型等級 10；種子 0..29；邊輪流）', () => {
+  const s = P.seeds(30);
+  const fitted = [0, 0.71, 0.29] as const;
+  const B = Object.fromEntries(Q.familyB(fitted).map(([n, plan]) => [n.slice(0, 2), plan]));
+  const C = Object.fromEntries(Q.familyC().map(([n, plan]) => [n.slice(0, 2), plan]));
+  const run = (plan: P.Plan, params: Record<string, number>): Q.Played =>
+    Q.play(plan, s, cfg(params));
+  const margin = (c: Q.Played, b: Q.Played): number => Q.pairedMargin(c.margins, b.margins).mean;
+
+  it(
+    '舊規則：能分歧的讀者（C1、C5、C6）都比 (b) 差（分差 −1 到 −4.5）；C2 到 C4 與 (b) 在每個決策點都選一樣的（分歧 0），所以那幾格的 (c)−(b) = 0 量不到東西，不能當「沒有互動」的證據',
+    () => {
+      const b = run(B['B2'] as P.Plan, {});
+      for (const name of ['C2', 'C3', 'C4']) {
+        const dv = Q.divergence(B['B2'] as P.Plan, C[name] as P.Plan, s, cfg({}));
+        expect(dv.pointsDiffer, name).toBe(0);
+      }
+      for (const name of ['C1', 'C5', 'C6']) {
+        const dv = Q.divergence(B['B2'] as P.Plan, C[name] as P.Plan, s, cfg({}));
+        expect(dv.pointsDiffer / dv.points, name).toBeGreaterThan(0.1);
+        const c = run(C[name] as P.Plan, {});
+        report(`舊規則 ${name}：分歧 ${dv.pointsDiffer}/${dv.points}，分差 ${margin(c, b)}`);
+        expect(margin(c, b), name).toBeLessThan(0);
+      }
+    },
+    LONG,
+  );
+
+  it(
+    'E1（cap = 1，兩邊搶同一個都作廢）：AI 讓路——不知道有對手的 (a)、一直挑名次 1 都贏 100%（支配策略）；讀的人（分歧 36% 以上）勝率一樣是 100%（貼天花板），但分差比不讀的最強 (b)（B8）少 10 以上',
+    () => {
+      const p = { cap: 1 };
+      expect(run(Q.PLAN_A[1], p).points.every((x) => x === 1)).toBe(true);
+      expect(run(P.alwaysFattest, p).points.every((x) => x === 1)).toBe(true);
+      const b = run(B['B8'] as P.Plan, p);
+      expect(b.points.every((x) => x === 1)).toBe(true);
+      for (const name of ['C1', 'C2', 'C5']) {
+        const dv = Q.divergence(B['B8'] as P.Plan, C[name] as P.Plan, s, cfg(p));
+        expect(dv.pointsDiffer / dv.points, name).toBeGreaterThan(0.2);
+        const c = run(C[name] as P.Plan, p);
+        report(`E1 ${name}：分歧 ${dv.pointsDiffer}/${dv.points}，分差 ${margin(c, b)}`);
+        expect(margin(c, b), name).toBeLessThan(-10);
+      }
+    },
+    LONG,
+  );
+
+  it(
+    'E1：兩個一樣的 AI 對打，每一場都是 0 比 0 平手（兩邊同時讓到同一個名次 2，每輪都撞）——規則把 AI 打成死局',
+    () => {
+      const r = P.batch(P.L10, P.L10, P.seeds(10), cfg({ cap: 1 }));
+      expect(r.scoreA).toBe(0);
+      expect(r.scoreB).toBe(0);
+      expect(r.ties).toBe(10);
+    },
+    LONG,
+  );
+
+  it(
+    'E2（cap = 1、contest = 1，輪流的優先權）：結果由座位決定——坐 0 號邊（第 0 輪有優先權）的劇本玩家贏 100%、坐 1 號邊的輸 100%；(b)(c) 之差為 0；兩個一樣的 AI 對打 0 號邊全勝（K12 的對稱會紅）',
+    () => {
+      const p = { cap: 1, contest: 1 };
+      const b = run(B['B1'] as P.Plan, p);
+      const c = run(C['C1'] as P.Plan, p);
+      b.points.forEach((x, i) => expect(x).toBe(b.seats[i] === 0 ? 1 : 0));
+      expect(Q.rateOf(c.points).rate).toBe(Q.rateOf(b.points).rate);
+      expect(margin(c, b)).toBe(0);
+      const r = P.batch(P.L10, P.L10, P.seeds(10), cfg(p));
+      expect(r.wins + r.losses).toBe(10);
     },
     LONG,
   );
