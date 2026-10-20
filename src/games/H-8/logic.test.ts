@@ -678,12 +678,6 @@ describe('H-8 加倍或歸零｜actions 與 evaluate', () => {
 // ---------------------------------------------------------------------------
 
 describe('H-8 加倍或歸零｜對手模型（只讀公開資訊）', () => {
-  const stopRec = (level: number, ok: boolean | null = null) => ({
-    level,
-    acts: [CLIMB, STOP] as const,
-    ok: [ok, null] as const,
-  });
-
   it('門檻 θ̂：沒有歷史是 0.5；一座梯子「停過的最高 p 與爬過的最低 p」的中點與先驗 0.5 平均', () => {
     expect(thetaHat(makeState(), 0)).toBeCloseTo(0.5, 10);
     // 對手（1 號邊）q = 0：爬了層 0、1（p .85、.75），在層 2（p .65）停 → 中點 .70；(.5 + .7) / 2 = .6
