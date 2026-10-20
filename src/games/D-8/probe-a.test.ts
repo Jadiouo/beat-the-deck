@@ -463,7 +463,7 @@ describe('決策點與串接', () => {
   it('(c) 的原始碼沒有 import evaluate、predictOpponent，也沒有拿 AI 的控制器當成員', () => {
     const text = readFileSync(new URL('./probe-a.test-helpers.ts', import.meta.url), 'utf8');
     const code = text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
-    expect(code).not.toMatch(/\bevaluate\b|predictOpponent|humanModel|human-model|wrapPolicy/);
+    expect(code).not.toMatch(/\bevaluate\b|predictOpponent|opponentAction|policies\/shared|humanModel|human-model|wrapPolicy/);
     expect(code.match(/levelController\(/g)?.length).toBe(1);
     const members = code.slice(
       code.indexOf('export function member'),
