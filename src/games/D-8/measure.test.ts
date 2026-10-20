@@ -1,4 +1,5 @@
-import { writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import { levelController } from '../../ai/level';
@@ -30,14 +31,19 @@ import type { Cell, Row } from './probe-a.test-helpers';
 
 /**
  * D-8 探針 A（完整版）的量測（`docs/cards/D-8.md`「探針 A（完整版）」；DESIGN-AI-FUN 10.35、10.54、10.59、10.61）。
- * 定義（兩族、選法、種子、格子）在量之前寫進小規格並 push（見 `git log -- docs/cards/D-8.md` 的「探針 A 完整版」那個 docs commit），這裡只是照做。
+ * 定義（兩族、選法、種子、格子、雙胞胎）在量之前寫進小規格並 push，這裡只是照做。
  * 預設場數很小（只驗工具串得起來）；正式量測用環境變數開大：
  *   D8_PROBE_CELL（main ＝ 貪心型等級 10、玩家延遲 12；d0 ＝ 等級 10 延遲 0；l7、l5 ＝ 等級 7、5 延遲 12；預設 main）
  *   D8_PROBE_TRAIN_N（訓練場數，預設 4，正式 60；種子 1000 起）
  *   D8_PROBE_N（量測場數，預設 4，正式 400；種子 5000 起）
- *   D8_PROBE_TWIN_N（雙胞胎對照用的場數，預設 2，正式 200；取量測種子的前 TWIN_N 個）、D8_PROBE_ALLC（每個 (c) 成員都對 (b*) 量一次）、
- *   D8_PROBE_VERBOSE（印出報告）、D8_PROBE_OUT（把結果寫成 JSON 的路徑）、
- *   D8_PROBE_PRE_ONLY（只做訓練與訓練種子上的分歧率，不碰量測種子）。
+ *   D8_PROBE_TWIN_N（雙胞胎對照用的場數，預設 2，正式 200；取量測種子的前 TWIN_N 個）、
+ *   D8_PROBE_ALLC（每個 (c) 成員都對 (b*) 量一次）、D8_PROBE_VERBOSE（印出報告；跑完才看得到）、D8_PROBE_LOG（每行即時附加到這個檔，長時間的量測看進度用）。
+ * 不要加 vitest 的 --disable-console-intercept：長時間的行程接管道時會卡住（上次整段量測因此停住）。
+ * 可續跑、可分給幾個行程（機器上有別的 agent 在跑，一個行程跑完要很久）：
+ *   D8_PROBE_OUT_DIR（把每個訓練成員、每個量測項目的結果各存成一個 JSON；有的就不重算）、
+ *   D8_PROBE_STAGE（train ＝ 只做訓練成員；pre ＝ 選 (b*)(c*) ＋ 訓練種子上的分歧率，不碰量測種子；
+ *                jobs ＝ 量測項目；all ＝ 全部，預設）、
+ *   D8_PROBE_ONLY（逗號分隔：train 階段是成員名，jobs 階段是項目名 all／seat0／seat1／twin|b|c／c|name／bstar／mirror）。
  * 環境變數不要叫 TEST（vitest 佔用）。
  */
 
@@ -70,15 +76,37 @@ const TWIN_N = Math.min(N, Math.max(1, Number(process.env['D8_PROBE_TWIN_N'] ?? 
 const twinSeeds = seeds.slice(0, TWIN_N);
 const allC = process.env['D8_PROBE_ALLC'] !== undefined;
 const verbose = process.env['D8_PROBE_VERBOSE'] !== undefined;
-const preOnly = process.env['D8_PROBE_PRE_ONLY'] !== undefined;
+const OUT_DIR = process.env['D8_PROBE_OUT_DIR'];
+const LOG = process.env['D8_PROBE_LOG'];
+const STAGE = process.env['D8_PROBE_STAGE'] ?? 'all';
+const ONLY = process.env['D8_PROBE_ONLY']?.split(',').filter((s) => s !== '');
 
 const say = (text: string): void => {
+  if (LOG !== undefined) {
+    appendFileSync(LOG, text + '\n');
+  }
   if (verbose) {
     console.log(text);
   }
 };
 
-const pp = (x: number): string => (x >= 0 ? '+' : '') + (100 * x).toFixed(1);
+/** 有 OUT_DIR 就把結果存成檔（鍵含格子與場數，換設定不會讀到舊的）；有檔就直接讀。 */
+function cached<T>(kind: string, key: string, compute: () => T): T {
+  if (OUT_DIR === undefined) {
+    return compute();
+  }
+  mkdirSync(OUT_DIR, { recursive: true });
+  const tag = `${cellName}.t${String(TRAIN_N)}.n${String(N)}.w${String(TWIN_N)}`;
+  const file = join(OUT_DIR, `${tag}.${kind}.${key.replace(/[^\w.-]/g, '_')}.json`);
+  if (existsSync(file)) {
+    return JSON.parse(readFileSync(file, 'utf8')) as T;
+  }
+  const value = compute();
+  writeFileSync(file, JSON.stringify(value));
+  return value;
+}
+
+const wanted = (name: string): boolean => ONLY === undefined || ONLY.includes(name);
 
 /** (d) 參照：AI 自己的引擎（貪心型等級 10）當玩家。鏡像，不是 (c)。 */
 function mirrorRow(list: readonly number[]): { win: number; margin: number } {
@@ -100,100 +128,97 @@ function mirrorRow(list: readonly number[]): { win: number; margin: number } {
 }
 
 describe(`D-8 探針 A 完整版｜格 ${cellName}（貪心型等級 ${String(at.level)}、玩家延遲 ${String(at.delay)}）`, () => {
-  it('訓練 → 選 (b*)(c*) → 訓練種子上的分歧率 →（不是 PRE_ONLY 才）量測種子上的 (c)−(b)', () => {
-    const out: Record<string, unknown> = {
-      cell: cellName,
-      at,
-      trainSeeds: [TRAIN_FROM, TRAIN_N],
-      seeds: [FROM, N],
-    };
-
-    // 訓練：兩族全部成員。
-    const train: Row[] = [...B_FAMILY, ...C_FAMILY].map((name) => score(name, trainSeeds, at));
-    const trainB = train.filter((r) => r.name.startsWith('b-'));
-    const trainC = train.filter((r) => r.name.startsWith('c-'));
-    const bStar = selectBest(trainB);
-    const cStar = selectBest(trainC);
-    out['train'] = train;
-    out['bStar'] = bStar.name;
-    out['cStar'] = cStar.name;
-    for (const r of train) {
-      say(`訓練 ${r.name} 勝率 ${(100 * r.win).toFixed(1)} 分差 ${r.margin.toFixed(2)}`);
+  it('訓練 → 選 (b*)(c*) → 訓練種子上的分歧率 →（階段允許時）量測種子上的 (c)−(b)', () => {
+    // 訓練：兩族全部成員（可分給幾個行程）。
+    const names = [...B_FAMILY, ...C_FAMILY];
+    const train: Row[] = [];
+    for (const name of names) {
+      if (STAGE === 'train' && !wanted(name)) {
+        continue;
+      }
+      if (STAGE === 'jobs' || STAGE === 'pre' || STAGE === 'all' || wanted(name)) {
+        train.push(cached('train', name, () => score(name, trainSeeds, at)));
+        say(
+          `訓練 ${name} 勝率 ${(100 * (train[train.length - 1] as Row).win).toFixed(1)} 分差 ${(train[train.length - 1] as Row).margin.toFixed(2)}`,
+        );
+      }
     }
+    if (STAGE === 'train') {
+      expect(train.length).toBeGreaterThan(0);
+      return;
+    }
+    const bStar = selectBest(train.filter((r) => r.name.startsWith('b-')));
+    const cStar = selectBest(train.filter((r) => r.name.startsWith('c-')));
     say(
       `(b*) ＝ ${bStar.name}（${(100 * bStar.win).toFixed(1)}%）、(c*) ＝ ${cStar.name}（${(100 * cStar.win).toFixed(1)}%）`,
     );
+    writeIfDir('select', { bStar, cStar, train });
 
     // 訓練種子上的分歧率（只跑 (b*) 驅動，不讀勝率）。
-    const pre = divergence(spec(bStar.name, cStar.name, trainSeeds, at));
-    out['preDivergence'] = pre;
+    const pre = cached('pre', `${bStar.name}__${cStar.name}`, () =>
+      divergence(spec(bStar.name, cStar.name, trainSeeds, at)),
+    );
     say(
       `訓練種子上 (b*)=${bStar.name} 對 (c*)=${cStar.name}：場級 ${String(pre.gamesDiffer)}/${String(pre.games)}，點級 ${String(pre.pointsDiff)}/${String(pre.points)}，逐 tick ${(100 * pre.tickRate).toFixed(2)}%，活躍 tick ${(100 * pre.liveRate).toFixed(1)}%`,
     );
     expect(pre.games).toBe(TRAIN_N);
-
-    if (preOnly) {
-      if (process.env['D8_PROBE_OUT'] !== undefined) {
-        writeFileSync(process.env['D8_PROBE_OUT'], JSON.stringify(out, null, 1));
-      }
+    if (STAGE === 'pre') {
       return;
     }
 
-    // 量測：(c*)−(b*)，全部、0 號邊、1 號邊分開。
+    // 量測。
     const results: Record<string, ProbeAResult> = {};
-    const run = (label: string, list: readonly number[], c: string): void => {
-      const r = compareBC(spec(bStar.name, c, list, at));
+    const run = (label: string, b: string, c: string, list: readonly number[]): void => {
+      if (!wanted(label)) {
+        return;
+      }
+      const r = cached('job', label.replace(/\|/g, '__'), () => compareBC(spec(b, c, list, at)));
       results[label] = r;
-      say(formatProbeA(`D-8 ${cellName} (b*)=${bStar.name} (c)=${c} [${label}]`, r));
+      say(formatProbeA(`D-8 ${cellName} ${b} → ${c} [${label}]`, r));
       expect(r.winBoundHolds).toBe(true);
       expect(r.inconsistentSeeds).toEqual([]);
     };
-    run(`all|${cStar.name}`, seeds, cStar.name);
+    run('all', bStar.name, cStar.name, seeds);
     run(
-      `seat0|${cStar.name}`,
+      'seat0',
+      bStar.name,
+      cStar.name,
       seeds.filter((s) => s % 2 === 0),
-      cStar.name,
     );
     run(
-      `seat1|${cStar.name}`,
-      seeds.filter((s) => s % 2 === 1),
+      'seat1',
+      bStar.name,
       cStar.name,
+      seeds.filter((s) => s % 2 === 1),
     );
-    // 敏感度：(c) 族每個成員對 (b*)（事後的敏感度分析，不是標籤）。
+    for (const [b, c] of TWINS) {
+      run(`twin|${b}|${c}`, b, c, twinSeeds);
+    }
     if (allC) {
       for (const c of C_FAMILY) {
         if (c !== cStar.name) {
-          run(`all|${c}`, seeds, c);
+          run(`c|${c}`, bStar.name, c, seeds);
         }
       }
     }
-    // 雙胞胎對照：機器一樣、只差「讀對手」。
-    for (const [b, c] of TWINS) {
-      const r = compareBC(spec(b, c, twinSeeds, at));
-      results[`twin|${b}|${c}`] = r;
-      say(formatProbeA(`${b} → ${c} [twin]`, r));
-      expect(r.winBoundHolds).toBe(true);
-      expect(r.inconsistentSeeds).toEqual([]);
-    }
-    out['results'] = results;
-
     // 參照：(b*) 自己的絕對勝率（陷阱一：(b*) 夠不夠強）、(d) 鏡像。
-    const bAbs = seeds.map((s) => playWith(s, member(bStar.name), at));
-    out['bStarAbs'] = {
-      win: pairedStats(bAbs.map((o) => o.win)),
-      margin: pairedStats(bAbs.map((o) => o.margin)),
-    };
-    say(
-      `(b*) 量測種子上的絕對值：勝率 ${pp(pairedStats(bAbs.map((o) => o.win)).mean)}，分差 ${pairedStats(bAbs.map((o) => o.margin)).mean.toFixed(2)}`,
-    );
-    const mirror = mirrorRow(seeds);
-    out['mirror'] = mirror;
-    say(
-      `(d) 鏡像（AI 引擎當玩家）勝率 ${(100 * mirror.win).toFixed(1)}%，分差 ${mirror.margin.toFixed(2)}`,
-    );
-
-    if (process.env['D8_PROBE_OUT'] !== undefined) {
-      writeFileSync(process.env['D8_PROBE_OUT'], JSON.stringify(out, null, 1));
+    if (wanted('bstar')) {
+      const abs = cached('job', 'bstar', () => {
+        const rows = seeds.map((s) => playWith(s, member(bStar.name), at));
+        return {
+          win: pairedStats(rows.map((o) => o.win)),
+          margin: pairedStats(rows.map((o) => o.margin)),
+        };
+      });
+      say(
+        `(b*) 量測種子上的絕對值：勝率 ${(100 * abs.win.mean).toFixed(1)}，分差 ${abs.margin.mean.toFixed(2)}`,
+      );
+    }
+    if (wanted('mirror')) {
+      const mirror = cached('job', 'mirror', () => mirrorRow(seeds));
+      say(
+        `(d) 鏡像（AI 引擎當玩家）勝率 ${(100 * mirror.win).toFixed(1)}%，分差 ${mirror.margin.toFixed(2)}`,
+      );
     }
   }, 7_200_000);
 
@@ -201,7 +226,21 @@ describe(`D-8 探針 A 完整版｜格 ${cellName}（貪心型等級 ${String(at
     expect(trainSeeds.some((s) => seeds.includes(s))).toBe(false);
     expect(Math.max(...trainSeeds)).toBeLessThan(FROM);
     expect(B_FAMILY.length).toBeGreaterThanOrEqual(5);
+    expect(C_FAMILY.length).toBeGreaterThanOrEqual(5);
     const state: D8State = d8Game.init(1, CONFIG);
     expect(state.tick).toBe(0);
   });
 });
+
+function writeIfDir(kind: string, value: unknown): void {
+  if (OUT_DIR !== undefined) {
+    mkdirSync(OUT_DIR, { recursive: true });
+    writeFileSync(
+      join(
+        OUT_DIR,
+        `${cellName}.t${String(TRAIN_N)}.n${String(N)}.w${String(TWIN_N)}.${kind}.json`,
+      ),
+      JSON.stringify(value),
+    );
+  }
+}
