@@ -43,8 +43,12 @@ export const PRIOR_ZERO = 0.35;
 /** 貪心型搶拍：音符開始前這麼多 tick 內按著那一軌，gain 加一點。 */
 export const ANTICIPATE_TICKS = 12;
 export const ANTICIPATE_GAIN = 0.1;
-/** 按一條沒有音符的軌道的 danger。 */
-export const WRONG_LANE_DANGER = 0.5;
+/**
+ * 按一條沒有音符的軌道的 danger（每條 1，上限 1）：這一個 tick 一定被記一筆多按，是確定的小損失，
+ * 不是不確定的風險。設成 1 之後賭徒型（偏好風險）會把它整個排除，而不是當成誘因去按
+ * （試過 0.5：落後時賭徒型 r 升到 4，整個對打階段都按著錯的軌道，每回合扣 12 分）。
+ */
+export const WRONG_LANE_DANGER = 1;
 /** 自己的口味（種子決定）只用來在沒有差別的軌道之間分高下。 */
 const TASTE_WEIGHT = 0.01;
 /** 越早放的音折得越少：同樣價值的計畫，AI 選比較早的格子。 */
