@@ -243,3 +243,316 @@ export const S_6: CardSpec = defineSpec<S6World>('S-6', {
 });
 
 export const CONTROL_SPADES: readonly CardSpec[] = [S_8, S_10, S_6];
+
+// ---------------------------------------------------------------------------
+// 目標牌：S-A、S-2、S-3、S-Q（各自獨立的場地）、S-5（乒乓）、S-7（拔槍）、S-J（射手與靶）
+// ---------------------------------------------------------------------------
+
+const other = (side: Side): Side => (side === 0 ? 1 : 0);
+
+// S-A、S-2、S-3、S-Q：兩個人各自在自己的場地裡躲自己的子彈（fields[side] 含玩家、子彈、命中數），
+// 兩邊唯一的耦合是 score 的差（領先）。對手的元件就是整個 fields[o]。
+interface Bullet {
+  readonly x: number;
+  readonly y: number;
+}
+interface Field {
+  readonly px: number;
+  readonly py: number;
+  readonly invuln: number;
+  readonly hits: number;
+  readonly grazes: number;
+  readonly bullets: readonly Bullet[];
+}
+interface FieldWorld {
+  readonly fields: readonly Field[];
+}
+
+const fieldLegal = (s: FieldWorld, _ai: Side): string | null => {
+  for (const f of s.fields) {
+    if (!(
+      f.px >= PLAYER_R &&
+      f.px <= FIELD_W - PLAYER_R &&
+      f.py >= PLAYER_R &&
+      f.py <= FIELD_H - PLAYER_R
+    )) {
+      return '玩家出界';
+    }
+    if (!(f.invuln >= 0 && f.invuln <= 60)) {
+      return '無敵倒數無效';
+    }
+    if (!(Number.isInteger(f.hits) && f.hits >= 0 && Number.isInteger(f.grazes) && f.grazes >= 0)) {
+      return '命中或擦彈數無效';
+    }
+    if (
+      f.bullets.some((b) => !(b.x >= -2 && b.x <= FIELD_W + 2 && b.y >= 0 && b.y <= FIELD_H + 2))
+    ) {
+      return '子彈在場地外';
+    }
+  }
+  return null;
+};
+
+const fieldTeeth = <W extends FieldWorld>(
+  s: W,
+  ai: Side,
+): readonly { name: string; state: W }[] => {
+  const o = other(ai);
+  return [
+    { name: '玩家出界', state: setAt(s, `fields.${o}.px`, -9) },
+    { name: '無敵倒數無效', state: setAt(s, `fields.${o}.invuln`, 999) },
+    { name: '命中數無效', state: setAt(s, `fields.${o}.hits`, -1) },
+    { name: '子彈在場地外', state: setAt(s, `fields.${o}.bullets`, [{ x: 999, y: 5 }]) },
+  ];
+};
+
+// 特殊狀態：對手無敵中、對手多被打中 3 次（領先反轉）。
+const fieldSpecial = <W extends FieldWorld>(
+  s: W,
+  ai: Side,
+): readonly { name: string; state: W }[] => {
+  const o = other(ai);
+  const f = s.fields[o] as Field;
+  return [
+    { name: 'opp-invuln-60', state: setAt(s, `fields.${o}.invuln`, 60) },
+    { name: 'opp-invuln-0', state: setAt(s, `fields.${o}.invuln`, 0) },
+    { name: 'opp-hits+3', state: setAt(s, `fields.${o}.hits`, f.hits + 3) },
+  ];
+};
+
+const fieldSpec = (id: string): CardSpec =>
+  defineSpec<FieldWorld>(id, {
+    comp: sideOf('fields'),
+    legal: fieldLegal,
+    teeth: fieldTeeth,
+    special: fieldSpecial,
+  });
+
+export const S_A: CardSpec = fieldSpec('S-A');
+export const S_2: CardSpec = fieldSpec('S-2');
+export const S_3: CardSpec = fieldSpec('S-3');
+
+// S-Q 鏡像：S-3 加上每邊的鏡像計時器 mirror[side]（pending → active → immune，同一時間最多一個非零）與觸發次數 triggers。
+interface MirrorWorld extends FieldWorld {
+  readonly mirror: readonly {
+    readonly pending: number;
+    readonly active: number;
+    readonly immune: number;
+  }[];
+  readonly triggers: readonly number[];
+}
+export const S_Q: CardSpec = defineSpec<MirrorWorld>('S-Q', {
+  comp: sideOf('fields', 'mirror', 'triggers'),
+  legal: (s: MirrorWorld, ai: Side) => {
+    const base = fieldLegal(s, ai);
+    if (base !== null) {
+      return base;
+    }
+    for (const m of s.mirror) {
+      const live = [m.pending, m.active, m.immune].filter((n) => n > 0).length;
+      if (live > 1 || [m.pending, m.active, m.immune].some((n) => !Number.isInteger(n) || n < 0)) {
+        return '鏡像計時器無效';
+      }
+    }
+    return null;
+  },
+  teeth: (s: MirrorWorld, ai: Side) => [
+    ...fieldTeeth(s, ai),
+    {
+      name: '鏡像計時器無效',
+      state: setAt(s, `mirror.${other(ai)}`, { pending: 5, active: 5, immune: 0 }),
+    },
+  ],
+  special: (s: MirrorWorld, ai: Side) => {
+    const o = other(ai);
+    return [
+      ...fieldSpecial(s, ai),
+      {
+        name: 'opp-mirror-pending',
+        state: setAt(s, `mirror.${o}`, { pending: 30, active: 0, immune: 0 }),
+      },
+      {
+        name: 'opp-mirror-active',
+        state: setAt(s, `mirror.${o}`, { pending: 0, active: 120, immune: 0 }),
+      },
+      {
+        name: 'opp-mirror-immune',
+        state: setAt(s, `mirror.${o}`, { pending: 0, active: 0, immune: 120 }),
+      },
+      {
+        name: 'opp-mirror-calm',
+        state: setAt(s, `mirror.${o}`, { pending: 0, active: 0, immune: 0 }),
+      },
+    ];
+  },
+});
+
+// S-5 乒乓：兩塊板子（paddles[side]：x、vx、target）、各自最近 5 次回球的落點 habit[side]（公開，AI 讀它猜對方回哪）、
+// 比分 points[side]。球與發球方是共用的。發球方每得一分輪替，所以換對手的分數時要保持「總分的奇偶」不變，
+// 才不會讓發球方與比分矛盾。
+interface PongWorld {
+  readonly phase: string;
+  readonly server: number;
+  readonly target: number;
+  readonly paddles: readonly { readonly x: number; readonly vx: number; readonly target: number }[];
+  readonly habit: readonly (readonly number[])[];
+  readonly points: readonly number[];
+}
+export const S_5: CardSpec = defineSpec<PongWorld>('S-5', {
+  comp: sideOf('paddles', 'habit', 'points'),
+  donorOk: (q: PongWorld, d: PongWorld, ai: Side) =>
+    q.phase === d.phase &&
+    q.server === d.server &&
+    ((q.points[other(ai)] as number) - (d.points[other(ai)] as number)) % 2 === 0,
+  legal: (s: PongWorld, _ai: Side) => {
+    for (const p of s.paddles) {
+      if (!(p.x >= 15 && p.x <= FIELD_W - 15) || Math.abs(p.vx) > 2.4 + 1e-9) {
+        return '板子位置或速度無效';
+      }
+      if (![0, 1, -1, 2.4, -2.4].some((t) => Math.abs(p.target - t) < 1e-9)) {
+        return '板子的目標速度無效';
+      }
+    }
+    if (s.habit.some((h) => h.length > 5 || h.some((x) => !(x >= 0 && x <= FIELD_W)))) {
+      return '回球習慣無效';
+    }
+    if (s.points.some((n) => !Number.isInteger(n) || n < 0 || n >= s.target)) {
+      return '比分無效';
+    }
+    return null;
+  },
+  teeth: (s: PongWorld, ai: Side) => [
+    { name: '板子位置無效', state: setAt(s, `paddles.${other(ai)}.x`, -20) },
+    { name: '回球習慣無效', state: setAt(s, `habit.${other(ai)}`, [1, 2, 3, 4, 5, 6]) },
+    { name: '比分無效', state: setAt(s, `points.${other(ai)}`, 99) },
+  ],
+});
+
+// S-7 拔槍：對手的公開紀錄 spent（用掉的假動作）與歷史裡它的假動作次數／時間／上當次數。
+// 隱藏的當前輪資訊（twitches、flash.makers、press）與勝負歷史不換（它們和共用的 flash、wins 耦合）。
+interface DrawWorld {
+  readonly round: number;
+  readonly phase: string;
+  readonly spent: readonly number[];
+  readonly twitches: readonly number[];
+  readonly flash: unknown;
+  readonly press: readonly unknown[];
+  readonly history: readonly {
+    readonly twitches: readonly number[];
+    readonly twitchAt: readonly (readonly number[])[];
+    readonly baited: readonly number[];
+  }[];
+}
+export const S_7: CardSpec = defineSpec<DrawWorld>('S-7', {
+  comp: (side: Side, s?: DrawWorld) => {
+    const paths = [`spent.${side}`];
+    if (s !== undefined) {
+      for (let i = 0; i < s.history.length; i += 1) {
+        paths.push(
+          `history.${i}.twitches.${side}`,
+          `history.${i}.twitchAt.${side}`,
+          `history.${i}.baited.${side}`,
+        );
+      }
+    }
+    return paths;
+  },
+  donorOk: (q: DrawWorld, d: DrawWorld) =>
+    q.round === d.round &&
+    q.phase === d.phase &&
+    q.history.length === d.history.length &&
+    (q.flash === null) === (d.flash === null) &&
+    q.press.every((p, i) => (p === null) === (d.press[i] === null)),
+  legal: (s: DrawWorld, _ai: Side) => {
+    for (const side of [0, 1] as const) {
+      const seen = s.history.reduce((n, r) => n + (r.twitches[side] as number), 0);
+      if ((s.spent[side] as number) < seen) {
+        return '用掉的假動作少於歷史裡的次數';
+      }
+      // 結算階段 spent 已經把這一輪的 twitches 加進去、twitches 還留著到下一輪才歸零，所以只在等待階段檢查總和。
+      if (
+        (s.spent[side] as number) > 6 ||
+        (s.phase === 'wait' && (s.spent[side] as number) + (s.twitches[side] as number) > 6)
+      ) {
+        return '假動作超過上限 6';
+      }
+      for (const r of s.history) {
+        if ((r.twitchAt[side] as readonly number[]).length !== r.twitches[side]) {
+          return '假動作次數與時間數量不一致';
+        }
+        if ((r.baited[side] as number) < 0 || (r.baited[side] as number) > 1) {
+          return '上當次數無效';
+        }
+      }
+    }
+    return null;
+  },
+  teeth: (s: DrawWorld, ai: Side) => [
+    { name: '用掉的假動作少於歷史裡的次數', state: setAt(s, `spent.${other(ai)}`, -1) },
+    { name: '假動作超過上限 6', state: setAt(s, `spent.${other(ai)}`, 7) },
+  ],
+});
+
+// S-J 射手與靶：兩局交換角色。射手有游標、冷卻、公開的彈藥；靶有位置速度與無敵。兩個角色的元件都在 state 的頂層
+// （不分邊），所以「某一邊的元件」依這一局誰是射手而定。子彈是共用環境。
+interface ShootWorld {
+  readonly shooter: number;
+  readonly round: number;
+  readonly cursor: number;
+  readonly cooldown: number;
+  readonly ammo: number;
+  readonly regen: number;
+  readonly px: number;
+  readonly py: number;
+  readonly invuln: number;
+  readonly bullets: readonly Bullet[];
+}
+export const S_J: CardSpec = defineSpec<ShootWorld>('S-J', {
+  comp: (side: Side, s?: ShootWorld) => {
+    const common = [`hits.${side}`, `zone.${side}`];
+    if (s === undefined) {
+      return common;
+    }
+    return s.shooter === side
+      ? [...common, 'cursor', 'cooldown', 'ammo', 'regen']
+      : [...common, 'px', 'py', 'vx', 'vy', 'invuln'];
+  },
+  donorOk: (q: ShootWorld, d: ShootWorld) => q.round === d.round && q.shooter === d.shooter,
+  legal: (s: ShootWorld, _ai: Side) => {
+    if (!(s.cursor >= 2 && s.cursor <= FIELD_W - 2)) {
+      return '游標出界';
+    }
+    if (!(Number.isInteger(s.ammo) && s.ammo >= 0 && s.ammo <= 5)) {
+      return '彈藥無效';
+    }
+    if (!(s.cooldown >= 0 && s.cooldown <= 20 && s.regen >= 0 && s.regen <= 90)) {
+      return '冷卻或補充倒數無效';
+    }
+    if (!(
+      s.px >= PLAYER_R &&
+      s.px <= FIELD_W - PLAYER_R &&
+      s.py >= PLAYER_R &&
+      s.py <= FIELD_H - PLAYER_R
+    )) {
+      return '靶出界';
+    }
+    if (!(s.invuln >= 0 && s.invuln <= 45)) {
+      return '無敵倒數無效';
+    }
+    // 沒有無敵的靶不可能和子彈重疊（重疊的那個 tick 就被打中、進入無敵）。
+    if (s.invuln === 0 && s.bullets.some((b) => Math.hypot(b.x - s.px, b.y - s.py) < 5 - 1e-9)) {
+      return '沒有無敵的靶壓在子彈上';
+    }
+    return null;
+  },
+  teeth: (s: ShootWorld) => [
+    { name: '彈藥無效', state: setAt(s, 'ammo', 99) },
+    { name: '靶出界', state: setAt(s, 'px', -50) },
+    {
+      name: '沒有無敵的靶壓在子彈上',
+      state: setAt(setAt(setAt(s, 'invuln', 0), 'bullets', [{ x: s.px, y: s.py }]), 'py', s.py),
+    },
+  ],
+});
+
+export const SPADES_SPECS: readonly CardSpec[] = [S_A, S_2, S_3, S_Q, S_5, S_7, S_J];

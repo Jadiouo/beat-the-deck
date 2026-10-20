@@ -14,6 +14,10 @@ import type { CardSpec, Path, SpecialPerturbation, Det } from './engine';
 export interface SpecInput<S> {
   readonly comp: (side: Side, state?: S) => readonly Path[];
   readonly donorOk?: (query: S, donor: S, ai: Side) => boolean;
+  readonly entangled?: (side: Side, state?: S) => readonly Path[];
+  readonly mixed?: readonly Path[];
+  readonly mixedOk?: (before: S, after: S, preserved: Side) => boolean;
+  readonly graftSide?: (query: S, donor: S, ai: Side, side: Side) => S | null;
   readonly legal: (state: S, ai: Side) => string | null;
   readonly special?: (state: S, ai: Side, det: Det) => readonly SpecialPerturbation<S>[];
   readonly teeth?: (state: S, ai: Side) => readonly SpecialPerturbation<S>[];
