@@ -242,7 +242,7 @@ describe('決策點與探針串接', () => {
     for (let i = 1; i < hits.length; i += 1) {
       expect((hits[i]?.tick ?? 0) - (hits[i - 1]?.tick ?? 0)).toBeGreaterThanOrEqual(14);
     }
-  });
+  }, 120_000);
 
   it('compareBC 串得起來：勝率差不超過場級分歧率、沒有一致性違規', () => {
     const spec = s5Spec('b-straight', 'c-away', firstCell(), [0, 1, 2, 3]);

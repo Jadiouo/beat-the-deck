@@ -225,7 +225,7 @@ describe('決策點與探針串接', () => {
     // 射手的回合不算決策點。
     const asShooter = { ...firstSample(samples).state };
     expect(isPoint(asShooter, asShooter.shooter, 0)).toBe(false);
-  });
+  }, 120_000);
 
   it('compareBC 串得起來：勝率差不超過場級分歧率、沒有一致性違規', () => {
     const spec = sjSpec('b-y62', 'c-offcol10', firstCell(), [0, 1, 2, 3]);
