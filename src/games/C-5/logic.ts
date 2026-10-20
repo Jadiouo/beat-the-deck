@@ -430,6 +430,17 @@ function baitCell(
 // 一個 tick
 // ---------------------------------------------------------------------------
 
+/** 牆格的集合：以牆陣列的參考為鍵記起來（同一組牆會連續用上幾百個 tick；資料從不被改動）。 */
+let wallsFor: readonly (readonly number[])[] | null = null;
+let wallsSet: ReadonlySet<number> = new Set<number>();
+function wallSetOf(bars: readonly (readonly number[])[]): ReadonlySet<number> {
+  if (bars !== wallsFor) {
+    wallsSet = new Set<number>(bars.flat());
+    wallsFor = bars;
+  }
+  return wallsSet;
+}
+
 function crushed(snake: Snake, cells: ReadonlySet<number>): boolean {
   return snake.body.some((c) => cells.has(c));
 }
@@ -454,7 +465,7 @@ function stepWith(options: Required<C5Options>, state: C5State, inputs: Inputs):
 
   if (tick % MOVE_EVERY === 0) {
     moved = true;
-    const wallCells = new Set<number>(bars.flat());
+    const wallCells = wallSetOf(bars);
     const extended = bait === null ? foods : [...foods, bait.cell];
     const result = moveSnakes(snakes, extended);
     const dead: [boolean, boolean] = [result.dead[0], result.dead[1]];
@@ -670,6 +681,25 @@ function exitDistance(
   return BFS_CAP;
 }
 
+/**
+ * 落點的格子（集合與 0/1 表兩種）：同一個預告在它存在的 120 個 tick 裡是同一個物件，
+ * 搜尋型每次評估都會問，所以以 `landing.bars` 的參考為鍵記起來，不用每次重蓋（資料從不被改動）。
+ */
+let zoneFor: readonly (readonly number[])[] | null = null;
+let zoneSet: ReadonlySet<number> = new Set<number>();
+const zoneMask = new Uint8Array(CELLS);
+function zoneOf(bars: readonly (readonly number[])[]): ReadonlySet<number> {
+  if (bars !== zoneFor) {
+    zoneMask.fill(0);
+    zoneSet = new Set<number>(bars.flat());
+    for (const c of zoneSet) {
+      zoneMask[c] = 1;
+    }
+    zoneFor = bars;
+  }
+  return zoneSet;
+}
+
 /** `side` 下一步之後被牆壓死的 danger（0 到 1）；沒有預告、或下一步之後沒有身體在落點裡是 0。 */
 function crushDangerOf(state: C5State, side: Side, marginScale: number): number {
   const landing = state.landing;
@@ -684,29 +714,29 @@ function crushDangerOf(state: C5State, side: Side, marginScale: number): number 
     return 0;
   }
   const next = cell(nx, ny);
-  const zone = new Set<number>(landing.bars.flat());
+  const zone = zoneOf(landing.bars);
   const grows = state.bait !== null && state.bait.cell === next;
-  const newBody = [next, ...(grows ? me.body : me.body.slice(0, -1))];
-  let firstInZone = -1;
-  for (let i = 0; i < newBody.length; i += 1) {
-    if (zone.has(newBody[i] as number)) {
+  // 下一步之後的身體：[next, ...(吃到誘餌就接整條舊身體，沒吃到就去掉尾巴)]；不真的配置出來，第 i 格（i ≥ 1）就是舊身體的第 i − 1 格。
+  const length = grows ? me.body.length + 1 : me.body.length;
+  const headInZone = zoneMask[next] === 1;
+  let firstInZone = headInZone ? 0 : -1;
+  for (let i = 1; firstInZone < 0 && i < length; i += 1) {
+    if (zoneMask[me.body[i - 1] as number] === 1) {
       firstInZone = i;
-      break;
     }
   }
   if (firstInZone < 0) {
     return 0;
   }
-  const headInZone = zone.has(next);
   // 身體是一格接一格走過同一條路：落點整個清空要等到尾巴也走過去。
   // 頭在裡面：頭出去之後，整條身體（含吃誘餌長出來的）都還要走過這一段，所以算全長；
   // 頭在外面：從最靠近頭的那一格在落點裡的身體算到尾巴。
-  const inZone = headInZone ? newBody.length : newBody.length - firstInZone;
+  const inZone = headInZone ? length : length - firstInZone;
   let exitSteps = 0;
   if (headInZone) {
     const blocked = new Set<number>(state.bars.flat());
-    for (let i = 1; i < newBody.length; i += 1) {
-      blocked.add(newBody[i] as number);
+    for (let i = 1; i < length; i += 1) {
+      blocked.add(me.body[i - 1] as number);
     }
     const other = state.snakes[side === 0 ? 1 : 0];
     for (let i = 0; i < other.body.length - 1; i += 1) {
@@ -716,6 +746,47 @@ function crushDangerOf(state: C5State, side: Side, marginScale: number): number 
   }
   const stepsLeft = Math.max(0, Math.ceil((landing.at - state.tick) / MOVE_EVERY) - 1);
   return crushDanger(stepsLeft, exitSteps, inZone, headInZone, marginScale);
+}
+
+/**
+ * 對手的身體併進牆格（尾巴還是最後一格）：以「牆的陣列＋對手身體」的參考為鍵記起來，
+ * 同一個走格週期、同一組牆底下搜尋型會問上百次，答案永遠一樣（資料從不被改動）。
+ */
+let solidBars: readonly (readonly number[])[] | null = null;
+let solidFrom: readonly number[] | null = null;
+let solidBody: readonly number[] = [];
+function solidBodyOf(
+  bars: readonly (readonly number[])[],
+  body: readonly number[],
+): readonly number[] {
+  if (bars === solidBars && body === solidFrom) {
+    return solidBody;
+  }
+  const wall = bars.flat();
+  const tailIndex = body.length - 1;
+  solidBody =
+    wall.length === 0 || tailIndex < 0
+      ? body
+      : [...body.slice(0, tailIndex), ...wall, body[tailIndex] as number];
+  solidBars = bars;
+  solidFrom = body;
+  return solidBody;
+}
+
+/** 食物併進誘餌：同樣以參考為鍵記起來。 */
+let foodsFrom: readonly number[] | null = null;
+let foodsBait = -1;
+let foodsWith: readonly number[] = [];
+function foodsOf(state: C5State): readonly number[] {
+  if (state.bait === null) {
+    return state.foods;
+  }
+  if (state.foods !== foodsFrom || state.bait.cell !== foodsBait) {
+    foodsWith = [...state.foods, state.bait.cell];
+    foodsFrom = state.foods;
+    foodsBait = state.bait.cell;
+  }
+  return foodsWith;
 }
 
 /**
@@ -729,20 +800,12 @@ function evaluateWith(
   side: Side,
 ): { gain: number; danger: number } {
   const other = state.snakes[side === 0 ? 1 : 0];
-  const wall = state.bars.flat();
-  const tailIndex = other.body.length - 1;
-  const solid: Snake = {
-    ...other,
-    body:
-      wall.length === 0 || tailIndex < 0
-        ? other.body
-        : [...other.body.slice(0, tailIndex), ...wall, other.body[tailIndex] as number],
-  };
+  const solid: Snake = { ...other, body: solidBodyOf(state.bars, other.body) };
   const world: ClubsState = {
     tick: state.tick,
     maxTicks: state.maxTicks,
     snakes: side === 0 ? [state.snakes[0], solid] : [solid, state.snakes[1]],
-    foods: state.bait === null ? state.foods : [...state.foods, state.bait.cell],
+    foods: foodsOf(state),
     rng: state.rng,
     over: state.over,
     winner: state.winner,
@@ -759,8 +822,7 @@ function evaluateWith(
 
 function actionsWith(state: C5State, side: Side): readonly Buttons[] {
   // 誘餌算食物；落點與牆不影響排序（那是 `evaluate` 的事）。
-  const foods = state.bait === null ? state.foods : [...state.foods, state.bait.cell];
-  return orderedActions({ ...state, foods }, side);
+  return orderedActions({ ...state, foods: foodsOf(state) }, side);
 }
 
 // ---------------------------------------------------------------------------
