@@ -552,11 +552,188 @@ export function actions(_state: JKBState, _side: Side): readonly Buttons[] {
 }
 
 // ---------------------------------------------------------------------------
-// 評估（給 AI）：先留空，等測試紅了再補
+// 評估（給 AI）
 // ---------------------------------------------------------------------------
 
-export function evaluate(_state: JKBState, _side: Side): { gain: number; danger: number } {
-  return { gain: 0, danger: 0 };
+/**
+ * 一分的 gain。其他項的單位是「格」：往有價值的金幣走近一格 ＝ 1（`COIN_W`），所以撿到一個金幣（100）永遠比
+ * 多走近幾格重要，而距離只在視野（搜尋型最多往前看 6 個 tick，約 1 到 2 次走格）之外的時候決定往哪走。
+ */
+export const POINT = 100;
+/** 離最近的有價值金幣每一格的扣分。 */
+export const COIN_W = 1;
+/** 重力下的走路成本：順風（往重力方向）一格 0.75、逆風一格 1.5（飄移每 12 tick 一格，走格每 4 tick 一格）。 */
+export const WIND_WITH = 0.75;
+export const WIND_AGAINST = 1.5;
+/** 搶劫期間：我可以推時，離對手每一格的扣分（追）；我在冷卻、對手能推時，離對手每一格的加分（躲，最多算 8 格）。 */
+export const ROB_CHASE_W = 2;
+export const ROB_FLEE_W = 2;
+export const ROB_FLEE_RANGE = 8;
+/** 準備項（只在預告期 `ruleTick ≥ 600 − 180` 生效；寫死的、人可以預測的習慣）。 */
+/** next ＝ 金幣雨：離標記格每一格的扣分；來得及（走過去的 tick ≤ 剩餘 tick ＋ 這個寬限）才有。 */
+export const RAIN_PREP_W = 2;
+export const RAIN_SLACK = 120;
+/** 毒藥／送禮快結束：離「5×5 內金幣最多的地方」每一格的扣分。 */
+export const DENSE_PREP_W = 2;
+/** next ＝ 搶劫：離對手不到這麼多格，每近一格扣 `ROB_PREP_W`。 */
+export const ROB_PREP_RANGE = 6;
+export const ROB_PREP_W = 10;
+/** next ＝ 重力：站得比這一列低（y 大）的每一列扣的分。 */
+export const GRAVITY_PREP_ROW = 6;
+export const GRAVITY_PREP_W = 1;
+/** 分數互換最後 1 秒：領先、而且對手搆不到任何金幣時的加成。 */
+export const FINAL_BONUS = 30;
+/** 相鄰、對手能推、我被推走並不致命時的 danger（推走我只是換了位置）。 */
+export const DANGER_PUSH = 0.4;
+/**
+ * 我剛推完人，對手要看到才能推回來：對手的反應延遲（12 tick）內它推不回來，我有時間走開，
+ * 所以推完的這段時間不算「相鄰就會被推」。
+ */
+export const SAFE_AFTER_SHOVE = 12;
+
+function projectedCell(av: JKBAvatar): number {
+  const to = stepCell(av.x, av.y, av.want);
+  return to >= 0 ? to : av.y * WIDTH + av.x;
+}
+
+/** 走路成本（格）：重力段順風便宜、逆風貴，其他段是曼哈頓距離。 */
+function travel(state: JKBState, fromCell: number, toCell: number): number {
+  const dx = Math.abs((toCell % WIDTH) - (fromCell % WIDTH));
+  const dy = Math.floor(toCell / WIDTH) - Math.floor(fromCell / WIDTH);
+  if (state.rule !== 'gravity') {
+    return dx + Math.abs(dy);
+  }
+  const withWind = state.gravity === 'down' ? dy > 0 : dy < 0;
+  return dx + Math.abs(dy) * (withWind ? WIND_WITH : WIND_AGAINST);
+}
+
+function manhattan(a: number, b: number): number {
+  return (
+    Math.abs((a % WIDTH) - (b % WIDTH)) + Math.abs(Math.floor(a / WIDTH) - Math.floor(b / WIDTH))
+  );
+}
+
+/**
+ * 「5×5 內金幣最多的地方」：以每個金幣為中心數 5×5 內有幾個金幣，最多的（同樣多取離 `from` 最近的）；
+ * 站的位置是那一群金幣的重心（四捨五入）。沒有金幣回傳 −1。
+ */
+export function densestSpot(coins: readonly number[], from: number): number {
+  let bestCount = 0;
+  let bestDist = Number.POSITIVE_INFINITY;
+  let spot = -1;
+  for (const center of coins) {
+    const cx = center % WIDTH;
+    const cy = Math.floor(center / WIDTH);
+    let count = 0;
+    let sx = 0;
+    let sy = 0;
+    for (const c of coins) {
+      const x = c % WIDTH;
+      const y = Math.floor(c / WIDTH);
+      if (Math.abs(x - cx) <= RAIN_RADIUS && Math.abs(y - cy) <= RAIN_RADIUS) {
+        count += 1;
+        sx += x;
+        sy += y;
+      }
+    }
+    const here = cell(Math.round(sx / count), Math.round(sy / count));
+    const dist = manhattan(from, here);
+    if (count > bestCount || (count === bestCount && dist < bestDist)) {
+      bestCount = count;
+      bestDist = dist;
+      spot = here;
+    }
+  }
+  return spot;
+}
+
+export function evaluate(state: JKBState, side: Side): { gain: number; danger: number } {
+  const me = state.avatars[side];
+  const opp = state.avatars[other(side)];
+  const lead = state.scores[side] - state.scores[other(side)];
+  if (isOver(state)) {
+    return { gain: POINT * lead, danger: 0 };
+  }
+  const { rule, ruleTick } = state;
+  const here = projectedCell(me);
+  const theirs = opp.y * WIDTH + opp.x;
+  let gain = POINT * lead;
+
+  // 有價值的金幣：近一格 ＋1。毒藥、送禮、搶劫的金幣沒有價值（撿了不賺）。
+  if (rule === 'normal' || rule === 'rain' || rule === 'gravity' || rule === 'exchange') {
+    let best = Number.POSITIVE_INFINITY;
+    for (const c of state.coins) {
+      best = Math.min(best, travel(state, here, c));
+    }
+    for (const c of state.extra) {
+      best = Math.min(best, travel(state, here, c));
+    }
+    if (best !== Number.POSITIVE_INFINITY) {
+      gain -= COIN_W * best;
+    }
+  }
+
+  // 搶劫：我能推就追，我在冷卻而它能推就躲
+  if (rule === 'rob') {
+    const d = manhattan(here, theirs);
+    if (me.shoveCd === 0) {
+      gain -= ROB_CHASE_W * d;
+    } else if (opp.shoveCd === 0) {
+      gain += ROB_FLEE_W * Math.min(d, ROB_FLEE_RANGE);
+    }
+  }
+
+  // 準備項：只在預告期
+  const preview = ruleTick >= PHASE_TICKS - NOTICE_TICKS && state.next !== 'none';
+  if (preview) {
+    if (state.next === 'rain' && state.rainCell >= 0) {
+      const d = manhattan(here, state.rainCell);
+      if (d * MOVE_EVERY <= PHASE_TICKS - ruleTick + RAIN_SLACK) {
+        gain -= RAIN_PREP_W * d;
+      }
+    } else if (state.next === 'rob') {
+      gain -= ROB_PREP_W * Math.max(0, ROB_PREP_RANGE - manhattan(here, theirs));
+    } else if (state.next === 'gravity') {
+      gain -= GRAVITY_PREP_W * Math.max(0, Math.floor(here / WIDTH) - GRAVITY_PREP_ROW);
+    }
+    if (rule === 'poison' || rule === 'gift') {
+      const spot = densestSpot(state.coins, here);
+      if (spot >= 0) {
+        gain -= DENSE_PREP_W * manhattan(here, spot);
+      }
+    }
+  }
+
+  // 分數互換的時間項：最後 1 秒，領先而且對手搆不到任何金幣（走過去要的 tick 比剩下的多）才算數
+  if (rule === 'exchange' && ruleTick >= PHASE_TICKS - FINAL_TICKS && lead > 0) {
+    const left = Math.min(PHASE_TICKS - ruleTick, state.maxTicks - state.tick);
+    let reach = Number.POSITIVE_INFINITY;
+    for (const c of state.coins) {
+      reach = Math.min(reach, manhattan(theirs, c));
+    }
+    if (reach * MOVE_EVERY > left) {
+      gain += FINAL_BONUS;
+    }
+  }
+
+  // danger：對手相鄰、冷卻是 0、而且推得動我（我後面有格子）
+  let danger = 0;
+  if (opp.shoveCd === 0 && manhattan(here, theirs) === 1) {
+    const hx = here % WIDTH;
+    const hy = Math.floor(here / WIDTH);
+    const dir = hx > opp.x ? 1 : hx < opp.x ? 3 : hy > opp.y ? 2 : 0;
+    const behind = stepCell(hx, hy, dir);
+    if (behind >= 0) {
+      if (rule === 'rob') {
+        danger = me.shoveCd > SHOVE_CD - SAFE_AFTER_SHOVE ? 0 : 1;
+      } else if ((rule === 'poison' || rule === 'gift') && state.coins.includes(behind)) {
+        danger = 1;
+      } else {
+        danger = DANGER_PUSH;
+      }
+    }
+  }
+  return { gain, danger };
 }
 
 export const jkbGame: Game<JKBState> = {
