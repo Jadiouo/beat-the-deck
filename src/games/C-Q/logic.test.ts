@@ -9,7 +9,7 @@ import {
 } from '../../../tests/contract/fake-context';
 import { deepFreeze } from '../../../tests/contract/freeze';
 import { COLOR } from '../../shell/palette';
-import { cell, cellX, cellY } from '../_clubs/logic';
+import { cell, cellX, cellY, orderedActions } from '../_clubs/logic';
 import {
   AIM_EVERY,
   AIM_LEAD,
@@ -21,7 +21,7 @@ import {
   START_RELOAD,
   aimPoint,
   createCQGame,
-  cqGame,
+  cqGame as shippedGame,
   makeState,
 } from './logic';
 import type { CQState } from './logic';
@@ -37,6 +37,8 @@ import { cqRender } from './render';
  * 預設的蛇：人 (5,12) 往右、AI (26,11) 往左，各 3 格；食物在 (15,3) 與 (15,20)。
  */
 
+/** 小規格原版的規則（放出不花東西）。這個檔案前半段測的是這一版；預設交付的版本（tailCost）見 `shippedGame` 的測試。 */
+const cqGame = createCQGame({ tailCost: false });
 const CONFIG = { maxTicks: 3600, params: {} };
 const NONE: Buttons = { up: false, down: false, left: false, right: false, a: false, b: false };
 const A: Buttons = { ...NONE, a: true };
@@ -588,15 +590,16 @@ describe('C-Q 兩條蛇｜tailCost 版本（DESIGN-AI-FUN 10.19 的改法：放�
 });
 
 describe('C-Q 兩條蛇｜actions', () => {
-  it('可以放：6 個動作，不放的在前（轉向在前、全放開，然後同樣三個帶 a）', () => {
-    const actions = cqGame.actions(makeState(), 0);
+  it('可以放：基底動作是 C-A 的 orderedActions（5 個，兩個轉向在前），後面再接一個「全放開＋a」', () => {
+    const state = makeState();
+    const actions = cqGame.actions(state, 0);
+    const base = orderedActions(state, 0);
+    expect(base).toHaveLength(5);
     expect(actions).toHaveLength(6);
-    expect(actions.slice(0, 3).every((b) => !b.a)).toBe(true);
-    expect(actions.slice(3).every((b) => b.a)).toBe(true);
-    // 前三個裡兩個是轉向、一個是全放開
-    const turns = actions.slice(0, 3).filter((b) => b.up || b.down || b.left || b.right);
-    expect(turns).toHaveLength(2);
-    expect(actions[0]?.left || actions[0]?.right).toBe(false);
+    expect(actions.slice(0, 5)).toEqual(base);
+    expect(actions[5]).toEqual(A);
+    // 不放的在前、放的在後（平手時搜尋型取排前面的＝不放）
+    expect(actions.slice(0, 5).every((b) => !b.a)).toBe(true);
   });
 
   it('冷卻中、僚機在場上、aHeld、死亡、結束：沒有帶 a 的動作', () => {
@@ -610,20 +613,27 @@ describe('C-Q 兩條蛇｜actions', () => {
       expect(cqGame.actions(state, 0).length).toBeGreaterThan(0);
     }
     const dead = makeState({ snakes: [{ alive: false }, {}] });
-    expect(cqGame.actions(dead, 0)).toHaveLength(1);
+    expect(cqGame.actions(dead, 0).some((b) => b.a)).toBe(false);
     const over = makeState({ over: true });
-    expect(cqGame.actions(over, 0)).toHaveLength(1);
-    expect(cqGame.actions(over, 1)).toHaveLength(1);
+    expect(cqGame.actions(over, 0)).toHaveLength(orderedActions(over, 0).length);
+    expect(cqGame.actions(over, 0).some((b) => b.a)).toBe(false);
   });
 
-  it('被鎖定：只有全放開（可放時再加全放開＋a）', () => {
+  it('被鎖定：基底是 orderedActions 的固定順序（沒有轉向的選擇），可放時再加全放開＋a', () => {
     const locked = makeState({ lock: [2, 0] });
     const actions = cqGame.actions(locked, 0);
-    expect(actions).toHaveLength(2);
     expect(actions[0]).toEqual(NONE);
-    expect(actions[1]?.a).toBe(true);
+    expect(actions[actions.length - 1]).toEqual(A);
     const lockedCool = makeState({ lock: [2, 0], reload: [9, 0] });
-    expect(cqGame.actions(lockedCool, 0)).toEqual([NONE]);
+    expect(cqGame.actions(lockedCool, 0).some((b) => b.a)).toBe(false);
+  });
+
+  it('每個動作都是凍結的共用物件，同一個局面連續問兩次回傳相同內容', () => {
+    const state = makeState();
+    expect(cqGame.actions(state, 0)).toEqual(cqGame.actions(state, 0));
+    for (const b of cqGame.actions(state, 0)) {
+      expect(Object.isFrozen(b)).toBe(true);
+    }
   });
 
   it('tailCost 版本：長度不到 4 時沒有帶 a 的動作', () => {
@@ -633,6 +643,26 @@ describe('C-Q 兩條蛇｜actions', () => {
       snakes: [{ body: [cell(5, 12), cell(4, 12), cell(3, 12), cell(2, 12)] }, {}],
     });
     expect(game.actions(long, 0).some((b) => b.a)).toBe(true);
+  });
+});
+
+describe('C-Q 兩條蛇｜預設交付的版本（tailCost，DESIGN-AI-FUN 10.19 的改法）', () => {
+  it('cqGame 預設就是 tailCost：放出割尾巴、分數 −1；起始長度 3 的蛇不能放', () => {
+    const short = shippedGame.step(makeState({ tick: 0 }), [A, NONE]);
+    expect(short.launches).toEqual([0, 0]);
+    const state = makeState({
+      tick: 0,
+      snakes: [{ body: [cell(5, 12), cell(4, 12), cell(3, 12), cell(2, 12)] }, {}],
+    });
+    const next = shippedGame.step(state, [A, NONE]);
+    expect(next.snakes[0].body).toHaveLength(3);
+    expect(next.snakes[0].score).toBe(-1);
+  });
+
+  it('關掉 tailCost 就是小規格原版：起始長度 3 也能放，不扣分', () => {
+    const next = cqGame.step(makeState({ tick: 0 }), [A, NONE]);
+    expect(next.launches).toEqual([1, 0]);
+    expect(next.snakes[0].score).toBe(0);
   });
 });
 
