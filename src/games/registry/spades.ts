@@ -24,6 +24,10 @@ import { s5Game } from '../S-5/logic';
 import type { S5State } from '../S-5/logic';
 import { s5Meta } from '../S-5/meta';
 import { s5Render } from '../S-5/render';
+import { s6Game } from '../S-6/logic';
+import type { S6State } from '../S-6/logic';
+import { s6Meta } from '../S-6/meta';
+import { s6Render } from '../S-6/render';
 import { s7Game } from '../S-7/logic';
 import type { S7State } from '../S-7/logic';
 import { s7Meta } from '../S-7/meta';
@@ -79,6 +83,13 @@ export const spadesEntries: readonly RegistryEntry[] = [
     game: s5Game,
     render: s5Render,
     meta: s5Meta,
+  }),
+  defineEntry<S6State>({
+    id: s6Meta.id,
+    kind: 'card',
+    game: s6Game,
+    render: s6Render,
+    meta: s6Meta,
   }),
   defineEntry<S7State>({
     id: s7Meta.id,
