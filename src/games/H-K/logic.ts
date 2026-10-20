@@ -151,6 +151,8 @@ export interface HKState {
   /** 這場被包的牌的 state。 */
   readonly sub: Sub;
   readonly results: readonly HKResult[];
+  /** 消融開關（`config.params.flat = 1`）：edge 表全當 0.5，就是 DESIGN-AI-FUN 10.19 的第一版（量鑑別力用）。 */
+  readonly flat: boolean;
 }
 
 type Delegate = Game<unknown>;
@@ -224,6 +226,7 @@ export function makeState(overrides: Partial<HKState> = {}): HKState {
     used: [false, false],
     mult: 1,
     results: [],
+    flat: false,
     ...overrides,
     sub: overrides.sub ?? openStage(seed, stages[stageIdx] as StageId, stageIdx, stageTicks),
   };
@@ -437,7 +440,7 @@ function opponentUse(state: HKState, side: Side, from: number): number[] {
   let smart = from;
   let weakest = 2;
   for (let j = from; j <= LAST; j += 1) {
-    const mine = (EDGE[state.stages[j] as StageId] as readonly [number, number])[side];
+    const mine = edgeOf(state, side, j);
     if (mine < weakest) {
       weakest = mine;
       smart = j;
@@ -528,6 +531,9 @@ function bestPlan(
 
 /** 自己的 edge 表：第 j 場我贏的機率（沒打到一半的場次）。 */
 function edgeOf(state: HKState, side: Side, j: number): number {
+  if (state.flat) {
+    return 0.5;
+  }
   return (EDGE[state.stages[j] as StageId] as readonly [number, number])[side];
 }
 
@@ -642,7 +648,7 @@ export const hkGame: Game<HKState> = {
         `config.maxTicks 必須是 ${MIN_MAX_TICKS} 以上的整數，收到 ${String(config.maxTicks)}`,
       );
     }
-    return makeState({ seed, maxTicks: config.maxTicks });
+    return makeState({ seed, maxTicks: config.maxTicks, flat: config.params['flat'] === 1 });
   },
 
   step(state: HKState, inputs: Inputs): HKState {
