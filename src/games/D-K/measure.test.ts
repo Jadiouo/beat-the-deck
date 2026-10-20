@@ -8,8 +8,17 @@ import type { Controller, Side } from '../../core/types';
 import type { LevelParams } from '../../ai/types';
 import { dKGame, stageOf } from './logic';
 import type { DKState } from './logic';
-import { CONFIG, engineThenSteal, playTraced, script } from './players.test-helpers';
+import {
+  CONFIG,
+  PROBE_A,
+  engineThenSteal,
+  playTraced,
+  script,
+  scriptPolicy,
+} from './players.test-helpers';
 import type { ScriptSpec } from './players.test-helpers';
+import { compareBC, formatProbeA, outcomeOf } from '../../../tests/ai/probe-a.shared';
+import type { ProbeSpec } from '../../../tests/ai/probe-a.shared';
 
 /**
  * D-K 的量測型測試（小規格「實作與量測」；DESIGN-AI-FUN 3 反應速度、10.27、10.40 支配策略、10.54、10.57）。
@@ -228,6 +237,75 @@ describe('D-K 反應速度（準則 3）', () => {
           expect(points / count, name).toBeLessThan(limit);
         }
       }
+    },
+    LONG,
+  );
+});
+
+/**
+ * 探針 A 與 A′ 的決策分歧率與 (c)−(b)（DESIGN-AI-FUN 10.35、10.59）。腳本是目前取回的版本，不保證是最早的那一份。
+ * 預設場數很小（只驗工具串得起來）；正式量測用環境變數開大：
+ *   DK_PROBE_N（場數，預設 4）、DK_PROBE_FROM（起始種子，預設 0）、DK_VERBOSE（印出一行報告）。
+ * 三格：探針 A 腳本延遲 0、延遲 12（`wrapPolicy`，同人類模型：反應 12、每 tick 決定、深度 1），對貪心型等級 10（AI 種子 ＋ 7）；
+ * 探針 A′（第 1、2 段用引擎，只有第 3 段 dj 對 smart），AI 種子 ＋ 17 ＋ 1,000,003。
+ */
+describe('D-K 探針 A、A′：(b) 對 (c) 的分歧率與勝率差（共用 tests/ai/probe-a.shared.ts）', () => {
+  const N = Math.max(1, Number(process.env['DK_PROBE_N'] ?? '4'));
+  const FROM = Number(process.env['DK_PROBE_FROM'] ?? '0');
+  const seeds = range(N).map((i) => FROM + i);
+  const playAgainst =
+    (aiOf: (seed: number) => Controller<DKState>): ProbeSpec<DKState>['play'] =>
+    (seed, ctl) => {
+      const side: Side = seed % 2 === 0 ? 0 : 1;
+      const ai = aiOf(seed);
+      const t = side === 0 ? playTraced(seed, ctl, ai) : playTraced(seed, ai, ctl);
+      return outcomeOf(t.result, side);
+    };
+  const delayed =
+    (g: 'b' | 'c', delay: number): Make =>
+    (seed) =>
+      delay === 0
+        ? script(PROBE_A[g])
+        : wrapPolicy(
+            dKGame,
+            scriptPolicy(PROBE_A[g]),
+            { reactionTicks: delay, decideEvery: 1, depth: 1, epsilon: 0 },
+            seed,
+          );
+  const cells: (readonly [string, ProbeSpec<DKState>])[] = [0, 12].map(
+    (delay) =>
+      [
+        `探針 A 腳本延遲 ${String(delay)}`,
+        {
+          makeB: delayed('b', delay),
+          makeC: delayed('c', delay),
+          seeds,
+          play: playAgainst((seed) => levelController(dKGame, greedy, 10, seed + 7)),
+        },
+      ] as const,
+  );
+  cells.push([
+    '探針 A′（第 3 段 dj 對 smart）',
+    {
+      makeB: (seed) => engineThenSteal(levelController(dKGame, greedy, 10, seed + 3), 'dj'),
+      makeC: (seed) => engineThenSteal(levelController(dKGame, greedy, 10, seed + 3), 'smart'),
+      seeds,
+      play: playAgainst((seed) => levelController(dKGame, greedy, 10, seed + 17 + 1_000_003)),
+    },
+  ]);
+
+  it.each(cells.map((c) => [c[0], c[1]] as const))(
+    '%s：勝率差不超過場級分歧率；影子不影響對局（驅動者單獨跑的結果相同）',
+    (label, spec) => {
+      const r = compareBC(spec);
+      report(
+        formatProbeA(`D-K ${label} greedy L10 seeds ${String(FROM)}..${String(FROM + N - 1)}`, r),
+      );
+      expect(r.n).toBe(N);
+      expect(r.winBoundHolds).toBe(true);
+      expect(r.inconsistentSeeds).toEqual([]);
+      const alone = seeds.map((seed) => spec.play(seed, spec.makeB(seed)));
+      expect(r.win.b).toBe(alone.reduce((a, o) => a + o.win, 0) / N);
     },
     LONG,
   );
