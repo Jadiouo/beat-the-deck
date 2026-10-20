@@ -1,5 +1,4 @@
-import type { Buttons, GameConfig, Inputs, Side } from '../../core/types';
-import type { GameWithSelfFromPresent } from '../types';
+import type { Buttons, Game, GameConfig, Inputs, Side } from '../../core/types';
 import {
   HEIGHT,
   MOVE_EVERY,
@@ -549,7 +548,7 @@ function extend(base: ClubsState, options: Resolved): CQState {
   };
 }
 
-export function createCQGame(options: CQOptions = {}): GameWithSelfFromPresent<CQState> {
+export function createCQGame(options: CQOptions = {}): Game<CQState> {
   const resolved = resolve(options);
   return {
     id: 'C-Q',
@@ -581,31 +580,10 @@ export function createCQGame(options: CQOptions = {}): GameWithSelfFromPresent<C
     evaluate(state: CQState, side: Side): { gain: number; danger: number } {
       return evaluateWith(resolved, state, side);
     },
-
-    /**
-     * 反應延遲的重播只含自己的輸入，重現不出「被對手的僚機鎖定、轉向輸入作廢」這個外力：
-     * 重播的主蛇會照自己按的鍵轉彎，真實的主蛇卻被鎖著直走。所以自己這一邊的欄位（主蛇、冷卻、僚機、
-     * 鎖定、免疫、計數）取真實的現在；對手與食物維持重播（舊）的樣子。
-     */
-    selfFromPresent(replayed: CQState, present: CQState, side: Side): CQState {
-      const pick = <T>(mine: readonly [T, T], theirs: readonly [T, T]): readonly [T, T] =>
-        side === 0 ? [mine[0], theirs[1]] : [theirs[0], mine[1]];
-      return {
-        ...replayed,
-        snakes: pick(present.snakes, replayed.snakes),
-        reload: pick(present.reload, replayed.reload),
-        aHeld: pick(present.aHeld, replayed.aHeld),
-        drone: pick(present.drone, replayed.drone),
-        lock: pick(present.lock, replayed.lock),
-        immune: pick(present.immune, replayed.immune),
-        hits: pick(present.hits, replayed.hits),
-        launches: pick(present.launches, replayed.launches),
-      };
-    },
   };
 }
 
-export const cqGame: GameWithSelfFromPresent<CQState> = createCQGame();
+export const cqGame: Game<CQState> = createCQGame();
 
 // ---------------------------------------------------------------------------
 // 測試輔助
