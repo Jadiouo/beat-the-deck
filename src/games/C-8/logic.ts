@@ -85,11 +85,22 @@ export interface C8State extends ClubsState {
 const DX: readonly number[] = [0, 1, 0, -1];
 const DY: readonly number[] = [-1, 0, 1, 0];
 
+/**
+ * 每一格往四個方向走一格的結果（走出地圖是 -1）：`NEIGHBOR[index × 4 + dir]`。
+ * 地圖是固定的，所以開機時算一次；評估與洪水填充每次要問上百次，查表比拆 x、y 再檢查邊界快。
+ */
+const NEIGHBOR = new Int16Array(CELLS * 4);
+for (let index = 0; index < CELLS; index += 1) {
+  for (let dir = 0; dir < 4; dir += 1) {
+    const x = cellX(index) + (DX[dir] as number);
+    const y = cellY(index) + (DY[dir] as number);
+    NEIGHBOR[index * 4 + dir] = x < 0 || x >= WIDTH || y < 0 || y >= HEIGHT ? -1 : cell(x, y);
+  }
+}
+
 /** 從格子 `index` 往 `dir` 走一格；走出地圖是 -1。 */
 function neighbor(index: number, dir: Dir): number {
-  const x = cellX(index) + (DX[dir] as number);
-  const y = cellY(index) + (DY[dir] as number);
-  return x < 0 || x >= WIDTH || y < 0 || y >= HEIGHT ? -1 : cell(x, y);
+  return NEIGHBOR[index * 4 + dir] as number;
 }
 
 function opposite(dir: Dir): Dir {
@@ -183,7 +194,6 @@ export function initC8State(seed: number, config: GameConfig): C8State {
 const blockedStamp = new Uint32Array(CELLS);
 const seenRoom = new Uint32Array(CELLS);
 const queueRoom = new Int16Array(CELLS);
-const columnGap = new Int8Array(WIDTH);
 let blockedGeneration = 0;
 let scanGeneration = 0;
 let cachedFirst: readonly number[] | null = null;
@@ -208,6 +218,23 @@ function stampBlocked(first: readonly number[], second: readonly number[]): numb
   cachedSecond = second;
   return blockedGeneration;
 }
+
+/**
+ * 評估的幾個部分只由「軌跡（世代）＋幾個格子」決定，搜尋型在同一個走格週期裡會用同樣的世代問上百次，
+ * 所以答案記在表裡，世代對得上就直接用（世代變了＝軌跡變了，舊答案自然作廢）。
+ * 答案就是原本算出來的那個數字，與記過幾次、先問什麼都無關（見 `evaluate.golden.test.ts` 的洗牌檢查）。
+ */
+const openGen = new Uint32Array(CELLS);
+const openVal = new Uint8Array(CELLS);
+const runGen = new Uint32Array(CELLS * 4);
+const runVal = new Uint8Array(CELLS * 4);
+/** 洪水填充的答案：直接對應（衝突就覆蓋，只是少一次命中），鍵是起點與多擋的那一格。 */
+const ROOM_SLOTS = 4096;
+const roomGen = new Uint32Array(ROOM_SLOTS);
+const roomKey = new Int32Array(ROOM_SLOTS);
+const roomVal = new Uint8Array(ROOM_SLOTS);
+/** `globalTerritory` 的暫存：每一欄的差值直方圖（差值在 −31 到 31）與累計。 */
+const columnHist = new Int16Array(64);
 
 // ---------------------------------------------------------------------------
 // 一個 tick
@@ -381,8 +408,31 @@ function runLength(gen: number, at: number, dir: Dir): number {
   return run;
 }
 
-/** 以 `at` 為中心、`TERRITORY_RADIUS` 格以內（切比雪夫距離）還有幾格是空的。 */
+/** `runLength` 記起來的版本（鍵是起點與方向，世代對得上才算數）。 */
+function cachedRun(gen: number, at: number, dir: Dir): number {
+  const key = at * 4 + dir;
+  if (runGen[key] === gen) {
+    return runVal[key] as number;
+  }
+  const value = runLength(gen, at, dir);
+  runGen[key] = gen;
+  runVal[key] = value;
+  return value;
+}
+
+/** `openCellsUncached` 記起來的版本。 */
 function openCells(gen: number, at: number): number {
+  if (openGen[at] === gen) {
+    return openVal[at] as number;
+  }
+  const value = openCellsUncached(gen, at);
+  openGen[at] = gen;
+  openVal[at] = value;
+  return value;
+}
+
+/** 以 `at` 為中心、`TERRITORY_RADIUS` 格以內（切比雪夫距離）還有幾格是空的。 */
+function openCellsUncached(gen: number, at: number): number {
   const x0 = cellX(at);
   const y0 = cellY(at);
   const yEnd = Math.min(HEIGHT - 1, y0 + TERRITORY_RADIUS);
@@ -398,8 +448,29 @@ function openCells(gen: number, at: number): number {
   return count;
 }
 
+/** `roomUncached` 記起來的版本（`cap` 固定是 `ROOM_CAP`）。 */
+function roomCached(gen: number, start: number, blockedExtra: number): number {
+  const key = start * 1024 + blockedExtra + 1;
+  const slot = (start * 31 + blockedExtra + 1) & (ROOM_SLOTS - 1);
+  if (roomGen[slot] === gen && roomKey[slot] === key) {
+    return roomVal[slot] as number;
+  }
+  scanGeneration += 1;
+  const value = roomUncached(gen, scanGeneration, start, blockedExtra, ROOM_CAP);
+  roomGen[slot] = gen;
+  roomKey[slot] = key;
+  roomVal[slot] = value;
+  return value;
+}
+
 /** 洪水填充：從 `start` 出發能走到幾格（含 `start`），數到 `cap` 就停；`blockedExtra` 這一格也擋路。 */
-function room(gen: number, scan: number, start: number, blockedExtra: number, cap: number): number {
+function roomUncached(
+  gen: number,
+  scan: number,
+  start: number,
+  blockedExtra: number,
+  cap: number,
+): number {
   let head = 0;
   let tail = 1;
   queueRoom[0] = start;
@@ -407,16 +478,14 @@ function room(gen: number, scan: number, start: number, blockedExtra: number, ca
   while (head < tail && tail < cap) {
     const current = queueRoom[head] as number;
     head += 1;
-    const x = cellX(current);
-    const y = cellY(current);
     for (let dir = 0; dir < 4; dir += 1) {
-      const nx = x + (DX[dir] as number);
-      const ny = y + (DY[dir] as number);
-      if (nx < 0 || nx >= WIDTH || ny < 0 || ny >= HEIGHT) {
-        continue;
-      }
-      const next = cell(nx, ny);
-      if (seenRoom[next] !== scan && blockedStamp[next] !== gen && next !== blockedExtra) {
+      const next = NEIGHBOR[current * 4 + dir] as number;
+      if (
+        next >= 0 &&
+        seenRoom[next] !== scan &&
+        blockedStamp[next] !== gen &&
+        next !== blockedExtra
+      ) {
         seenRoom[next] = scan;
         queueRoom[tail] = next;
         tail += 1;
@@ -454,6 +523,36 @@ function evaluateEnded(state: C8State, side: Side): { gain: number; danger: numb
 }
 
 /**
+ * 全場的領地差（不看軌跡，只比曼哈頓距離，x、y 都每隔一格取樣）：離 `mine` 比離 `theirs` 近的格數，
+ * 減去反過來的格數。一格算我的 ⟺ `|x − mx| − |x − tx| < |y − ty| − |y − my|`；
+ * 每一欄的左邊先放進直方圖，每一列只要查「比這一列的右邊小、大的有幾欄」，不用逐格比。
+ */
+function globalTerritory(mine: number, theirs: number): number {
+  const mx = cellX(mine);
+  const my = cellY(mine);
+  const tx = cellX(theirs);
+  const ty = cellY(theirs);
+  columnHist.fill(0);
+  let columns = 0;
+  for (let x = 0; x < WIDTH; x += 2) {
+    columnHist[Math.abs(x - mx) - Math.abs(x - tx) + 31] += 1;
+    columns += 1;
+  }
+  // 累計：columnHist[i] 變成「差值 ≤ i − 31 的欄數」。
+  for (let i = 1; i < 64; i += 1) {
+    columnHist[i] = (columnHist[i] as number) + (columnHist[i - 1] as number);
+  }
+  let total = 0;
+  for (let y = 0; y < HEIGHT; y += 2) {
+    const rowGap = Math.abs(y - ty) - Math.abs(y - my);
+    const smaller = columnHist[rowGap + 30] as number; // 差值 < rowGap
+    const notLarger = columnHist[rowGap + 31] as number; // 差值 ≤ rowGap
+    total += smaller - (columns - notLarger);
+  }
+  return total;
+}
+
+/**
  * `gain` = 領地差：全場有多少格離我的下一步比離對方的下一步近（曼哈頓距離，不看軌跡，每隔一格取樣）減去反過來的格數，
  * 再加上「我下一步周圍 7×7 還有幾格是空的」減去對方的；下一步就出局：`gain = −500`、`danger = 1`。
  * `danger` 取最大的：頭對頭 0.8、對方蛇頭離我的下一步 1 或 2 格（0.5、0.25）、
@@ -468,8 +567,6 @@ function evaluateTron(state: C8State, side: Side): { gain: number; danger: numbe
   if (next === -1 || blockedStamp[next] === gen) {
     return { gain: -CRASH_GAIN, danger: 1 };
   }
-  scanGeneration += 1;
-  const scan = scanGeneration;
   const theirNext = them.alive ? neighbor(them.body[0] as number, them.turn) : -1;
   const theirsValid = theirNext !== -1 && blockedStamp[theirNext] !== gen;
 
@@ -479,24 +576,7 @@ function evaluateTron(state: C8State, side: Side): { gain: number; danger: numbe
 
   // 全場的領地（不看軌跡，只比曼哈頓距離）：對方在哪裡，整張地圖的分界就跟著動。
   // 每一欄的 `|x − 我| − |x − 對方|` 先算好，每一列再跟「兩邊離這一列的距離差」比。
-  let global = 0;
-  if (theirsValid) {
-    const mx = cellX(next);
-    const my = cellY(next);
-    const tx = cellX(theirNext);
-    const ty = cellY(theirNext);
-    for (let x = 0; x < WIDTH; x += 2) {
-      columnGap[x] = Math.abs(x - mx) - Math.abs(x - tx);
-    }
-    for (let y = 0; y < HEIGHT; y += 2) {
-      // 這一格算我的：|x − mx| + |y − my| < |x − tx| + |y − ty|，即 columnGap[x] < rowGap
-      const rowGap = Math.abs(y - ty) - Math.abs(y - my);
-      for (let x = 0; x < WIDTH; x += 2) {
-        const gap = columnGap[x] as number;
-        global += gap < rowGap ? 1 : gap > rowGap ? -1 : 0;
-      }
-    }
-  }
+  const global = theirsValid ? globalTerritory(next, theirNext) : 0;
 
   let danger = 0;
   if (theirsValid) {
@@ -508,11 +588,11 @@ function evaluateTron(state: C8State, side: Side): { gain: number; danger: numbe
       danger = NEAR_HEAD_DANGER[gap - 1] ?? 0;
     }
   }
-  const run = Math.min(runLength(gen, next, me.turn), FRONT_LOOK);
+  const run = Math.min(cachedRun(gen, next, me.turn), FRONT_LOOK);
   if (run < FRONT_LOOK) {
     danger = Math.max(danger, FRONT_DANGER * (1 - run / FRONT_LOOK) ** 2);
   }
-  const space = room(gen, scan, next, theirsValid ? theirNext : -1, ROOM_CAP);
+  const space = roomCached(gen, next, theirsValid ? theirNext : -1);
   if (space < ROOM_CAP) {
     danger = Math.max(danger, TRAP_DANGER * (1 - space / ROOM_CAP));
   }
@@ -557,7 +637,7 @@ export const c8Game: Game<C8State> = {
     const clockwise = ((me.dir + 1) % 4) as Dir;
     const anticlockwise = ((me.dir + 3) % 4) as Dir;
     const first =
-      runLength(gen, at, anticlockwise) > runLength(gen, at, clockwise) ? anticlockwise : clockwise;
+      cachedRun(gen, at, anticlockwise) > cachedRun(gen, at, clockwise) ? anticlockwise : clockwise;
     const second = first === clockwise ? anticlockwise : clockwise;
     return [PRESS[first] as Buttons, PRESS[second] as Buttons, NONE];
   },
