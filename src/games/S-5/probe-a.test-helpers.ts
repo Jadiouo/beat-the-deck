@@ -49,7 +49,13 @@ export const B_FAMILY = [
   'b-speed-edge',
 ] as const;
 
-export const C_FAMILY = ['c-away', 'c-stop', 'c-stop-wide', 'c-wrongfoot', 'c-lean-flip'] as const;
+export const C_FAMILY = [
+  'c-away',
+  'c-mirror',
+  'c-stop-wide',
+  'c-wrongfoot',
+  'c-lean-flip',
+] as const;
 
 export type MemberName = (typeof B_FAMILY)[number] | (typeof C_FAMILY)[number];
 
@@ -239,17 +245,23 @@ export function chooseLanding(
       const opp = s.paddles[other(side)];
       return opp.x < START_X ? RIGHT_X : LEFT_X;
     }
-    case 'c-stop': {
-      const stop = stopPoint(s.paddles[other(side)]);
-      return stop < START_X ? RIGHT_X : LEFT_X;
+    case 'c-mirror': {
+      // 照對手偏離中央的程度反著落：它歪越多，落得越遠（對手在中央就落中央）。
+      const opp = s.paddles[other(side)];
+      return clamp(START_X - 2 * (opp.x - START_X), LEFT_X, RIGHT_X);
     }
     case 'c-stop-wide': {
       const stop = stopPoint(s.paddles[other(side)]);
       return Math.abs(stop - START_X) < 10 ? null : stop < START_X ? RIGHT_X : LEFT_X;
     }
     case 'c-wrongfoot': {
+      // 對手板子在動（速度 ≥ 0.8）就落在它來的那一側（速度的反方向）；看不出在動就照 c-away。
+      // 延遲 12 的玩家看到的對手速度被重播抹成 0（wrapPolicy 的語意），所以那時它就是 c-away。
       const opp = s.paddles[other(side)];
-      return Math.abs(opp.vx) < 0.8 ? null : opp.vx > 0 ? LEFT_X : RIGHT_X;
+      if (Math.abs(opp.vx) >= 0.8) {
+        return opp.vx > 0 ? LEFT_X : RIGHT_X;
+      }
+      return opp.x < START_X ? RIGHT_X : LEFT_X;
     }
     case 'c-lean-flip': {
       // 對手板子歪離中央 18 以上就打到它的反側（它在猜我的習慣）；沒歪就照我上一球的那一側繼續養習慣。

@@ -41,6 +41,7 @@ export const B_FAMILY = [
   'b-y74',
   'b-wander62',
   'b-wander70',
+  'b-pulse',
 ] as const;
 
 export const C_FAMILY = [
@@ -48,7 +49,7 @@ export const C_FAMILY = [
   'c-offcol14',
   'c-imminent',
   'c-imminent74',
-  'c-ammo-depth',
+  'c-regen-depth',
 ] as const;
 
 export type MemberName = (typeof B_FAMILY)[number] | (typeof C_FAMILY)[number];
@@ -172,9 +173,15 @@ const LEFT_EDGE = 10;
 const RIGHT_EDGE = FIELD_W - 10;
 
 /**
+ * 射手「隨時會開火」：有彈藥時看冷卻（≤ 6 tick 內能再開），沒彈藥時看補充倒數（≤ 15 tick 就補上一發）。
+ * 這個等級的 AI 射手一有彈藥就開火，所以彈藥幾乎總是 0；真正的資訊是補充倒數這個時鐘。
+ */
+export const shotImminent = (s: SJState): boolean => (s.ammo > 0 ? s.cooldown <= 6 : s.regen <= 15);
+
+/**
  * 成員在 `side` 躲的回合「想去哪」。
- * (b) 成員只讀：自己的位置、時間（`tick`）。子彈由躲的核心讀。
- * (c) 成員另外讀射手的游標 `cursor`、彈藥 `ammo`、冷卻 `cooldown`。
+ * (b) 成員只讀：自己的位置、時間（`tick`）、飛行中的子彈。
+ * (c) 成員另外讀射手的游標 `cursor`、彈藥 `ammo`、補充倒數 `regen`、冷卻 `cooldown`。
  */
 export function chooseGoal(name: MemberName, s: SJState, _side: Side, tick: number): DodgeGoal {
   const home = (y: number): DodgeGoal => ({ x: FIELD_W / 2, y, wx: 0.2, wy: 1 });
@@ -193,10 +200,13 @@ export function chooseGoal(name: MemberName, s: SJState, _side: Side, tick: numb
       return { x: FIELD_W / 2 + 40 * wave(tick), y: 62, wx: 0.6, wy: 1 };
     case 'b-wander70':
       return { x: FIELD_W / 2 + 40 * wave(tick), y: 70, wx: 0.6, wy: 1 };
+    case 'b-pulse':
+      // 場上有子彈就退到上半場邊緣（有時間躲），沒有就站 62。
+      return home(s.bullets.length > 0 ? 74 : 62);
     case 'c-offcol10':
     case 'c-offcol14': {
       const keep = name === 'c-offcol10' ? 10 : 14;
-      if (s.ammo === 0) {
+      if (!shotImminent(s)) {
         return home(62);
       }
       if (Math.abs(s.px - s.cursor) >= keep) {
@@ -212,14 +222,14 @@ export function chooseGoal(name: MemberName, s: SJState, _side: Side, tick: numb
     case 'c-imminent':
     case 'c-imminent74': {
       const y = name === 'c-imminent' ? 62 : 74;
-      if (s.ammo > 0 && s.cooldown <= 2 && Math.abs(s.px - s.cursor) <= 14) {
+      if (shotImminent(s) && Math.abs(s.px - s.cursor) <= 14) {
         const x = clamp(s.cursor + (s.px >= s.cursor ? 16 : -16), LEFT_EDGE, RIGHT_EDGE);
         return { x, y, wx: 2, wy: 1 };
       }
       return home(y);
     }
-    case 'c-ammo-depth':
-      return home(s.ammo >= 3 ? 74 : 55);
+    case 'c-regen-depth':
+      return home(shotImminent(s) ? 74 : 55);
   }
 }
 
@@ -257,14 +267,11 @@ export function playCell(seed: number, ctl: Controller<SJState>, cell: Cell): Ma
 }
 
 /**
- * 決策點：玩家在躲、射手還有彈藥而且不在冷卻（隨時可以開火）、游標離我 20 以內。
+ * 決策點：玩家在躲、射手隨時會開火（`shotImminent`）、游標離我 20 以內。
  * 這是「讀射手的承諾」可能改變走位的時刻；點級分歧率比的是這一刻的按鍵。
  */
 export const isPoint: IsPoint<SJState> = (state, side) =>
-  state.shooter !== side &&
-  state.ammo > 0 &&
-  state.cooldown === 0 &&
-  Math.abs(state.px - state.cursor) <= 20;
+  state.shooter !== side && shotImminent(state) && Math.abs(state.px - state.cursor) <= 20;
 
 export function sjSpec(
   b: MemberName,
