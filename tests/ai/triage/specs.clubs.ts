@@ -201,10 +201,21 @@ interface C8World extends Clubs {
 export const C_8: CardSpec = defineSpec<C8World>('C-8', {
   comp: sideOf('snakes'),
   teeth: snakeTeeth,
+  farDonors: true,
+  sample: { every: 10 },
   donorOk: (q: C8World, d: C8World) =>
     q.round === d.round && q.roundTick === d.roundTick && d.pause === 0 && d.outcome === null,
-  legal: (s: C8World, _ai: Side) =>
-    snakesLegal(s, { minLen: 1, allowDead: s.pause > 0 || s.outcome !== null }),
+  legal: (s: C8World, _ai: Side) => {
+    const base = snakesLegal(s, { minLen: 1, allowDead: s.pause > 0 || s.outcome !== null });
+    if (base !== null) {
+      return base;
+    }
+    // 光軌沒有食物，蛇每走一格長一格：局內 tick 決定軌跡的長度（開局不動的時間 roundTick 是負的）。
+    const moves = Math.max(0, Math.floor(s.roundTick / 10));
+    return s.snakes.every((sn) => sn.body.length === 1 + moves || s.pause > 0 || !sn.alive)
+      ? null
+      : '軌跡長度與局內 tick 不一致';
+  },
 });
 
 // C-10 追與逃：一邊逃（長 4）、一邊追（長 1），兩局交換角色。
@@ -218,12 +229,10 @@ interface C10World extends Clubs {
 export const C_10: CardSpec = defineSpec<C10World>('C-10', {
   comp: sideOf('snakes', 'runnerTicks'),
   teeth: snakeTeeth,
+  farDonors: true,
+  sample: { every: 10 },
   donorOk: (q: C10World, d: C10World) =>
-    q.round === d.round &&
-    q.runner === d.runner &&
-    q.roundTick === d.roundTick &&
-    d.pause === 0 &&
-    d.outcome === null,
+    q.round === d.round && q.runner === d.runner && d.pause === 0 && d.outcome === null,
   legal: (s: C10World, _ai: Side) => {
     const base = snakesLegal(s, { minLen: 1, allowDead: s.pause > 0 || s.outcome !== null });
     if (base !== null) {
@@ -267,4 +276,53 @@ export const C_J: CardSpec = defineSpec<CJWorld>('C-J', {
     snakesLegal(s, { minLen: 1, allowEmpty: true, blocked: s.walls.flatMap((w) => w.cells) }),
 });
 
-export const CLUBS_SPECS: readonly CardSpec[] = [C_A, C_2, C_3, C_5, C_8, C_10, C_J];
+// C-4 霧：AI 只讀自己的 memory（記得的食物、各格最後看見的 tick、最近一次掃視看到的對手蛇身與蛇頭），
+// 不讀 state 裡真的對手（小規格與 logic.ts 開頭明文）。對手的資訊經由「自己的 memory」進來，而 memory 是 AI 自己的狀態，
+// 按定義不動；所以乾淨擾動只剩下兩種：對手在 AI 看不到的地方（AI 的 memory 本來就說沒看到它），
+// 以及對手只差一步的位置（memory 最多落後一次走格）。其餘位置會讓 AI 的 memory 與真實矛盾，不合法。
+// 搜尋型往前模擬時 `step` 會用真實的對手更新模擬裡的 memory，這是唯一剩下的洩漏管道。
+interface FogWorld extends Clubs {
+  readonly tick: number;
+  readonly endAt: number;
+  readonly memory: readonly { readonly rivalHead: number }[];
+}
+const manhattan = (a: number, b: number): number =>
+  Math.abs(cellX(a) - cellX(b)) + Math.abs(cellY(a) - cellY(b));
+export const C_4: CardSpec = defineSpec<FogWorld>('C-4', {
+  comp: sideOf('snakes', 'memory', 'prevDir', 'ateAt'),
+  teeth: (s: FogWorld, ai: Side) => [
+    ...snakeTeeth(s, ai),
+    // 蛇頭貼在 AI 蛇頭旁邊、而 AI 的 memory 說沒看到：矛盾。
+    {
+      name: '對手在視野內但 AI 的 memory 說沒看到',
+      state: setAt(
+        setAt(s, `memory.${ai}.rivalHead`, -1),
+        `snakes.${ai === 0 ? 1 : 0}.body.0`,
+        (s.snakes[ai] as SnakeLike).body[0] === 0
+          ? 1
+          : ((s.snakes[ai] as SnakeLike).body[0] as number) - 1,
+      ),
+    },
+  ],
+  legal: (s: FogWorld, ai: Side) => {
+    const base = snakesLegal(s, { minLen: 3, allowDead: s.endAt >= 0 });
+    if (base !== null) {
+      return base;
+    }
+    const mine = (s.snakes[ai] as SnakeLike).body[0] as number;
+    const theirs = (s.snakes[ai === 0 ? 1 : 0] as SnakeLike).body[0] as number;
+    const seen = (s.memory[ai] as { rivalHead: number }).rivalHead;
+    // 掃視發生在走格的那個 tick、用走格之前的位置（視野半徑 4）：沒看到＝當時距離 ≥ 5，之後兩邊各走一格，距離至少還有 3。
+    if (seen < 0 && manhattan(mine, theirs) <= 2) {
+      return '對手在視野內但 AI 的 memory 說沒看到';
+    }
+    if (seen >= 0 && manhattan(seen, theirs) > 2) {
+      return 'AI 記得的對手位置離真實位置太遠';
+    }
+    return null;
+  },
+  notScreenable:
+    'AI 只讀自己的 memory；對手的資訊經由 AI 自己的狀態（memory）進來，按定義不動，所以乾淨擾動只剩視野外與一步內的位置',
+});
+
+export const CLUBS_SPECS: readonly CardSpec[] = [C_A, C_2, C_3, C_4, C_5, C_8, C_10, C_J];

@@ -42,7 +42,12 @@ describe.skipIf(cards.length === 0)('篩檢量測', { timeout: 6 * 3600 * 1000 }
   it.each(cards)('%s', (id) => {
     const spec = specFor(id);
     const seeds = Array.from({ length: num('SEEDS', 24) }, (_v, i) => num('FROM', 6000) + i);
-    const corpus = collectCorpus(spec.game, { seeds, matchups: MATCHUPS, every: num('EVERY', 30) });
+    const corpus = collectCorpus(spec.game, {
+      seeds,
+      matchups: MATCHUPS,
+      every: env('EVERY') === undefined ? (spec.sample?.every ?? 30) : num('EVERY', 30),
+      decisionsOnly: spec.sample?.decisionsOnly === true,
+    });
     const measure = measureCard(spec, corpus, {
       policies: DEFAULT_POLICIES,
       levels: DEFAULT_LEVELS,

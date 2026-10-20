@@ -171,6 +171,8 @@ export interface CardSpec<S = never> {
    * 放寬模式的數字只能當作「AI 有沒有讀這些欄位」的指標，不是合法局面上的量測，報告裡永遠分開列。
    */
   readonly entangled?: (side: Side, state?: S) => readonly Path[];
+  /** 放寬模式（糾纏欄位）額外要求的相容性（例如歷史清單同樣長、同一個位置的紀錄屬於同一邊）。 */
+  readonly donorOkRelaxed?: (query: S, donor: S, ai: Side) => boolean;
   /** 捐贈者與查詢的 state 是否相容（同一回合、同一階段……）；沒給就都相容。 */
   readonly donorOk?: (query: S, donor: S, ai: Side) => boolean;
   /** 合法性檢查：回傳 null（合法）或一個簡短的類別原因（會被計數，所以不要放數字）。 */
@@ -183,6 +185,8 @@ export interface CardSpec<S = never> {
   readonly special?: (state: S, ai: Side, det: Det) => readonly SpecialPerturbation<S>[];
   /** 對手的元件不綁時鐘時，也從同一種子別的 tick 取捐贈者。 */
   readonly farDonors?: boolean;
+  /** 取樣方式：回合制的牌決策點稀疏，要更密地取、而且只留有決策可做的 tick。 */
+  readonly sample?: { readonly every?: number; readonly decisionsOnly?: boolean };
   /** 這張牌的 init 要求的最短局長（S-6 要 2940）；測試用較短的局時取 max。 */
   readonly minTicks?: number;
   /** 這張牌無法乾淨篩檢的理由（沒有對手概念、對手狀態與環境／AI 自己的感知不可分……）。 */
@@ -233,6 +237,8 @@ export interface CorpusOptions {
   readonly matchups: readonly Matchup[];
   /** 每隔幾個 tick 取一次樣。 */
   readonly every: number;
+  /** true：只留至少一邊有 ≥ 2 個動作可選的 tick（回合制的牌）。 */
+  readonly decisionsOnly?: boolean;
   readonly config?: GameConfig;
 }
 
@@ -251,7 +257,12 @@ export function collectCorpus<S>(game: Game<S>, opts: CorpusOptions): Corpus<S> 
       const c1 = m.swap ? first : second;
       let state = game.init(seed, config);
       for (let tick = 0; !game.isOver(state) && tick < config.maxTicks; tick += 1) {
-        if (tick % opts.every === 0) {
+        if (
+          tick % opts.every === 0 &&
+          (opts.decisionsOnly !== true ||
+            game.actions(state, 0).length >= 2 ||
+            game.actions(state, 1).length >= 2)
+        ) {
           samples.push({ run, tick, state });
         }
         state = game.step(state, [
@@ -309,11 +320,9 @@ export function pickQueries<S>(
 export interface Donors<S> {
   /** 同一個種子、同一個 tick、別的 run。 */
   readonly sameTick: readonly S[];
-  /** 同一個種子、tick 相差 ≥ FAR_TICKS 的任何 run。 */
+  /** 同一個種子、tick 不同的任何 run（含同一場對局的別的時刻）。 */
   readonly otherTick: readonly S[];
 }
-
-export const FAR_TICKS = 120;
 
 export function donorsFor<S>(seedCorpus: SeedCorpus<S>, q: Query<S>): Donors<S> {
   const sameTick: S[] = [];
@@ -321,7 +330,7 @@ export function donorsFor<S>(seedCorpus: SeedCorpus<S>, q: Query<S>): Donors<S> 
   for (const s of seedCorpus.samples) {
     if (s.tick === q.tick && s.run !== q.run) {
       sameTick.push(s.state);
-    } else if (Math.abs(s.tick - q.tick) >= FAR_TICKS) {
+    } else if (s.tick !== q.tick) {
       otherTick.push(s.state);
     }
   }
@@ -431,24 +440,31 @@ function perturbGraft<S>(
   const paths = [...spec.comp(target, q.state), ...extraPaths];
   const base = canon(q.state);
   const marginBefore = marginOf(spec.game, q.state, q.ai);
+  // 先用 donorOk 過濾（相容的才進候選），不相容的只計數，不浪費嘗試次數。
+  const compatible = (d: S): boolean =>
+    (spec.donorOk === undefined || spec.donorOk(q.state, d, q.ai)) &&
+    (!relaxed || spec.donorOkRelaxed === undefined || spec.donorOkRelaxed(q.state, d, q.ai));
+  const sameList = donors.sameTick.filter(compatible);
+  let skipped = donors.sameTick.length - sameList.length;
   const tagged: { donor: S; kind: string }[] = det
-    .shuffle(donors.sameTick)
+    .shuffle(sameList)
     .map((donor) => ({ donor, kind: relaxed ? 'relaxed-same-tick' : 'donor-same-tick' }));
   if (spec.farDonors === true) {
-    for (const donor of det.shuffle(donors.otherTick).slice(0, FAR_SAMPLE)) {
+    const farList = donors.otherTick.filter(compatible);
+    skipped += donors.otherTick.length - farList.length;
+    for (const donor of det.shuffle(farList).slice(0, FAR_SAMPLE)) {
       tagged.push({ donor, kind: relaxed ? 'relaxed-far' : 'donor-far' });
     }
   }
   const legalList: Perturbation<S>[] = [];
   const illegal: Record<string, number> = {};
+  if (skipped > 0) {
+    illegal['捐贈者不相容（已略過，不算嘗試）'] = skipped;
+  }
   let attempted = 0;
   let identical = 0;
   for (const { donor, kind } of tagged.slice(0, MAX_TRIES)) {
     attempted += 1;
-    if (spec.donorOk !== undefined && !spec.donorOk(q.state, donor, q.ai)) {
-      illegal['捐贈者不相容'] = (illegal['捐贈者不相容'] ?? 0) + 1;
-      continue;
-    }
     const customised =
       spec.graftSide === undefined ? null : spec.graftSide(q.state, donor, q.ai, target);
     const state =
@@ -540,6 +556,24 @@ export function perturbRelaxed<S>(
   return perturbGraft(spec, q, donors, det, max, opp, false, extra);
 }
 
+/**
+ * 世界對照：整個 state 換成同種子、同 tick、別的 run 的真實 state（一定合法）。AI 的決策若連這個都不變，
+ * 它就是對整個局面的常數函數；有變，而自我／對手都不變，AI 讀的就是共用的環境。
+ */
+export function perturbWorld<S>(
+  q: Query<S>,
+  donors: Donors<S>,
+  det: Det,
+  max: number,
+): readonly Perturbation<S>[] {
+  // 同 tick 的捐贈者優先；回合制的牌各局節奏不同、同一個 tick 常常沒有別的 run，就用別的時刻的真實 state。
+  const pool = [...det.shuffle(donors.sameTick), ...det.shuffle(donors.otherTick)];
+  return pool
+    .filter((d) => canon(d) !== canon(q.state))
+    .slice(0, max)
+    .map((state) => ({ kind: 'world', state, leadFlip: false, scoreChanged: false }));
+}
+
 /** 正對照：把「自己」的元件換成別人的。 */
 export function perturbSelf<S>(
   spec: CardSpec<S>,
@@ -549,6 +583,24 @@ export function perturbSelf<S>(
   max: number,
 ): PerturbResult<S> {
   return perturbGraft(spec, q, donors, det, max, q.ai, false);
+}
+
+/**
+ * 正對照的放寬版：有糾纏欄位的牌，把自己的糾纏欄位（H-5 的暗牌這種 AI 最依賴的欄位）也一起換。
+ * 沒有糾纏欄位的牌回傳空的。
+ */
+export function perturbSelfRelaxed<S>(
+  spec: CardSpec<S>,
+  q: Query<S>,
+  donors: Donors<S>,
+  det: Det,
+  max: number,
+): PerturbResult<S> {
+  const extra = spec.entangled === undefined ? [] : spec.entangled(q.ai, q.state);
+  if (extra.length === 0) {
+    return { list: [], stats: { attempted: 0, accepted: 0, identical: 0, illegal: {} } };
+  }
+  return perturbGraft(spec, q, donors, det, max, q.ai, false, extra);
 }
 
 export interface PathPerturbation<S> {
@@ -581,9 +633,13 @@ export function perturbByPath<S>(
   perPath: number,
 ): readonly PathPerturbation<S>[] {
   const opp: Side = q.ai === 0 ? 1 : 0;
+  const compatible = (d: S): boolean =>
+    spec.donorOk === undefined || spec.donorOk(q.state, d, q.ai);
   const pool = [
-    ...det.shuffle(donors.sameTick),
-    ...(spec.farDonors === true ? det.shuffle(donors.otherTick).slice(0, FAR_SAMPLE) : []),
+    ...det.shuffle(donors.sameTick.filter(compatible)),
+    ...(spec.farDonors === true
+      ? det.shuffle(donors.otherTick.filter(compatible)).slice(0, FAR_SAMPLE)
+      : []),
   ];
   const out: PathPerturbation<S>[] = [];
   for (const path of spec.comp(opp, q.state)) {
@@ -592,9 +648,6 @@ export function perturbByPath<S>(
     for (const donor of pool.slice(0, MAX_TRIES)) {
       if (taken >= perPath) {
         break;
-      }
-      if (spec.donorOk !== undefined && !spec.donorOk(q.state, donor, q.ai)) {
-        continue;
       }
       const value = getAt(donor, path);
       if (value === undefined || canon(value) === mine) {
@@ -661,6 +714,8 @@ export interface CellMeasure {
   byKind: Record<string, Tally>;
   /** 機制：一次只換一條路徑時，各路徑的改變率。 */
   byPath: Record<string, Tally>;
+  /** 世界對照：整個 state 換成別的真實 state（見 `perturbWorld`）。 */
+  world: Tally;
   /** 放寬模式（連糾纏欄位一起換，不保證跨欄位一致）：只有宣告 `entangled` 的牌有。永遠與乾淨模式分開報。 */
   relaxed: Tally;
   /** 正對照：自己的元件被換掉。 */
@@ -706,6 +761,7 @@ interface Prepared<S> {
   readonly byPath: readonly PathPerturbation<S>[];
   readonly opp: readonly Perturbation<S>[];
   readonly relaxed: readonly Perturbation<S>[];
+  readonly world: readonly Perturbation<S>[];
   readonly self: readonly Perturbation<S>[];
   readonly identity: S;
 }
@@ -725,14 +781,22 @@ export function measureCard<S>(
     for (const q of pickQueries(spec.game, seedCorpus, perSeed, det)) {
       const donors = donorsFor(seedCorpus, q);
       const opp = perturbOpponent(spec, q, donors, det, cfg.maxPerts);
-      const self = perturbSelf(spec, q, donors, det, cfg.maxSelf);
+      const selfClean = perturbSelf(spec, q, donors, det, cfg.maxSelf);
+      const selfRelaxed = perturbSelfRelaxed(spec, q, donors, det, cfg.maxSelf);
+      const self = { list: [...selfClean.list, ...selfRelaxed.list] };
       attempted += opp.stats.attempted;
       identical += opp.stats.identical;
       for (const [k, v] of Object.entries(opp.stats.illegal)) {
         illegal[k] = (illegal[k] ?? 0) + v;
       }
       const relaxedList = perturbRelaxed(spec, q, donors, det, 4);
-      if (opp.list.length === 0 && self.list.length === 0 && relaxedList.list.length === 0) {
+      const worldList = perturbWorld(q, donors, det, 3);
+      if (
+        opp.list.length === 0 &&
+        self.list.length === 0 &&
+        relaxedList.list.length === 0 &&
+        worldList.length === 0
+      ) {
         continue;
       }
       // 負對照：把對手的元件換成「自己現在的值」（內容相同的新物件）。
@@ -746,6 +810,7 @@ export function measureCard<S>(
         byPath,
         opp: opp.list,
         relaxed: relaxedList.list,
+        world: worldList,
         self: self.list,
         identity,
       });
@@ -767,6 +832,7 @@ export function measureCard<S>(
         byKind: {},
         byPath: {},
         relaxed: { queries: 0, changed: 0 },
+        world: { queries: 0, changed: 0 },
         self: { queries: 0, changed: 0 },
         nullChanged: 0,
       };
@@ -796,6 +862,12 @@ export function measureCard<S>(
         }
         if (any) {
           cell.statesAny += 1;
+        }
+        for (const pert of p.world) {
+          cell.world.queries += 1;
+          if (!sameButtons(base, decideAs(spec.game, policy, level, seed, pert.state, p.q.ai))) {
+            cell.world.changed += 1;
+          }
         }
         for (const pert of p.relaxed) {
           cell.relaxed.queries += 1;
@@ -859,6 +931,10 @@ export interface Classification {
   readonly rMax: number;
   /** 自我改變率（正對照）的最大值。 */
   readonly sMax: number;
+  /** 世界對照（整個 state 換成別的真實 state）的最大改變率。 */
+  readonly wMax: number;
+  /** 乾淨模式：這張牌預設性格（實際上線的那個 AI）的最大改變率。判定類別不用它，排序用它。 */
+  readonly rDefault: number;
   /** 放寬模式：主格的最大改變率；沒有放寬模式是 null。 */
   readonly rRelaxed: number | null;
 }
@@ -870,6 +946,10 @@ export function classify(m: CardMeasure): Classification {
   const primaryCells = m.cells.filter((c) => primary.has(c.policy));
   const rMax = primaryCells.reduce((x, c) => Math.max(x, rate(c)), 0);
   const sMax = m.cells.reduce((x, c) => Math.max(x, rate(c.self)), 0);
+  const wMax = m.cells.reduce((x, c) => Math.max(x, rate(c.world)), 0);
+  const rDefault = m.cells
+    .filter((c) => c.policy === m.defaultPolicy)
+    .reduce((x, c) => Math.max(x, rate(c)), 0);
   const hasRelaxed = primaryCells.some((c) => c.relaxed.queries > 0);
   const rRelaxed = hasRelaxed
     ? primaryCells.reduce((x, c) => Math.max(x, rate(c.relaxed)), 0)
@@ -880,6 +960,8 @@ export function classify(m: CardMeasure): Classification {
     reason,
     rMax,
     sMax,
+    wMax,
+    rDefault,
     rRelaxed,
   });
   if (m.notScreenable !== undefined) {
@@ -901,12 +983,12 @@ export function classify(m: CardMeasure): Classification {
         `乾淨擾動量不到（${pctText(rMax)}），但放寬模式（連糾纏欄位一起換）${pctText(rRelaxed)}：AI 讀的是與環境糾纏的欄位`,
       );
     }
-    if (sMax >= CLASSIFY.selfMin) {
+    if (sMax >= CLASSIFY.selfMin || wMax >= CLASSIFY.selfMin) {
+      const reads =
+        sMax >= CLASSIFY.selfMin ? 'AI 讀自己、不讀對手' : 'AI 只讀共用環境、不讀雙方的元件';
       return out(
         'structural-zero',
-        rRelaxed === null
-          ? 'AI 讀自己、不讀對手'
-          : `AI 讀自己、不讀對手（放寬模式也只有 ${pctText(rRelaxed)}）`,
+        rRelaxed === null ? reads : `${reads}（放寬模式也只有 ${pctText(rRelaxed)}）`,
       );
     }
     return out('constant-policy', 'AI 對整個局面近似常數');
@@ -920,7 +1002,7 @@ const pct = (x: number): string => `${(100 * x).toFixed(1)}%`;
 export function formatMeasure(m: CardMeasure, c: Classification): string {
   const lines: string[] = [];
   lines.push(
-    `${m.id}  判定=${c.verdict}（${c.reason}）  R_max=${pct(c.rMax)}  S_max=${pct(c.sMax)}  放寬=${c.rRelaxed === null ? 'n/a' : pct(c.rRelaxed)}`,
+    `${m.id}  判定=${c.verdict}（${c.reason}）  R_max=${pct(c.rMax)}  預設性格=${m.defaultPolicy}:${pct(c.rDefault)}  S_max=${pct(c.sMax)}  W_max=${pct(c.wMax)}  放寬=${c.rRelaxed === null ? 'n/a' : pct(c.rRelaxed)}`,
   );
   lines.push(
     `  決策點=${m.states}  擾動=${m.perturbations}（嘗試 ${m.attempted}，與原本相同 ${m.identical}）  拒絕=${JSON.stringify(m.illegal)}`,
@@ -935,7 +1017,7 @@ export function formatMeasure(m: CardMeasure, c: Classification): string {
       .map(([k, t]) => `${k}:${t.changed}/${t.queries}`)
       .join(' ');
     lines.push(
-      `  ${cell.policy.padEnd(10)} L${String(cell.level).padEnd(2)} 改變=${cell.changed}/${cell.queries}=${pct(cell.queries === 0 ? 0 : cell.changed / cell.queries)} [${pct(lo)},${pct(hi)}]  有改變的決策點=${cell.statesAny}/${m.states}  領先反轉=${flip}  自我=${cell.self.changed}/${cell.self.queries}  放寬=${cell.relaxed.changed}/${cell.relaxed.queries}  null=${cell.nullChanged}  ${kinds}  路徑[${paths}]`,
+      `  ${cell.policy.padEnd(10)} L${String(cell.level).padEnd(2)} 改變=${cell.changed}/${cell.queries}=${pct(cell.queries === 0 ? 0 : cell.changed / cell.queries)} [${pct(lo)},${pct(hi)}]  有改變的決策點=${cell.statesAny}/${m.states}  領先反轉=${flip}  自我=${cell.self.changed}/${cell.self.queries}  世界=${cell.world.changed}/${cell.world.queries}  放寬=${cell.relaxed.changed}/${cell.relaxed.queries}  null=${cell.nullChanged}  ${kinds}  路徑[${paths}]`,
     );
   }
   return lines.join('\n');

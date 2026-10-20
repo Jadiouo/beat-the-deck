@@ -1,6 +1,8 @@
 import type { CardSpec } from './engine';
 import { CLUBS_SPECS } from './specs.clubs';
 import { CONTROL_DIAMONDS, DIAMONDS_SPECS } from './specs.diamonds';
+import { HEARTS_SPECS } from './specs.hearts';
+import { JOKERS_SPECS } from './specs.jokers';
 import { CONTROL_SPADES, SPADES_SPECS } from './specs.spades';
 
 /** 對照組（已量過探針 A 的牌；不在那 34 張裡）。 */
@@ -11,6 +13,8 @@ export const TARGET_SPECS: readonly CardSpec[] = [
   ...CLUBS_SPECS,
   ...DIAMONDS_SPECS,
   ...SPADES_SPECS,
+  ...HEARTS_SPECS,
+  ...JOKERS_SPECS,
 ];
 
 export const ALL_SPECS: readonly CardSpec[] = [...CONTROL_SPECS, ...TARGET_SPECS];

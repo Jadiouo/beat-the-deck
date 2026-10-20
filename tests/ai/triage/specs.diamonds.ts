@@ -490,6 +490,8 @@ const marketTeeth = (s: MarketWorld, ai: Side): readonly { name: string; state: 
 
 export const D_6: CardSpec = defineSpec<MarketWorld>('D-6', {
   comp: sideOf('pending'),
+  farDonors: true,
+  sample: { every: 12, decisionsOnly: true },
   entangled: (side: Side, s?: MarketWorld) => {
     const paths = [`cash.${side}`, `inv.${side}`];
     if (s !== undefined) {
@@ -504,8 +506,8 @@ export const D_6: CardSpec = defineSpec<MarketWorld>('D-6', {
   },
   legal: marketLegal,
   teeth: marketTeeth,
-  donorOk: (q: MarketWorld, d: MarketWorld) =>
-    q.round === d.round && q.phase === d.phase && q.history.length === d.history.length,
+  donorOk: (q: MarketWorld, d: MarketWorld) => q.round === d.round && q.phase === d.phase,
+  donorOkRelaxed: (q: MarketWorld, d: MarketWorld) => q.history.length === d.history.length,
   notScreenable:
     '對手的現金、存貨與歷史和共用的價格偏移（dev）以及自己的現金不可分；乾淨模式只剩 pending（AI 明文不讀）',
 });

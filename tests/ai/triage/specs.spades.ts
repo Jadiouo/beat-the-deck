@@ -444,6 +444,8 @@ interface DrawWorld {
   }[];
 }
 export const S_7: CardSpec = defineSpec<DrawWorld>('S-7', {
+  farDonors: true,
+  sample: { every: 10, decisionsOnly: true },
   comp: (side: Side, s?: DrawWorld) => {
     const paths = [`spent.${side}`];
     if (s !== undefined) {
