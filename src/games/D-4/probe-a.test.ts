@@ -66,6 +66,8 @@ describe('族的定義', () => {
     for (const banned of [
       'evaluate',
       'predictOpponent',
+      'opponentAction',
+      'policies/shared',
       'levelController',
       'wrapPolicy',
       'policyByName',
