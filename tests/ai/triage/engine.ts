@@ -147,14 +147,25 @@ export interface CardSpec<S = never> {
   readonly game: Game<S>;
   /** 這張牌預設的性格（`meta.defaultPolicy`；沒有就用 pathfinder）。判準的主格會包含它。 */
   readonly defaultPolicy: PolicyKey;
-  /** 某一邊的元件在 state 裡的路徑清單。對手的元件是 `comp(1 − ai)`，自己的是 `comp(ai)`。 */
-  readonly comp: (side: Side) => readonly Path[];
+  /**
+   * 某一邊的元件在 state 裡的路徑清單。對手的元件是 `comp(1 − ai)`，自己的是 `comp(ai)`。
+   * 路徑隨 state 變的牌（例如歷史清單的長度）會收到 `state`；沒給 `state` 時回傳靜態的那幾條。
+   */
+  readonly comp: (side: Side, state?: S) => readonly Path[];
+  /** 捐贈者與查詢的 state 是否相容（同一回合、同一階段……）；沒給就都相容。 */
+  readonly donorOk?: (query: S, donor: S, ai: Side) => boolean;
   /** 合法性檢查：回傳 null（合法）或一個簡短的類別原因（會被計數，所以不要放數字）。 */
   readonly legal: (state: S, ai: Side) => string | null;
+  /**
+   * 刻意破壞的 state（重疊、出界、守恆被破壞……）：`legal` 必須全部擋下。證明合法性檢查有牙齒（測試用）。
+   */
+  readonly teeth?: (state: S, ai: Side) => readonly SpecialPerturbation<S>[];
   /** 這張牌特有的合法擾動（無敵、冷卻、被鎖……），不需要捐贈者。 */
   readonly special?: (state: S, ai: Side, det: Det) => readonly SpecialPerturbation<S>[];
   /** 對手的元件不綁時鐘時，也從同一種子別的 tick 取捐贈者。 */
   readonly farDonors?: boolean;
+  /** 這張牌的 init 要求的最短局長（S-6 要 2940）；測試用較短的局時取 max。 */
+  readonly minTicks?: number;
   /** 這張牌無法乾淨篩檢的理由（沒有對手概念、對手狀態與環境／AI 自己的感知不可分……）。 */
   readonly notScreenable?: string;
 }
@@ -356,13 +367,13 @@ export function legalOrReason<S>(spec: CardSpec<S>, state: S, ai: Side): string 
   return null;
 }
 
-/** 把 `donor` 在 `paths` 上的值整個換進 `state`；路徑在捐贈者身上不存在就丟錯（規格寫錯）。 */
-export function graft<S>(state: S, donor: S, paths: readonly Path[]): S {
+/** 把 `donor` 在 `paths` 上的值整個換進 `state`；捐贈者缺其中一條路徑就回傳 null。 */
+export function graft<S>(state: S, donor: S, paths: readonly Path[]): S | null {
   let out = state;
   for (const path of paths) {
     const value = getAt(donor, path);
     if (value === undefined) {
-      throw new Error(`規格的路徑 ${path} 在捐贈者的 state 裡不存在`);
+      return null;
     }
     out = setAt(out, path, value);
   }
@@ -396,7 +407,7 @@ function perturbGraft<S>(
   target: Side,
   withSpecial: boolean,
 ): PerturbResult<S> {
-  const paths = spec.comp(target);
+  const paths = spec.comp(target, q.state);
   const base = canon(q.state);
   const marginBefore = marginOf(spec.game, q.state, q.ai);
   const tagged: { donor: S; kind: string }[] = det
@@ -413,7 +424,15 @@ function perturbGraft<S>(
   let identical = 0;
   for (const { donor, kind } of tagged.slice(0, MAX_TRIES)) {
     attempted += 1;
+    if (spec.donorOk !== undefined && !spec.donorOk(q.state, donor, q.ai)) {
+      illegal['捐贈者不相容'] = (illegal['捐贈者不相容'] ?? 0) + 1;
+      continue;
+    }
     const state = graft(q.state, donor, paths);
+    if (state === null) {
+      illegal['捐贈者缺路徑'] = (illegal['捐贈者缺路徑'] ?? 0) + 1;
+      continue;
+    }
     if (canon(state) === base) {
       identical += 1;
       continue;
@@ -481,6 +500,66 @@ export function perturbSelf<S>(
   return perturbGraft(spec, q, donors, det, max, q.ai, false);
 }
 
+export interface PathPerturbation<S> {
+  /** 路徑的樣板：數字索引換成 `*`，對手那一邊換成 `o`（例如 `history.*.o`）。 */
+  readonly label: string;
+  readonly state: S;
+}
+
+export function pathLabel(path: Path, opp: Side): string {
+  const segs = path.split('.');
+  return segs
+    .map((seg, i) => {
+      if (!/^\d+$/.test(seg)) {
+        return seg;
+      }
+      if (i === segs.length - 1) {
+        return Number(seg) === opp ? 'o' : seg;
+      }
+      return '*';
+    })
+    .join('.');
+}
+
+/** 機制：一次只換對手元件裡的一條路徑，看 AI 讀的是哪一條。每條路徑最多 `perPath` 個合法擾動。 */
+export function perturbByPath<S>(
+  spec: CardSpec<S>,
+  q: Query<S>,
+  donors: Donors<S>,
+  det: Det,
+  perPath: number,
+): readonly PathPerturbation<S>[] {
+  const opp: Side = q.ai === 0 ? 1 : 0;
+  const pool = [
+    ...det.shuffle(donors.sameTick),
+    ...(spec.farDonors === true ? det.shuffle(donors.otherTick).slice(0, FAR_SAMPLE) : []),
+  ];
+  const out: PathPerturbation<S>[] = [];
+  for (const path of spec.comp(opp, q.state)) {
+    const mine = canon(getAt(q.state, path));
+    let taken = 0;
+    for (const donor of pool.slice(0, MAX_TRIES)) {
+      if (taken >= perPath) {
+        break;
+      }
+      if (spec.donorOk !== undefined && !spec.donorOk(q.state, donor, q.ai)) {
+        continue;
+      }
+      const value = getAt(donor, path);
+      if (value === undefined || canon(value) === mine) {
+        continue;
+      }
+      const state = setAt(q.state, path, value);
+      if (legalOrReason(spec, state, q.ai) !== null) {
+        continue;
+      }
+      out.push({ label: pathLabel(path, opp), state });
+      taken += 1;
+    }
+  }
+  return out;
+}
+
 // ---------------------------------------------------------------------------
 // AI 的動作
 // ---------------------------------------------------------------------------
@@ -529,6 +608,8 @@ export interface CellMeasure {
   flip: Tally;
   noflip: Tally;
   byKind: Record<string, Tally>;
+  /** 機制：一次只換一條路徑時，各路徑的改變率。 */
+  byPath: Record<string, Tally>;
   /** 正對照：自己的元件被換掉。 */
   self: Tally;
   /** 負對照：對手的元件換成自己現在的值，必須是 0。 */
@@ -569,6 +650,7 @@ export const DEFAULT_LEVELS: readonly number[] = [10, 5];
 
 interface Prepared<S> {
   readonly q: Query<S>;
+  readonly byPath: readonly PathPerturbation<S>[];
   readonly opp: readonly Perturbation<S>[];
   readonly self: readonly Perturbation<S>[];
   readonly identity: S;
@@ -600,10 +682,11 @@ export function measureCard<S>(
       }
       // 負對照：把對手的元件換成「自己現在的值」（內容相同的新物件）。
       let identity = q.state;
-      for (const path of spec.comp(q.ai === 0 ? 1 : 0)) {
+      for (const path of spec.comp(q.ai === 0 ? 1 : 0, q.state)) {
         identity = setAt(identity, path, JSON.parse(JSON.stringify(getAt(q.state, path))));
       }
-      prepared.push({ q, opp: opp.list, self: self.list, identity });
+      const byPath = perturbByPath(spec, q, donors, det, 2);
+      prepared.push({ q, byPath, opp: opp.list, self: self.list, identity });
     }
   }
   const states = prepared.filter((p) => p.opp.length > 0).length;
@@ -620,6 +703,7 @@ export function measureCard<S>(
         flip: { queries: 0, changed: 0 },
         noflip: { queries: 0, changed: 0 },
         byKind: {},
+        byPath: {},
         self: { queries: 0, changed: 0 },
         nullChanged: 0,
       };
@@ -649,6 +733,13 @@ export function measureCard<S>(
         }
         if (any) {
           cell.statesAny += 1;
+        }
+        for (const pp of p.byPath) {
+          const tally = (cell.byPath[pp.label] ??= { queries: 0, changed: 0 });
+          tally.queries += 1;
+          if (!sameButtons(base, decideAs(spec.game, policy, level, seed, pp.state, p.q.ai))) {
+            tally.changed += 1;
+          }
         }
         for (const pert of p.self) {
           cell.self.queries += 1;
@@ -727,4 +818,31 @@ export function classify(m: CardMeasure): Classification {
     return { verdict: 'constant-policy', reason: 'AI 對整個局面近似常數', rMax, sMax };
   }
   return { verdict: 'grey', reason: `主格最大改變率 ${(100 * rMax).toFixed(1)}%`, rMax, sMax };
+}
+
+/** 一張牌的人讀報告（量測 driver 用）。 */
+const pct = (x: number): string => `${(100 * x).toFixed(1)}%`;
+
+export function formatMeasure(m: CardMeasure, c: Classification): string {
+  const lines: string[] = [];
+  lines.push(
+    `${m.id}  判定=${c.verdict}（${c.reason}）  R_max=${pct(c.rMax)}  S_max=${pct(c.sMax)}`,
+  );
+  lines.push(
+    `  決策點=${m.states}  擾動=${m.perturbations}（嘗試 ${m.attempted}，與原本相同 ${m.identical}）  拒絕=${JSON.stringify(m.illegal)}`,
+  );
+  for (const cell of m.cells) {
+    const [lo, hi] = wilson(cell.changed, cell.queries);
+    const flip = cell.flip.queries === 0 ? 'n/a' : `${cell.flip.changed}/${cell.flip.queries}`;
+    const kinds = Object.entries(cell.byKind)
+      .map(([k, t]) => `${k}:${t.changed}/${t.queries}`)
+      .join(' ');
+    const paths = Object.entries(cell.byPath)
+      .map(([k, t]) => `${k}:${t.changed}/${t.queries}`)
+      .join(' ');
+    lines.push(
+      `  ${cell.policy.padEnd(10)} L${String(cell.level).padEnd(2)} 改變=${cell.changed}/${cell.queries}=${pct(cell.queries === 0 ? 0 : cell.changed / cell.queries)} [${pct(lo)},${pct(hi)}]  有改變的決策點=${cell.statesAny}/${m.states}  領先反轉=${flip}  自我=${cell.self.changed}/${cell.self.queries}  null=${cell.nullChanged}  ${kinds}  路徑[${paths}]`,
+    );
+  }
+  return lines.join('\n');
 }

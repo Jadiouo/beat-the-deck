@@ -1,9 +1,15 @@
 import type { CardSpec } from './engine';
 import { CLUBS_SPECS } from './specs.clubs';
-import { DIAMONDS_SPECS } from './specs.diamonds';
+import { CONTROL_DIAMONDS, DIAMONDS_SPECS } from './specs.diamonds';
+import { CONTROL_SPADES } from './specs.spades';
 
-/** 所有已寫好的篩檢規格（按花色檔案分組）。 */
-export const ALL_SPECS: readonly CardSpec[] = [...CLUBS_SPECS, ...DIAMONDS_SPECS];
+/** 對照組（已量過探針 A 的牌；不在那 34 張裡）。 */
+export const CONTROL_SPECS: readonly CardSpec[] = [...CONTROL_DIAMONDS, ...CONTROL_SPADES];
+
+/** 那 34 張裡已經寫好規格的。 */
+export const TARGET_SPECS: readonly CardSpec[] = [...CLUBS_SPECS, ...DIAMONDS_SPECS];
+
+export const ALL_SPECS: readonly CardSpec[] = [...CONTROL_SPECS, ...TARGET_SPECS];
 
 const BY_ID = new Map(ALL_SPECS.map((s) => [s.id, s]));
 

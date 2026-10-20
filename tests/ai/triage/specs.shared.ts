@@ -12,20 +12,23 @@ import type { CardSpec, Path, SpecialPerturbation, Det } from './engine';
  */
 
 export interface SpecInput<S> {
-  readonly comp: (side: Side) => readonly Path[];
+  readonly comp: (side: Side, state?: S) => readonly Path[];
+  readonly donorOk?: (query: S, donor: S, ai: Side) => boolean;
   readonly legal: (state: S, ai: Side) => string | null;
   readonly special?: (state: S, ai: Side, det: Det) => readonly SpecialPerturbation<S>[];
+  readonly teeth?: (state: S, ai: Side) => readonly SpecialPerturbation<S>[];
   readonly farDonors?: boolean;
+  readonly minTicks?: number;
   readonly notScreenable?: string;
 }
 
-export function defineSpec<S>(id: string, input: SpecInput<S>): CardSpec {
+export function defineSpec<S>(id: string, input: SpecInput<S>, label: string = id): CardSpec {
   const entry = findEntry(id);
   if (entry === undefined) {
     throw new Error(`登記表裡找不到 ${id}`);
   }
   const policy = (entry.meta.defaultPolicy ?? 'pathfinder') as PolicyKey;
-  return { id, game: entry.game, defaultPolicy: policy, ...input } as unknown as CardSpec;
+  return { id: label, game: entry.game, defaultPolicy: policy, ...input } as unknown as CardSpec;
 }
 
 /** `${prefix}.${side}` 路徑的簡寫。 */
