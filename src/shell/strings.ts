@@ -106,6 +106,16 @@ export const strings = {
      */
   },
 
+  /** D-6 市場：貨名與狀態文字（畫面上的文字集中在這裡）。 */
+  market: {
+    goods: ['穀', '布', '鐵'],
+    locked: '已鎖定',
+    pass: '不動',
+    buy: '買',
+    sell: '賣',
+    round: (round: number, total: number): string => `第 ${round} / ${total} 回合`,
+  },
+
   touch: { up: '上', down: '下', left: '左', right: '右', a: 'A', b: 'B' },
 
   /** 看不見的 DOM 鏡像（給讀螢幕的人與端到端測試）。 */

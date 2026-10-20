@@ -137,7 +137,7 @@ describe('D-6 市場｜初始與行情曲線', () => {
 
   it('曲線公式：峰值 15、離峰 1 到 6 格依序 14、12、11、9、8、6，旺季之外是 6', () => {
     const base = curveFor([5, 10, 15]);
-    expect(base[0]!.slice(0, 12)).toEqual([6, 6, 6, 6, 6, 15, 14, 12, 11, 9, 8, 6]);
+    expect(base[0]!.slice(0, 12)).toEqual([8, 9, 11, 12, 14, 15, 14, 12, 11, 9, 8, 6]);
     const peak = 10;
     expect(
       [peak - 6, peak - 5, peak - 4, peak - 3, peak - 2, peak - 1, peak].map((r) => base[1]![r]),

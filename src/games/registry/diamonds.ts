@@ -22,6 +22,10 @@ import { d5Game } from '../D-5/logic';
 import type { D5State } from '../D-5/logic';
 import { d5Meta } from '../D-5/meta';
 import { d5Render } from '../D-5/render';
+import { d6Game } from '../D-6/logic';
+import type { D6State } from '../D-6/logic';
+import { d6Meta } from '../D-6/meta';
+import { d6Render } from '../D-6/render';
 import { d7Game } from '../D-7/logic';
 import type { D7State } from '../D-7/logic';
 import { d7Meta } from '../D-7/meta';
@@ -77,6 +81,13 @@ export const diamondsEntries: readonly RegistryEntry[] = [
     game: d5Game,
     render: d5Render,
     meta: d5Meta,
+  }),
+  defineEntry<D6State>({
+    id: d6Meta.id,
+    kind: 'card',
+    game: d6Game,
+    render: d6Render,
+    meta: d6Meta,
   }),
   defineEntry<D7State>({
     id: d7Meta.id,
