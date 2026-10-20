@@ -530,18 +530,42 @@ function reflexTrade(state: D6State, side: Side): Trade {
   return best;
 }
 
-/** 買下之後存貨裡「賣不掉」的比例，以曲線（不看偏移）算：1 − 一回合一件的出口價值 ÷ 反射標價。 */
-function hoardDanger(state: D6State, inv: readonly number[]): number {
-  const mark = markValue(state, inv);
-  if (mark <= 0) {
-    return 0;
+/** 「好價回合」的門檻：曲線在 LOW 與 HIGH 的中點以上（旺季的上半段，每個峰值約 7 個回合）。 */
+const GOOD_PRICE = (LOW + HIGH) / 2;
+
+/** 第 g 種貨還沒到的回合裡，曲線在好價門檻以上的回合數。 */
+function goodRoundsLeft(state: D6State, good: number): number {
+  let n = 0;
+  const row = state.base[good] as readonly number[];
+  for (let t = state.round + 1; t < ROUNDS; t += 1) {
+    if ((row[t] as number) >= GOOD_PRICE) {
+      n += 1;
+    }
   }
-  const real = exitValue(
-    inv,
-    state.round + 1,
-    (g, t) => (state.base[g] as readonly number[])[t] as number,
-  );
-  return clamp01(1 - real / mark);
+  return n;
+}
+
+/**
+ * 賣不掉的風險（0 到 1）：存貨超過「還沒到的好價回合」能吸收的件數（每種貨各算，總數也不能超過剩下的回合數），
+ * 加上對手手上同一種貨的擠壓。貪心型不看它；精準型排除超過 0.3 的動作（多一件賣不掉就排除）；賭徒型被它吸引。
+ * 深度 ≥ 3 的評價已經用「一回合只能賣一件」把這件事算進 gain，所以 `result` 階段的 danger 是 0，不重複扣。
+ */
+function hoardDanger(state: D6State, side: Side, inv: readonly number[]): number {
+  const oppInv = state.inv[otherSide(side)] as readonly number[];
+  let total = 0;
+  let weak = 0;
+  let crowd = 0;
+  for (let g = 0; g < GOODS; g += 1) {
+    const mine = inv[g] as number;
+    const room = goodRoundsLeft(state, g);
+    total += mine;
+    weak += Math.max(0, mine - room);
+    if (mine > 0) {
+      crowd = Math.max(crowd, (oppInv[g] as number) / (room + 1));
+    }
+  }
+  weak += Math.max(0, total - weak - (ROUNDS - 1 - state.round));
+  return clamp01(weak / 3 + crowd / 4);
 }
 
 /** 沒看到結算（choose、locked）：只剩反射式的評價，淺搜尋（深度 1、2）和三個一步看的性格只走到這裡。 */
@@ -552,7 +576,7 @@ function evaluateShallow(state: D6State, side: Side): { gain: number; danger: nu
   const theirs =
     (state.cash[opp] as number) + markValue(state, state.inv[opp] as readonly number[]);
   const inv = applyToInventory(state.inv[side] as readonly number[], mine);
-  return { gain: mineValue - theirs, danger: hoardDanger(state, inv) };
+  return { gain: mineValue - theirs, danger: hoardDanger(state, side, inv) };
 }
 
 /**
@@ -632,7 +656,9 @@ function evaluateDeep(state: D6State, side: Side): { gain: number; danger: numbe
     );
 
   const mineValue = myCash + exitValue(myInv, r + 1, price);
-  const theirValue = (state.cash[opp] as number) + exitValue(oppInv, r + 1, price);
+  // 對手的存貨價值只在讀對手的時候算（不讀就只管自己的現金與存貨）。
+  const theirValue =
+    (state.cash[opp] as number) + (state.model ? exitValue(oppInv, r + 1, price) : 0);
   return { gain: mineValue - theirValue, danger: 0 };
 }
 
