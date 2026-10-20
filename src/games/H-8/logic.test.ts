@@ -349,15 +349,17 @@ describe('H-8 加倍或歸零｜規則', () => {
     expect(ladderPoints(0, 1)).toEqual([0, 2]);
   });
 
-  it('8. 爬到最後一層成功就登頂：賭注 2^6、自動停', () => {
+  it('8. 爬到最後一層成功就登頂：賭注 2^6、自動停（梯子因此結束，past 記下賭注 64）', () => {
     const s = ladderAt(5);
     const r = playLevel(s, CLIMB, STOP, true, null);
-    expect(r.pot[0]).toBe(64);
-    expect(r.level[0]).toBe(6);
-    expect(r.status[0]).toBe('stopped');
-    // 另一邊也停了，所以這座梯子結束
+    expect(r.past[0]?.pots).toEqual([64, 32]);
+    expect(r.past[0]?.log[0]).toEqual({ level: 5, acts: [CLIMB, STOP], ok: [true, null] });
     expect(r.ladder).toBe(1);
     expect(r.scores).toEqual([2, 0]);
+    // 兩邊都登頂：賭注一樣高，各 1 分
+    const both = playLevel(s, CLIMB, CLIMB, true, true);
+    expect(both.past[0]?.pots).toEqual([64, 64]);
+    expect(both.scores).toEqual([1, 1]);
   });
 
   it('9. 梯子結束後：past 記下雙方的 q、賭注與紀錄；新的一座從層 0、賭注 1、重新抽 q 開始，準備階段多等 LADDER_PAUSE', () => {
