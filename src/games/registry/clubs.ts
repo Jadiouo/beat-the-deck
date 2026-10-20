@@ -38,6 +38,10 @@ import { cAGame } from '../C-A/logic';
 import type { ClubsState } from '../C-A/logic';
 import { cAMeta } from '../C-A/meta';
 import { cARender } from '../C-A/render';
+import { ckGame } from '../C-K/logic';
+import type { CKState } from '../C-K/logic';
+import { ckMeta } from '../C-K/meta';
+import { ckRender } from '../C-K/render';
 import { cJGame } from '../C-J/logic';
 import type { CJState } from '../C-J/logic';
 import { cJMeta } from '../C-J/meta';
@@ -134,5 +138,12 @@ export const clubsEntries: readonly RegistryEntry[] = [
     game: cqGame,
     render: cqRender,
     meta: cqMeta,
+  }),
+  defineEntry<CKState>({
+    id: ckMeta.id,
+    kind: 'card',
+    game: ckGame,
+    render: ckRender,
+    meta: ckMeta,
   }),
 ];
