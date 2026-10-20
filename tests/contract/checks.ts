@@ -1440,6 +1440,8 @@ export const PURSUIT: Readonly<Record<string, PursuitDeclaration | PursuitNotApp
   'C-6': { targets: clubFoods, minTakesPerMinute: 5, minMedianSeconds: 20 },
   // C-9 的目標是鑰匙與門（一局最多取得 2 次：拿鑰匙、進門）。下限的量測與理由見 docs/cards/C-9.md「追目標」。
   'C-9': { targets: keyThenDoor, minTakesPerMinute: 5, minMedianSeconds: 30 },
+  // C-Q 的目標是食物（沿用貪食蛇；僚機不吃東西）。下限的量測與理由見 docs/cards/C-Q.md「追目標」。
+  'C-Q': { targets: clubFoods, minTakesPerMinute: 8, minMedianSeconds: 30 },
   'C-8': { notApplicable: '光軌沒有可追的目標：先撞到牆的輸，贏的是活得久，不是拿到東西' },
   'C-10': {
     notApplicable: '追與逃：目標是對手的蛇頭，不是場上的東西；普查 60 個回合全部由追的抓到逃的',
