@@ -143,7 +143,11 @@ export interface StateOverrides extends BaseOverrides {
  * `stage` 由 `tick` 推出，不另存。
  */
 export function makeState(overrides: StateOverrides = {}): DKState {
-  const d8 = makeD8State({ ...overrides, tick: overrides.tick ?? STAGE1_START, players: undefined });
+  const d8 = makeD8State({
+    ...overrides,
+    tick: overrides.tick ?? STAGE1_START,
+    players: undefined,
+  });
   const cells0 = d8.players[0].score;
   const cells1 = d8.players[1].score;
   const base = d8 as DiamondsBase;
@@ -213,7 +217,10 @@ function stepGems(state: DKState, inputs: Inputs): DKState {
     const gained = (players[side] as Walker).score - (state.players[side] as Walker).score;
     if (gained > 0 && state.paint[(players[side] as Walker).cell] === side + 1) {
       const bonus = Math.ceil(gained / 2);
-      players[side] = { ...(players[side] as Walker), score: (players[side] as Walker).score + bonus };
+      players[side] = {
+        ...(players[side] as Walker),
+        score: (players[side] as Walker).score + bonus,
+      };
       turfGems[side] += bonus;
     }
   }
@@ -273,11 +280,7 @@ function stepSteal(state: DKState, inputs: Inputs): DKState {
     const first = Math.min(COIN_POINTS, base[victim]);
     scores[victim] -= first;
     // 偷成功的加碼：對手還有分、背包還有空位，再偷一枚。
-    if (
-      STEAL_EXTRA > 0 &&
-      base[victim] - first >= 1 &&
-      moved.bags[thief] < BAG_LIMIT
-    ) {
+    if (STEAL_EXTRA > 0 && base[victim] - first >= 1 && moved.bags[thief] < BAG_LIMIT) {
       scores[victim] -= Math.min(COIN_POINTS, base[victim] - first);
       bags[thief] += STEAL_EXTRA;
       stolen[thief] += STEAL_EXTRA;
@@ -544,7 +547,8 @@ function evaluateGems(state: DKState, side: Side): { gain: number; danger: numbe
     const theirs = fields.theirs[gem.cell] as number;
     const effective = mine + (theirs < mine ? CONTEST_PENALTY : 0);
     const value = gemValue(arrival - 1, gem.born);
-    const candidate = (GEM_PULL * (value + turfBonus(state, side, gem.cell, value))) / (effective + 2);
+    const candidate =
+      (GEM_PULL * (value + turfBonus(state, side, gem.cell, value))) / (effective + 2);
     if (candidate > pull) {
       pull = candidate;
       danger = contestDanger(mine, theirs);

@@ -147,7 +147,11 @@ describe('D-K｜第 1 段：圈地與分數', () => {
   });
 
   it('第 1 段結束（tick 1080）以及之後的過場：score 仍是顏色格數，turfCells 凍結，不被重算', () => {
-    const state = makeState({ tick: 1075, paint0: row(20, 0, 24), paint1: [BASE_1, ...row(2, 8, 11)] });
+    const state = makeState({
+      tick: 1075,
+      paint0: row(20, 0, 24),
+      paint1: [BASE_1, ...row(2, 8, 11)],
+    });
     // 1075 → 1080：最後一個走格 tick（1080）人往右走一格
     const end = run(dKGame, state, 5, RIGHT_ONLY);
     expect(end.tick).toBe(1080);
@@ -431,7 +435,10 @@ describe('D-K｜第 3 段：金幣的分數、連結 2（地盤是安全區）�
     expect(end.over).toBe(true);
     expect(end.players[0].score).toBe(100);
     expect(dKGame.winner(end)).toBe(1);
-    const tie = dKGame.step(makeState({ tick: 3599, players: [{ score: 10 }, { score: 10 }] }), BOTH_IDLE);
+    const tie = dKGame.step(
+      makeState({ tick: 3599, players: [{ score: 10 }, { score: 10 }] }),
+      BOTH_IDLE,
+    );
     expect(dKGame.winner(tie)).toBeNull();
     // 結束以後 step 原樣回傳
     expect(dKGame.step(end, BOTH_IDLE)).toBe(end);
@@ -464,7 +471,10 @@ describe('D-K｜整場', () => {
     const dirs = [PRESS_RIGHT, { ...NONE, up: true }, PRESS_LEFT, { ...NONE, down: true }];
     for (let i = 0; i < 3600; i += 1) {
       deepFreeze(state);
-      const inputs: Inputs = [dirs[Math.floor(i / 7) % 4] ?? NONE, dirs[Math.floor(i / 11) % 4] ?? NONE];
+      const inputs: Inputs = [
+        dirs[Math.floor(i / 7) % 4] ?? NONE,
+        dirs[Math.floor(i / 11) % 4] ?? NONE,
+      ];
       state = dKGame.step(state, inputs);
     }
     expect(state.over).toBe(true);

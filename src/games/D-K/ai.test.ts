@@ -118,7 +118,10 @@ describe('D-K｜evaluate', () => {
     const make = (onTurf: boolean): number => {
       const state = makeState({
         tick: 2700,
-        players: [{ cell: cell(25, 3), score: 100 }, { cell: cell(10, 10), score: 100 }],
+        players: [
+          { cell: cell(25, 3), score: 100 },
+          { cell: cell(10, 10), score: 100 },
+        ],
         paint1: onTurf ? [cell(10, 10)] : [],
         coins: [],
       });
@@ -134,7 +137,10 @@ describe('D-K｜evaluate', () => {
     const make = (onTurf: boolean): number => {
       const state = makeState({
         tick: 2700,
-        players: [{ cell: cell(12, 18), score: 100 }, { cell: cell(1, 23), score: 100 }],
+        players: [
+          { cell: cell(12, 18), score: 100 },
+          { cell: cell(1, 23), score: 100 },
+        ],
         lurk: [0, 30],
         paint0: onTurf ? [cell(12, 18)] : [],
         coins: [],
@@ -152,15 +158,47 @@ describe('D-K｜evaluate', () => {
   });
 
   it('第 1 段：家附近的地盤進了 gain（同樣的格數，在家附近的比在遠處的高）', () => {
-    const nearHome = makeState({ tick: 300, paint0: [BASE_0, cell(1, 23), cell(2, 23), cell(3, 23), cell(4, 23), cell(0, 22), cell(0, 21), cell(1, 22)] });
-    const farAway = makeState({ tick: 300, paint0: [cell(15, 10), cell(16, 10), cell(17, 10), cell(18, 10), cell(19, 10), cell(20, 10), cell(21, 10), cell(22, 10)] });
+    const nearHome = makeState({
+      tick: 300,
+      paint0: [
+        BASE_0,
+        cell(1, 23),
+        cell(2, 23),
+        cell(3, 23),
+        cell(4, 23),
+        cell(0, 22),
+        cell(0, 21),
+        cell(1, 22),
+      ],
+    });
+    const farAway = makeState({
+      tick: 300,
+      paint0: [
+        cell(15, 10),
+        cell(16, 10),
+        cell(17, 10),
+        cell(18, 10),
+        cell(19, 10),
+        cell(20, 10),
+        cell(21, 10),
+        cell(22, 10),
+      ],
+    });
     expect(dKGame.evaluate(nearHome, 0).gain).toBeGreaterThan(dKGame.evaluate(farAway, 0).gain);
   });
 
   it('第 1 段：越接近第 1 段結束、家附近越空，danger 越高；家附近鋪滿就是 0', () => {
     const farPaint = [cell(15, 10), cell(16, 10)];
-    const early = makeState({ tick: 100, paint0: farPaint, players: [{ cell: cell(15, 10) }, { cell: cell(31, 0) }] });
-    const late = makeState({ tick: 1000, paint0: farPaint, players: [{ cell: cell(15, 10) }, { cell: cell(31, 0) }] });
+    const early = makeState({
+      tick: 100,
+      paint0: farPaint,
+      players: [{ cell: cell(15, 10) }, { cell: cell(31, 0) }],
+    });
+    const late = makeState({
+      tick: 1000,
+      paint0: farPaint,
+      players: [{ cell: cell(15, 10) }, { cell: cell(31, 0) }],
+    });
     expect(dKGame.evaluate(late, 0).danger).toBeGreaterThan(0.3);
     expect(dKGame.evaluate(early, 0).danger).toBeLessThan(0.3);
     const homeFull: number[] = [];
@@ -169,7 +207,11 @@ describe('D-K｜evaluate', () => {
         homeFull.push(cell(x, y));
       }
     }
-    const filled = makeState({ tick: 1000, paint0: homeFull, players: [{ cell: cell(15, 10) }, { cell: cell(31, 0) }] });
+    const filled = makeState({
+      tick: 1000,
+      paint0: homeFull,
+      players: [{ cell: cell(15, 10) }, { cell: cell(31, 0) }],
+    });
     expect(dKGame.evaluate(filled, 0).danger).toBeLessThan(0.05);
   });
 
@@ -182,17 +224,28 @@ describe('D-K｜evaluate', () => {
         expect(danger).toBe(0);
       }
     }
-    const done = dKGame.step(makeState({ tick: 3599, players: [{ score: 300 }, { score: 250 }] }), [NONE, NONE]);
+    const done = dKGame.step(makeState({ tick: 3599, players: [{ score: 300 }, { score: 250 }] }), [
+      NONE,
+      NONE,
+    ]);
     expect(done.over).toBe(true);
-    expect(dKGame.evaluate(done, 0).gain).toBeGreaterThan(dKGame.evaluate(done, 1).gain + 1_000_000);
+    expect(dKGame.evaluate(done, 0).gain).toBeGreaterThan(
+      dKGame.evaluate(done, 1).gain + 1_000_000,
+    );
   });
 
   it('不是橡皮筋：兩邊分數對調，同一個局面（左右鏡像）的選擇不變——第 2 段，同一顆寶石對兩邊的評估一樣', () => {
     // 人在左下、AI 在右上，各自距離同一類寶石一樣遠（180 度旋轉）；兩邊分數相同。
     const a = makeState({
       tick: 1200,
-      players: [{ cell: cell(5, 20), score: 150 }, { cell: cell(26, 3), score: 150 }],
-      gems: [{ cell: cell(8, 20), born: 1140 }, { cell: cell(23, 3), born: 1140 }],
+      players: [
+        { cell: cell(5, 20), score: 150 },
+        { cell: cell(26, 3), score: 150 },
+      ],
+      gems: [
+        { cell: cell(8, 20), born: 1140 },
+        { cell: cell(23, 3), born: 1140 },
+      ],
     });
     const g0 = dKGame.evaluate(a, 0).gain;
     const g1 = dKGame.evaluate(a, 1).gain;
@@ -215,7 +268,8 @@ describe('D-K｜actions 的排序和 evaluate 的偏好一致', () => {
       let state = dKGame.init(seed, CONFIG);
       while (!dKGame.isOver(state)) {
         const tick = state.tick;
-        const stage = tick >= 2580 ? 3 : tick >= 1140 && tick < 2520 ? 2 : tick >= 60 && tick < 1080 ? 1 : 0;
+        const stage =
+          tick >= 2580 ? 3 : tick >= 1140 && tick < 2520 ? 2 : tick >= 60 && tick < 1080 ? 1 : 0;
         if (stage > 0 && tick % 5 === 4 && tick % 20 === 4) {
           for (const side of [0, 1] as Side[]) {
             const scored = lookOneStep(dKGame, state, side);
@@ -234,7 +288,9 @@ describe('D-K｜actions 的排序和 evaluate 的偏好一致', () => {
     }
     for (let i = 0; i < 3; i += 1) {
       expect(total[i] as number).toBeGreaterThan(20);
-      expect((hits[i] as number) / (total[i] as number), `第 ${i + 1} 段`).toBeGreaterThanOrEqual(0.7);
+      expect((hits[i] as number) / (total[i] as number), `第 ${i + 1} 段`).toBeGreaterThanOrEqual(
+        0.7,
+      );
     }
   }, 120_000);
 

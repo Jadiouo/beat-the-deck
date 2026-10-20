@@ -1,6 +1,7 @@
 import { copyButtons, playMatch } from '../../core/match';
 import type { MatchResult } from '../../core/match';
 import type { Buttons, Controller, GameConfig, Side } from '../../core/types';
+import type { Policy } from '../../ai/types';
 import { d2Game } from '../D-2/logic';
 import { d3Game, gemValue } from '../D-3/logic';
 import { d8Game } from '../D-8/logic';
@@ -65,11 +66,7 @@ export function homeCells(state: DKState, side: Side): number {
 }
 
 /** 從我現在的格子出發最近的、符合條件的「還不是我的顏色」的格子。 */
-function nearestCell(
-  state: DKState,
-  side: Side,
-  accept: (c: number) => boolean,
-): number | null {
+function nearestCell(state: DKState, side: Side, accept: (c: number) => boolean): number | null {
   const dist = bfsDistances(state.walls, state.players[side].cell);
   let best: number | null = null;
   let bestD = UNREACHABLE;
@@ -165,7 +162,7 @@ function stage2(mode: Stage2Mode, state: DKState, side: Side): Buttons {
   return toward(state, side, best);
 }
 
-function stage3(mode: Stage3Mode, state: DKState, side: Side): Buttons {
+export function stage3(mode: Stage3Mode, state: DKState, side: Side): Buttons {
   if (mode === 'dj') {
     return dJGame.actions(state as never, side)[0] as Buttons;
   }
@@ -274,3 +271,50 @@ export function playTraced(
 }
 
 export { playMatch };
+
+// ---------------------------------------------------------------------------
+// 性格當成 Policy 用（加反應延遲）、指紋、探針 A 的三組
+// ---------------------------------------------------------------------------
+
+/** 把劇本玩家包成 Policy，就可以用 `wrapPolicy` 加上反應延遲與決定頻率（同人類模型那一套）。 */
+export function scriptPolicy(spec: ScriptSpec): Policy {
+  const controller = script(spec);
+  return {
+    name: 'script',
+    decide(_game, state, side): Buttons {
+      return controller.decide(state as DKState, side, (state as DKState).tick);
+    },
+  };
+}
+
+/**
+ * 探針 A 的三組（對等級 10 的預設性格；**定義在量之前固定**）。三組第 1 段都用 D-8 的貪心（`greedy`），只差「知道多少」：
+ * - (a) 不知道有對手：第 2 段挑「價值加紅利 ÷ 距離」最大的寶石、不管對手在哪（`turf`）；第 3 段只撿金幣存起來，不偷也不守（`coins`）。
+ * - (b) 知道有對手、不讀它的狀態：第 2 段多一條固定的規則「對手比我近的寶石，距離加 8」（用到對手的位置，這是「知道有對手」的最低限度）；
+ *   第 3 段照 D-J 的固定規則（有分可偷就去貼著對手的基地偷，不看它站在誰的顏色上，也不退回自己的地盤；`dj`）。
+ * - (c) 讀它的狀態（地盤與位置）：第 2 段同 (b)；第 3 段（`smart`）對手站在自己的顏色上就不去偷（改撿金幣）、
+ *   對手貼著我的基地時我站回自己的顏色上不走開。
+ * (c) 不是鏡像：它用的是上面這幾條人腦做得到的規則，不是 AI 的 `evaluate`。
+ */
+export const PROBE_A: Readonly<Record<'a' | 'b' | 'c', ScriptSpec>> = {
+  a: { s1: 'greedy', s2: 'turf', s3: 'coins' },
+  b: { s1: 'greedy', s2: 'turfContest', s3: 'dj' },
+  c: { s1: 'greedy', s2: 'turfContest', s3: 'smart' },
+};
+
+/**
+ * 探針 A′（第 3 段專用）：第 1、2 段用 AI 自己的引擎（等級 10 貪心型，和對手同一個，所以前兩段是鏡像、勝率基準線 50%），
+ * 第 3 段換成 (a)(b)(c) 的規則。差別只在第 3 段「知道多少」；前兩段不是變數，所以不會被腳本比引擎弱的地板效應蓋掉。
+ * 引擎每個 tick 都被問一次（維持它自己的歷史），第 3 段只是不用它的答案。
+ */
+export function engineThenSteal(
+  engine: Controller<DKState>,
+  mode: Stage3Mode,
+): Controller<DKState> {
+  return {
+    decide(state: DKState, side: Side, tick: number): Buttons {
+      const fromEngine = engine.decide(state, side, tick);
+      return stageOf(state.tick) === 3 ? stage3(mode, state, side) : fromEngine;
+    },
+  };
+}
