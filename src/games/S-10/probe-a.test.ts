@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
+import { deepFreeze } from '../../../tests/contract/freeze';
 import { CLEAR_CAP, makeState } from './logic';
 import type { S10State } from './logic';
 import {
@@ -192,5 +193,31 @@ describe('(c) 不用 AI 的引擎', () => {
     expect(text).not.toMatch(/predictOpponent/);
     // 工具檔不呼叫 s10Game.evaluate / evaluate(
     expect(text).not.toMatch(/\.evaluate\(|\bevaluate\(/);
+  });
+});
+
+describe('影子不影響對局', () => {
+  it('同一個驅動者配三個不同的影子：對局的結果、分差、清場紀錄逐項相同，而分歧點數確實不同', () => {
+    for (const driver of ['b-wait3', 'c-learn']) {
+      const runs = ['b-habit', 'b-prob25', 'c-oppinvuln'].map((shadow) => playPair(driver, shadow, 3, { level: 5 }));
+      const [first, ...rest] = runs;
+      for (const r of rest) {
+        expect(r.win).toBe(first?.win);
+        expect(r.margin).toBe(first?.margin);
+        expect(r.hitsMe).toBe(first?.hitsMe);
+        expect(r.clears).toEqual(first?.clears);
+      }
+    }
+    const diffs = ['b-habit', 'b-wait10'].map((shadow) => playPair('b-wait3', shadow, 3, { level: 5 }).diffPoints);
+    expect(diffs[0]).not.toBe(diffs[1]);
+  }, 120_000);
+  it('20 個成員在凍結的 state 上跑，沒有任何一個會寫 state（寫了會丟錯）', () => {
+    for (const name of [...B_FAMILY, ...C_FAMILY, 'absent', 'd-sniper', 'd-sweep3']) {
+      const rule = makeRule(name, 2);
+      for (let k = 0; k < 70; k += 1) {
+        const s = deepFreeze(at(300 + k, 24 + (k % 9), { lock: [0, k % 3 === 0 ? 5 : 0], exposure: [0, 0.01] }));
+        expect(() => rule.press(s, k % 2 === 0 ? 0 : 1, s.tick)).not.toThrow();
+      }
+    }
   });
 });
