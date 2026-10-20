@@ -1,8 +1,12 @@
 import { levelController, policyByName } from '../../ai/level';
 import { precise } from '../../ai/policies/precise';
+import { playMatch } from '../../core/match';
+import type { MatchResult } from '../../core/match';
 import { createRng } from '../../core/rng';
-import type { Buttons, Game, Side } from '../../core/types';
+import type { Buttons, Controller, Game, Side } from '../../core/types';
 import type { PolicyKey } from '../../ai/types';
+import { outcomeOf, shadow } from '../../../tests/ai/probe-a.shared';
+import type { ProbeSpec } from '../../../tests/ai/probe-a.shared';
 import { actionsSpades } from '../_spades/logic';
 import { CLEAR_CAP, CLEARS, canClear, dangerOf, opponentPressChance, s10Game } from './logic';
 import type { S10State } from './logic';
@@ -253,31 +257,67 @@ export function makeRule(name: string, seed: number): PressRule {
 }
 
 // ---------------------------------------------------------------------------
-// 對局：驅動者＋影子
+// 對局：驅動者＋影子（影子、分歧率、配對標準誤全部來自 tests/ai/probe-a.shared.ts）
 // ---------------------------------------------------------------------------
 
 const MOVES = actionsSpades();
 const MOVE_GAME: Game<S10State> = { ...s10Game, actions: () => MOVES };
 const TRAINING_SEED_OFFSET = 1_000_003;
+const CONFIG = { maxTicks: 3600, params: {} };
+
+/** 偶數種子坐 0 號邊。 */
+export const sideOf = (seed: number): Side => (seed % 2 === 0 ? 0 : 1);
+
+/** 這個 tick 自己按得下去（`canClear` 且自己沒被鎖）＝一個決策點。 */
+export const isDecisionPoint = (state: S10State, side: Side): boolean =>
+  canClear(state) && state.lock[side] === 0;
+
+/** 同一個 tick 的移動只算一次（所有成員的移動都一樣；精準型 depth 1）。同一場的控制器共用一個。 */
+export type Mover = (state: S10State, side: Side, tick: number, seed: number) => Buttons;
+
+export function makeMover(): Mover {
+  let last: { state: S10State; side: Side; tick: number; seed: number; move: Buttons } | null =
+    null;
+  return (state, side, tick, seed) => {
+    if (
+      last !== null &&
+      last.state === state &&
+      last.side === side &&
+      last.tick === tick &&
+      last.seed === seed
+    ) {
+      return last.move;
+    }
+    const move = precise.decide(MOVE_GAME, state, side, tick, { depth: 1, seed });
+    last = { state, side, tick, seed, move };
+    return move;
+  };
+}
+
+/** 把一個按鍵規則做成控制器：移動同一套，只差這個 tick 要不要按 b。 */
+export function ruleController(
+  name: string,
+  seed: number,
+  mover: Mover = makeMover(),
+): Controller<S10State> {
+  const rule = makeRule(name, seed);
+  return {
+    decide(state, side, tick): Buttons {
+      const pressed = rule.press(state, side, tick);
+      const move = mover(state, side, tick, seed);
+      return pressed ? { ...move, b: true } : move;
+    },
+  };
+}
 
 export interface PairOptions {
   readonly level: number;
   readonly policy?: PolicyKey;
 }
 
-export interface PairResult {
-  /** 玩家坐哪一邊。 */
+export interface PlayedWith {
   readonly side: Side;
-  /** 驅動者這邊的結果：1 贏、0.5 平手、0 輸。 */
-  readonly win: number;
-  /** 玩家分數 − AI 分數。 */
-  readonly margin: number;
-  /** 決策點（按得下去的 tick）數。 */
-  readonly points: number;
-  /** 其中驅動者與影子要不要按不同的決策點數。 */
-  readonly diffPoints: number;
-  /** 第一個決定不同的 tick，沒有是 −1。 */
-  readonly firstDiffTick: number;
+  readonly match: MatchResult;
   readonly hitsMe: number;
   readonly hitsAi: number;
   /** 每次清場：誰按的、按下去那一刻的子彈數、第幾個 tick。 */
@@ -289,72 +329,31 @@ export interface PairResult {
 }
 
 /**
- * 驅動者 `driver` 真正操作對局；影子 `shadow` 在每個 tick 對同一個 state 回答但不被採用。
- * 偶數種子坐 0 號邊；AI 是 `policy`（預設精準型）的等級 `level`，種子是玩家種子 ＋ 1,000,003。
- * 驅動者是 (b*) 時，這就是真正的 (b) 對局，第一個分歧的 tick 就是 (b)、(c) 兩條對局真正分開的地方。
+ * 用 `ctl` 當玩家跑一場。偶數種子坐 0 號邊；AI 是 `policy`（預設精準型）的等級 `level`，
+ * 種子是玩家種子 ＋ 1,000,003。對局本身是 `playMatch`（和遊戲裡一樣），清場紀錄是事後用同樣的輸入重播得到。
  */
-export function playPair(
-  driver: string,
-  shadow: string,
+export function playWith(
   seed: number,
+  ctl: Controller<S10State>,
   options: PairOptions,
-): PairResult {
-  const { shadows, ...result } = playMulti(driver, [shadow], seed, options);
-  return { ...result, ...(shadows[0] as ShadowStat) };
-}
-
-export interface ShadowStat {
-  readonly points: number;
-  readonly diffPoints: number;
-  readonly firstDiffTick: number;
-}
-
-export interface MultiResult extends Omit<PairResult, keyof ShadowStat> {
-  /** 每個影子各自的決策點與分歧（與 `shadows` 參數同順序）。 */
-  readonly shadows: readonly ShadowStat[];
-}
-
-/** 同一場對局配多個影子（影子的回答不被採用，所以驅動者的對局與影子的數量無關）。 */
-export function playMulti(
-  driver: string,
-  shadowNames: readonly string[],
-  seed: number,
-  options: PairOptions,
-): MultiResult {
-  const me: Side = seed % 2 === 0 ? 0 : 1;
+): PlayedWith {
+  const me = sideOf(seed);
   const opp = other(me);
-  const drive = makeRule(driver, seed);
-  const shades = shadowNames.map((n) => makeRule(n, seed));
-  const stats = shadowNames.map(() => ({ points: 0, diffPoints: 0, firstDiffTick: -1 }));
   const ai = levelController(
     s10Game,
     policyByName(options.policy ?? 'precise'),
     options.level,
     seed + TRAINING_SEED_OFFSET,
   );
-  let state = s10Game.init(seed, { maxTicks: 3600, params: {} });
+  const match =
+    me === 0
+      ? playMatch(s10Game, seed, CONFIG, ctl, ai)
+      : playMatch(s10Game, seed, CONFIG, ai, ctl);
+  let state = s10Game.init(seed, CONFIG);
   const clears: { who: 'me' | 'ai' | 'both'; n: number; tick: number }[] = [];
-  for (let tick = 0; !s10Game.isOver(state); tick += 1) {
-    const pd = drive.press(state, me, tick);
-    const decisionPoint = canClear(state) && state.lock[me] === 0;
-    shades.forEach((shade, i) => {
-      const ps = shade.press(state, me, tick);
-      const stat = stats[i] as { points: number; diffPoints: number; firstDiffTick: number };
-      if (decisionPoint) {
-        stat.points += 1;
-        if (pd !== ps) {
-          stat.diffPoints += 1;
-          if (stat.firstDiffTick < 0) {
-            stat.firstDiffTick = tick;
-          }
-        }
-      }
-    });
-    const move = precise.decide(MOVE_GAME, state, me, tick, { depth: 1, seed });
-    const mine: Buttons = pd ? { ...move, b: true } : move;
-    const theirs = ai.decide(state, opp, tick);
+  match.inputs.forEach((inputs, tick) => {
     const before = state;
-    state = s10Game.step(state, me === 0 ? [mine, { ...theirs }] : [{ ...theirs }, mine]);
+    state = s10Game.step(state, inputs);
     if (state.clears < before.clears) {
       const mineGain = state.cleared[me] - before.cleared[me];
       const theirGain = state.cleared[opp] - before.cleared[opp];
@@ -364,41 +363,110 @@ export function playMulti(
         tick,
       });
     }
-  }
-  const winner = s10Game.winner(state);
-  const [s0, s1] = s10Game.score(state);
+  });
   return {
     side: me,
-    win: winner === null ? 0.5 : winner === me ? 1 : 0,
-    margin: me === 0 ? s0 - s1 : s1 - s0,
-    shadows: stats,
+    match,
     hitsMe: state.players[me].hits,
     hitsAi: state.players[opp].hits,
     clears,
   };
 }
 
-// ---------------------------------------------------------------------------
-// 統計
-// ---------------------------------------------------------------------------
-
-/** 同種子配對差 a − b 的平均與標準誤（樣本標準差 ÷ √n）。 */
-export function pairedStats(
-  a: readonly number[],
-  b: readonly number[],
-): { mean: number; se: number } {
-  const n = Math.min(a.length, b.length);
-  if (n === 0) {
-    return { mean: 0, se: 0 };
-  }
-  const d = Array.from({ length: n }, (_v, i) => (a[i] as number) - (b[i] as number));
-  const mean = d.reduce((acc, x) => acc + x, 0) / n;
-  if (n < 2) {
-    return { mean, se: 0 };
-  }
-  const variance = d.reduce((acc, x) => acc + (x - mean) ** 2, 0) / (n - 1);
-  return { mean, se: Math.sqrt(variance / n) };
+/**
+ * 探針 A 的規格（給 `compareBC`／`divergence`）：(b)、(c) 是兩個按鍵規則的名字。
+ * 決策點是「自己按得下去的 tick」。(b)、(c) 吃同一個 `play`，AI 的種子約定相同。
+ */
+export function s10Spec(
+  b: string,
+  c: string,
+  seeds: readonly number[],
+  options: PairOptions,
+): ProbeSpec<S10State> {
+  return {
+    makeB: (seed) => ruleController(b, seed),
+    makeC: (seed) => ruleController(c, seed),
+    seeds,
+    play: (seed, ctl) => {
+      const played = playWith(seed, ctl, options);
+      return outcomeOf(played.match, played.side);
+    },
+    isPoint: isDecisionPoint,
+  };
 }
+
+export interface ShadowStat {
+  readonly points: number;
+  readonly diffPoints: number;
+  readonly firstDiffTick: number;
+}
+
+export interface MultiResult {
+  /** 玩家坐哪一邊。 */
+  readonly side: Side;
+  /** 驅動者這邊的結果：1 贏、0.5 平手、0 輸。 */
+  readonly win: number;
+  /** 玩家分數 − AI 分數。 */
+  readonly margin: number;
+  /** 每個影子各自的決策點與分歧（與 `shadowNames` 參數同順序）。 */
+  readonly shadows: readonly ShadowStat[];
+  readonly hitsMe: number;
+  readonly hitsAi: number;
+  readonly clears: PlayedWith['clears'];
+  readonly finalHash: string;
+}
+
+/**
+ * 驅動者 `driver` 真正操作對局；每個影子對同一個 state 回答但不被採用（所以驅動者的對局與影子的數量無關）。
+ * 驅動者是 (b*) 時，這就是真正的 (b) 對局，第一個分歧的 tick 就是 (b)、(c) 兩條對局真正分開的地方。
+ */
+export function playMulti(
+  driver: string,
+  shadowNames: readonly string[],
+  seed: number,
+  options: PairOptions,
+): MultiResult {
+  const mover = makeMover();
+  let ctl = ruleController(driver, seed, mover);
+  const stats = shadowNames.map((name) => {
+    const wrapped = shadow(ctl, ruleController(name, seed, mover), isDecisionPoint);
+    ctl = wrapped.ctl;
+    return wrapped.stat;
+  });
+  const played = playWith(seed, ctl, options);
+  const outcome = outcomeOf(played.match, played.side);
+  return {
+    side: played.side,
+    win: outcome.win,
+    margin: outcome.margin,
+    shadows: stats.map((st) => ({
+      points: st.points,
+      diffPoints: st.pointsDiff,
+      firstDiffTick: st.firstDiff,
+    })),
+    hitsMe: played.hitsMe,
+    hitsAi: played.hitsAi,
+    clears: played.clears,
+    finalHash: played.match.finalHash,
+  };
+}
+
+export interface PairResult extends Omit<MultiResult, 'shadows'>, ShadowStat {}
+
+/** 一個驅動者配一個影子。 */
+export function playPair(
+  driver: string,
+  shadowName: string,
+  seed: number,
+  options: PairOptions,
+): PairResult {
+  const { shadows, ...result } = playMulti(driver, [shadowName], seed, options);
+  return { ...result, ...(shadows[0] as ShadowStat) };
+}
+
+// ---------------------------------------------------------------------------
+// 選法
+// ---------------------------------------------------------------------------
 
 export interface TrainingRow {
   readonly name: string;
