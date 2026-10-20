@@ -256,7 +256,8 @@ const scrambleHidden: Scramble = (s, side) => {
   const oppPress = s.press[opp];
   const press: [typeof oppPress, typeof oppPress] =
     side === 0 ? [s.press[0], oppPress] : [oppPress, s.press[1]];
-  const scrambled = oppPress === null ? oppPress : { ...oppPress, valid: !oppPress.valid, own: !oppPress.own };
+  const scrambled =
+    oppPress === null ? oppPress : { ...oppPress, valid: !oppPress.valid, own: !oppPress.own };
   if (opp === 0) {
     press[0] = scrambled;
   } else {
@@ -280,7 +281,12 @@ const scrambleOpponent: Scramble = (s, side) => {
     const twitchAt: [readonly number[], readonly number[]] =
       opp === 0 ? [[95, 140], r.twitchAt[1]] : [r.twitchAt[0], [95, 140]];
     const baited: [number, number] = opp === 0 ? [3, r.baited[1]] : [r.baited[0], 3];
-    return { ...r, twitches: [twitchAt[0].length, twitchAt[1].length] as [number, number], twitchAt, baited };
+    return {
+      ...r,
+      twitches: [twitchAt[0].length, twitchAt[1].length] as [number, number],
+      twitchAt,
+      baited,
+    };
   });
   const spent: [number, number] = opp === 0 ? [6, s.spent[1]] : [s.spent[0], 6];
   const wins: [number, number] = opp === 0 ? [4, s.wins[1]] : [s.wins[0], 4];
@@ -290,7 +296,11 @@ const scrambleOpponent: Scramble = (s, side) => {
 };
 
 /** 跑一場貪心 L5 的真實對局，成員當玩家（偶數種子坐 0 號邊），回傳每個 tick 看到的 state 與成員的決定。 */
-function recordRun(name: string, seed: number, delay: 0 | 12): { states: S7State[]; outs: Buttons[]; side: Side } {
+function recordRun(
+  name: string,
+  seed: number,
+  delay: 0 | 12,
+): { states: S7State[]; outs: Buttons[]; side: Side } {
   const side: Side = seed % 2 === 0 ? 0 : 1;
   const states: S7State[] = [];
   const outs: Buttons[] = [];
@@ -313,7 +323,13 @@ function recordRun(name: string, seed: number, delay: 0 | 12): { states: S7State
   return { states, outs, side };
 }
 
-function replayWith(name: string, seed: number, delay: 0 | 12, run: ReturnType<typeof recordRun>, f: Scramble): number {
+function replayWith(
+  name: string,
+  seed: number,
+  delay: 0 | 12,
+  run: ReturnType<typeof recordRun>,
+  f: Scramble,
+): number {
   const twin = makeMember(name, seed, delay);
   let differ = 0;
   run.states.forEach((state, tick) => {
@@ -328,44 +344,50 @@ function replayWith(name: string, seed: number, delay: 0 | 12, run: ReturnType<t
 describe('隱藏資訊與對手狀態的邊界（雙胞胎重播）', () => {
   const ALL = [...B_FAMILY, ...C_FAMILY];
 
-  it.each(ALL.map((n) => [n]))('%s 不讀任何隱藏欄位（換掉之後每個 tick 的決定都一樣）', (name) => {
-    for (const delay of [0, 12] as const) {
-      const run = recordRun(name, 3, delay);
-      expect(run.states.length).toBeGreaterThan(300);
-      expect(replayWith(name, 3, delay, run, scrambleHidden)).toBe(0);
-    }
-  }, 60_000);
-
-  it.each(B_FAMILY.map((n) => [n]))('(b) %s 不讀對手的狀態（換掉之後每個 tick 的決定都一樣）', (name) => {
-    for (const delay of [0, 12] as const) {
-      for (const seed of [3, 4]) {
-        const run = recordRun(name, seed, delay);
-        expect(replayWith(name, seed, delay, run, scrambleOpponent)).toBe(0);
+  it.each(ALL.map((n) => [n]))(
+    '%s 不讀任何隱藏欄位（換掉之後每個 tick 的決定都一樣）',
+    (name) => {
+      for (const delay of [0, 12] as const) {
+        const run = recordRun(name, 3, delay);
+        expect(run.states.length).toBeGreaterThan(300);
+        expect(replayWith(name, 3, delay, run, scrambleHidden)).toBe(0);
       }
-    }
-  }, 60_000);
+    },
+    60_000,
+  );
 
-  it.each(
-    C_FAMILY.filter((n) => n !== 'c-gunshot').map((n) => [n]),
-  )('(c) %s 真的讀了對手（換掉之後至少有一個 tick 的決定不一樣）', (name) => {
-    let total = 0;
-    for (const seed of [3, 4, 5, 6]) {
-      const run = recordRun(name, seed, 0);
-      total += replayWith(name, seed, 0, run, scrambleOpponent);
-    }
-    expect(total).toBeGreaterThan(0);
-  }, 60_000);
+  it.each(B_FAMILY.map((n) => [n]))(
+    '(b) %s 不讀對手的狀態（換掉之後每個 tick 的決定都一樣）',
+    (name) => {
+      for (const delay of [0, 12] as const) {
+        for (const seed of [3, 4]) {
+          const run = recordRun(name, seed, delay);
+          expect(replayWith(name, seed, delay, run, scrambleOpponent)).toBe(0);
+        }
+      }
+    },
+    60_000,
+  );
 
-  it('c-gunshot 在延遲 0 讀槍聲、在延遲 12 與基底逐 tick 相同（延遲 12 看到槍聲時早就揭曉了）', () => {
+  it.each(C_FAMILY.filter((n) => n !== 'c-gunshot').map((n) => [n]))(
+    '(c) %s 真的讀了對手（換掉之後至少有一個 tick 的決定不一樣）',
+    (name) => {
+      let total = 0;
+      for (const seed of [3, 4, 5, 6]) {
+        const run = recordRun(name, seed, 0);
+        total += replayWith(name, seed, 0, run, scrambleOpponent);
+      }
+      expect(total).toBeGreaterThan(0);
+    },
+    60_000,
+  );
+
+  it('c-gunshot 在延遲 0 讀槍聲（換掉槍聲決定會變）；延遲 12 的真實對局與基底的對照在「分歧率」那一組', () => {
     let total0 = 0;
     for (const seed of [3, 4, 5, 6]) {
       total0 += replayWith('c-gunshot', seed, 0, recordRun('c-gunshot', seed, 0), scrambleOpponent);
     }
     expect(total0).toBeGreaterThan(0);
-    for (const seed of [3, 4]) {
-      const run = recordRun('c-gunshot', seed, 12);
-      expect(replayWith('c-gunshot', seed, 12, run, scrambleOpponent)).toBe(0);
-    }
   }, 60_000);
 });
 
@@ -408,12 +430,8 @@ describe('(c) 各自讀的東西（對準的局面）', () => {
 
   it('c-gunshot：對手已經按了而且光亮滿 30 tick（所以是真的）才跟著按；沒滿就等', () => {
     const opp = { at: 150, valid: true, flashAge: 25, own: false };
-    expect(
-      lastDecision('c-gunshot', lit(30, { press: [null, opp], resolveIn: 3 })).a,
-    ).toBe(true);
-    expect(
-      lastDecision('c-gunshot', lit(10, { press: [null, opp], resolveIn: 3 })).a,
-    ).toBe(false);
+    expect(lastDecision('c-gunshot', lit(30, { press: [null, opp], resolveIn: 3 })).a).toBe(true);
+    expect(lastDecision('c-gunshot', lit(10, { press: [null, opp], resolveIn: 3 })).a).toBe(false);
   });
 
   it('c-lead、c-baited：落後或對手常被騙時假動作更多', () => {
@@ -468,7 +486,11 @@ describe('對局、分歧率與統計', () => {
     expect(isPressPoint(makeState({ elapsed: 100, flash: null }), 0, 0)).toBe(false);
     expect(
       isPressPoint(
-        makeState({ elapsed: 130, flash: { age: 3, makers: [true, false], real: false }, waitLeft: 50 }),
+        makeState({
+          elapsed: 130,
+          flash: { age: 3, makers: [true, false], real: false },
+          waitLeft: 50,
+        }),
         0,
         0,
       ),
