@@ -6,17 +6,11 @@ import type { Buttons, Controller, Side } from '../../core/types';
 import { cell } from '../_diamonds/logic';
 import { makeState } from './logic';
 import type { D3State } from './logic';
-import {
-  B_FAMILY,
-  C_FAMILY,
-  TWINS,
-  isPoint,
-  member,
-  withDelay,
-} from './probe-a.members.test-helpers';
+import { B_FAMILY, C_FAMILY, TWINS, member, withDelay } from './probe-a.members.test-helpers';
 import {
   AI_SEED_OFFSET,
   MAIN_CELL,
+  isPoint,
   playWith,
   score,
   selectBest,
@@ -118,10 +112,16 @@ describe('(b) 不讀對手，(c) 讀', () => {
     } as D3State;
     const far = base;
     // c-pull2-lead 讀的是分數：落後時敢賭、領先時保守。
-    const behind = at(cell(10, 10), cell(31, 0), [
-      { cell: cell(12, 10), born: 90 },
-      { cell: cell(10, 4), born: 0 },
-    ]);
+    // 近的那顆（右邊 2 格）已經貶到 4 分，遠的（上面 6 格）是新的 9 分：求近的去右邊、追價值的去上面。
+    const behind = at(
+      cell(10, 10),
+      cell(31, 0),
+      [
+        { cell: cell(12, 10), born: 0 },
+        { cell: cell(10, 4), born: 295 },
+      ],
+      { tick: 300 },
+    );
     const behindState: D3State = {
       ...behind,
       players: [
@@ -136,9 +136,22 @@ describe('(b) 不讀對手，(c) 讀', () => {
         { ...behind.players[1], score: 0 },
       ],
     };
+    // c-value-pen：價值優先，只有兩顆價值一樣時才看（加罰後的）距離。
+    const tie = at(cell(10, 10), cell(31, 0), [
+      { cell: cell(14, 10), born: 0 },
+      { cell: cell(10, 4), born: 20 },
+    ]);
+    const tieNear = {
+      ...tie,
+      players: [tie.players[0], { ...tie.players[1], cell: cell(15, 10) }],
+    } as D3State;
     for (const name of C_FAMILY) {
       const pairs: [D3State, D3State][] =
-        name === 'c-pull2-lead' ? [[behindState, aheadState]] : [[near, far]];
+        name === 'c-pull2-lead'
+          ? [[behindState, aheadState]]
+          : name === 'c-value-pen'
+            ? [[tieNear, tie]]
+            : [[near, far]];
       const changed = pairs.some(([x, y]) => ask(name, x) !== ask(name, y));
       expect(changed, name).toBe(true);
     }

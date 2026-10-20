@@ -6,17 +6,11 @@ import type { Buttons, Controller, Side } from '../../core/types';
 import { START_CELLS, cell } from '../_diamonds/logic';
 import { makeState } from './logic';
 import type { D2State } from './logic';
-import {
-  B_FAMILY,
-  C_FAMILY,
-  TWINS,
-  isPoint,
-  member,
-  withDelay,
-} from './probe-a.members.test-helpers';
+import { B_FAMILY, C_FAMILY, TWINS, member, withDelay } from './probe-a.members.test-helpers';
 import {
   AI_SEED_OFFSET,
   MAIN_CELL,
+  isPoint,
   playWith,
   score,
   selectBest,
@@ -133,13 +127,21 @@ describe('(b) 不讀對手，(c) 讀', () => {
     } as D2State;
     // 讀對手背包的那個（c-N3-pen 對 c-N3-pen-nobag 的差別）：對手背包滿了就搶不了金幣。
     const oppFull = { ...near, bags: [0, 3] } as D2State;
+    // c-N3-home-pen：挑金幣時還要看離基地多遠，所以要一個「近但離基地遠」與「遠一點但順路」的局面。
+    const homeFar = at(cell(10, 20), cell(31, 0), [cell(6, 20), cell(13, 20)]);
+    const homeNear = {
+      ...homeFar,
+      players: [homeFar.players[0], { ...homeFar.players[1], cell: cell(5, 20) }],
+    } as D2State;
     for (const name of C_FAMILY) {
       const pairs: [D2State, D2State][] =
-        name === 'c-N3-lead'
-          ? [[behind, ahead]]
-          : name === 'c-N3-pen'
-            ? [[near, oppFull]]
-            : [[near, base]];
+        name === 'c-N3-home-pen'
+          ? [[homeNear, homeFar]]
+          : name === 'c-N3-lead'
+            ? [[behind, ahead]]
+            : name === 'c-N3-pen'
+              ? [[near, oppFull]]
+              : [[near, base]];
       const changed = pairs.some(([x, y]) => ask(name, x) !== ask(name, y));
       expect(changed, name).toBe(true);
     }
