@@ -329,7 +329,7 @@ export function forcedLaunches(
       continue;
     }
     const mix = Math.imul(seed + 1, 2654435761) >>> 0;
-    const pickTick = base.ready[(mix ^ (mix >>> 15)) % base.ready.length] as number;
+    const pickTick = base.ready[((mix ^ (mix >>> 15)) >>> 0) % base.ready.length] as number;
     // 不干預的那場在 horizon 時的分差：同樣的對局再跑一次，在 pickTick + horizon 取值
     const controllers = [
       levelController(game, pathfinder, 10, seed),
