@@ -33,6 +33,11 @@ export interface CardMeta {
   readonly baseLevel: number;
   /** 兩邊完全對稱：K12 會跑。 */
   readonly symmetric?: boolean;
+  /**
+   * 這張牌沒有勝負（目前只有 JK-R 一起亂畫）：結算頁不顯示勝負與分數，玩完就算贏，
+   * 也不跑 A1–A5。有勝負的鬼牌（JK-B）不宣告它。外殼與契約測試都讀這個旗標，不用 id 前綴猜。
+   */
+  readonly noWinner?: boolean;
   /** 有淘汰規則，贏家不一定是分數高的：K7 跳過。 */
   readonly winnerNotByScore?: boolean;
   /** 運氣成分高（紅心）：A1、A2 的門檻降低。 */

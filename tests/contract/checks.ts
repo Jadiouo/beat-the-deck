@@ -666,9 +666,9 @@ export function aiThresholds(meta: CardMeta): AiThresholds {
   return { a1: lucky ? 0.6 : 0.75, a2: lucky ? 0.55 : 0.6, a3: 0.45, a4: 0.35 };
 }
 
-/** A1–A5 的前提：有預設性格、而且不是鬼牌（鬼牌不跑 5.1）。 */
+/** A1–A5 的前提：有預設性格、而且有勝負（`meta.noWinner` 的牌，目前只有 JK-R，不跑 5.1；JK-B 有勝負，跑）。 */
 export function runsAiChecks(entry: RegistryEntry): boolean {
-  return entry.meta.defaultPolicy !== null && entry.meta.suit !== 'JK';
+  return entry.meta.defaultPolicy !== null && entry.meta.noWinner !== true;
 }
 
 /**
@@ -1232,7 +1232,7 @@ function aiDefs(): CheckDef[] {
     applies: code === 'A4' ? runsA4 : code === 'A2' ? runsA2 : runsAiChecks,
     whyNotApplicable(entry: RegistryEntry): string {
       if (!runsAiChecks(entry)) {
-        return '沒有預設性格或是鬼牌，不跑 A1–A5';
+        return '沒有預設性格或沒有勝負（noWinner），不跑 A1–A5';
       }
       if (entry.meta.simpleStrategyViable === true) {
         return simpleStrategyReason(entry);

@@ -10,6 +10,8 @@ export const jkrMeta: CardMeta = {
   rank: 'R',
   defaultPolicy: null,
   baseLevel: 1,
+  /** 沒有勝負：外殼不顯示勝負與分數，契約測試不跑 A1–A5。 */
+  noWinner: true,
   /** SPEC 第 11 節：90 秒（5400 tick），比共同設定的 60 秒長。 */
   defaultMaxTicks: 5400,
 };
