@@ -6,14 +6,7 @@ import { outcomeOf } from '../../../tests/ai/probe-a.shared';
 import type { IsPoint, MatchOutcome, ProbeSpec } from '../../../tests/ai/probe-a.shared';
 import { MOVE_EVERY, bfsDistances, nextCell, stepTarget } from '../_diamonds/logic';
 import type { Dir, Walker } from '../_diamonds/logic';
-import {
-  MINE_REACH,
-  SOLO_YIELD,
-  ZONE_RADIUS,
-  dQGame,
-  hazardPermille,
-  zoneDistance,
-} from './logic';
+import { MINE_REACH, SOLO_YIELD, ZONE_RADIUS, dQGame, hazardPermille, zoneDistance } from './logic';
 import type { DQState } from './logic';
 
 /**
@@ -230,7 +223,8 @@ function ruleC(name: string): {
 } {
   const sameMineAs = (ctx: Ctx, view: OppView): boolean => oppOnMine(ctx.state, view);
   const myLead = (ctx: Ctx, view: OppView): number => ctx.me.score - view.opp.score;
-  const toNext = (ctx: Ctx, c: number): number => fieldTo(ctx.state.walls, ctx.state.next)[c] as number;
+  const toNext = (ctx: Ctx, c: number): number =>
+    fieldTo(ctx.state.walls, ctx.state.next)[c] as number;
   switch (name) {
     // 對手也在礦邊就只挖得到 1，否則 2：用當下看到的挖礦量算期望。
     case 'c-ev-yield':
@@ -332,13 +326,16 @@ function walker(
       if (ctx.carried === 0) {
         leaving = false;
       } else if (!leaving) {
-        leaving =
-          state.maxTicks - state.tick <= ENDGAME_TICKS || leaveRule(ctx, state, side);
+        leaving = state.maxTicks - state.tick <= ENDGAME_TICKS || leaveRule(ctx, state, side);
       }
       if (leaving) {
         return toward(state.walls, from, exitCell(state, from));
       }
-      if (ctx.carried === 0 && state.maxTicks - state.tick > ENDGAME_TICKS && campRule(ctx, state, side)) {
+      if (
+        ctx.carried === 0 &&
+        state.maxTicks - state.tick > ENDGAME_TICKS &&
+        campRule(ctx, state, side)
+      ) {
         return toward(state.walls, from, state.next);
       }
       // 回礦邊（或留在礦邊）挖。
@@ -464,10 +461,7 @@ export function selectBest(rows: readonly Row[]): Row {
   let best = rows[0] as Row;
   const eq = (a: number, b: number): boolean => Math.abs(a - b) < 1e-9;
   for (const row of rows.slice(1)) {
-    if (
-      row.win > best.win + 1e-9 ||
-      (eq(row.win, best.win) && row.margin > best.margin + 1e-9)
-    ) {
+    if (row.win > best.win + 1e-9 || (eq(row.win, best.win) && row.margin > best.margin + 1e-9)) {
       best = row;
     }
   }

@@ -31,11 +31,7 @@ const NONE: Buttons = { up: false, down: false, left: false, right: false, a: fa
 const idle = (b: Buttons): boolean => JSON.stringify(b) === JSON.stringify(NONE);
 
 /** 我（0 號邊）在 `me`，對手在 `opp`；礦在 (15, 12)、下一個礦在 (25, 20)；沒有牆。 */
-function at(
-  me: number,
-  opp: number,
-  extra: Parameters<typeof makeState>[0] = {},
-): DQState {
+function at(me: number, opp: number, extra: Parameters<typeof makeState>[0] = {}): DQState {
   return makeState({
     tick: 200,
     mine: MINE,
@@ -91,7 +87,10 @@ describe('(b) 不讀對手的任何狀態', () => {
     { ...s, players: [s.players[0], { ...s.players[1], cell: NEXT, pending: 2, score: 0 }] },
     { ...s, carried: [s.carried[0], 11] },
     { ...s, lost: [s.lost[0], 30] },
-    { ...s, players: [s.players[0], { ...s.players[1], cell: cell(15, 13), pending: 0, score: 12 }] },
+    {
+      ...s,
+      players: [s.players[0], { ...s.players[1], cell: cell(15, 13), pending: 0, score: 12 }],
+    },
   ];
 
   it.each(B_FAMILY.map((name) => [name]))(
@@ -187,9 +186,15 @@ describe('(c) 真的讀了對手（只換它讀的那一項，決定會變）', 
 
 describe('成員的動作（走路與存礦）', () => {
   it('b-N4W12：身上 3 塊留在礦邊、4 塊往外走；礦的年紀 ≥ 12 也往外走', () => {
-    expect(idle(asks('b-N4W12', at(MINE, cell(2, 2), { age: 5, carried: [3, 0] }))[0] as Buttons)).toBe(true);
-    expect(idle(asks('b-N4W12', at(MINE, cell(2, 2), { age: 5, carried: [4, 0] }))[0] as Buttons)).toBe(false);
-    expect(idle(asks('b-N4W12', at(MINE, cell(2, 2), { age: 12, carried: [1, 0] }))[0] as Buttons)).toBe(false);
+    expect(
+      idle(asks('b-N4W12', at(MINE, cell(2, 2), { age: 5, carried: [3, 0] }))[0] as Buttons),
+    ).toBe(true);
+    expect(
+      idle(asks('b-N4W12', at(MINE, cell(2, 2), { age: 5, carried: [4, 0] }))[0] as Buttons),
+    ).toBe(false);
+    expect(
+      idle(asks('b-N4W12', at(MINE, cell(2, 2), { age: 12, carried: [1, 0] }))[0] as Buttons),
+    ).toBe(false);
   });
 
   it('往外走是往礦坑範圍外（距離 ≥ 4）的方向：站在礦上時走出去的第一步離礦更遠', () => {
@@ -317,7 +322,10 @@ describe('決策點與串接', () => {
     expect(code).not.toMatch(/\bevaluate\b|predictOpponent|humanModel|human-model|wrapPolicy/);
     // levelController 只用來做「對手」（playWith 裡一次）。
     expect(code.match(/levelController\(/g)?.length).toBe(1);
-    const member_ = code.slice(code.indexOf('export function member'), code.indexOf('export function withDelay'));
+    const member_ = code.slice(
+      code.indexOf('export function member'),
+      code.indexOf('export function withDelay'),
+    );
     expect(member_).not.toMatch(/levelController|policyByName/);
   });
 
