@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { compareBC } from '../../../tests/ai/probe-a.shared';
 import { playMatch } from '../../core/match';
 import type { Buttons, Controller, Side } from '../../core/types';
-import { cell } from '../_diamonds/logic';
+import { cell, nextCell } from '../_diamonds/logic';
 import { dAGame, makeState } from './logic';
 import type { DAState } from './logic';
 import {
@@ -12,6 +12,7 @@ import {
   BALLAST,
   CONFIG,
   C_FAMILY,
+  EXTRA_TWINS,
   TWIN_OF,
   isPoint,
   member,
@@ -33,10 +34,10 @@ const idle = (b: Buttons): boolean => JSON.stringify(b) === JSON.stringify(NONE)
 const dirOf = (b: Buttons): string =>
   b.up ? 'up' : b.right ? 'right' : b.down ? 'down' : b.left ? 'left' : 'none';
 
-/** 我（0 號邊）在 (10, 12)。A 在右邊 4 步、B 在上面 8 步（B 的方向是上）。沒有牆。 */
+/** 我（0 號邊）在 (10, 12)。A 在右邊 4 步、B 在上面 7 步（B 的方向是上）。沒有牆。 */
 const ME = cell(10, 12);
 const A = cell(14, 12);
-const B = cell(10, 4);
+const B = cell(10, 5);
 const FAR = cell(31, 0);
 
 function at(me: number, opp: number, extra: Parameters<typeof makeState>[0] = {}): DAState {
@@ -92,9 +93,16 @@ describe('族的定義', () => {
     }
     // 沒有 (c) 成員是沒有雙胞胎的孤兒，也沒有 (b) 之外的鍵。
     expect(Object.keys(TWIN_OF).sort()).toEqual([...B_FAMILY].sort());
-    const used = new Set(Object.values(TWIN_OF).filter((v) => v !== null));
+    const used = new Set([
+      ...Object.values(TWIN_OF).filter((v) => v !== null),
+      ...EXTRA_TWINS.map(([, c]) => c),
+    ]);
     for (const c of C_FAMILY) {
-      expect(used.has(c) || c === 'c-adv').toBe(true);
+      expect(used.has(c)).toBe(true);
+    }
+    for (const [b, c] of EXTRA_TWINS) {
+      expect(B_FAMILY as readonly string[]).toContain(b);
+      expect(C_FAMILY as readonly string[]).toContain(c);
     }
   });
 });
@@ -259,11 +267,12 @@ describe('成員的動作（走路與選目標）', () => {
     // 第一個 tick 看到 A（右 4 步）、B（上 8 步）。第二個 tick 我走到 (10, 8)，B 近了（4）、A 變遠（8），差 4 > 3 就換。
     // 用小一點的差距：我走到 (10, 11)：A 5 步、B 7 步；沒換。再走到 (10, 10)：A 6、B 6，b-nearest 平手取先出現的 A；
     // 我們要測的是黏著：從 B 當目標開始，我在 (10, 9)：B 5 步、A 7 步（差 2 ≤ 3 → 黏著 B），再讓 A 變成 4 步（差 -1）。
+    const T = cell(10, 4);
     const stick = member('b-stick');
     const nearest = member('b-nearest');
     const s0 = makeState({
       tick: 200,
-      coins: [B],
+      coins: [T],
       players: [{ cell: cell(10, 9) }, { cell: FAR }],
     });
     expect(dirOf(stick.decide(s0, 0, 200))).toBe('up');
@@ -272,7 +281,7 @@ describe('成員的動作（走路與選目標）', () => {
     const A2 = cell(14, 9);
     const s1 = makeState({
       tick: 201,
-      coins: [B, A2],
+      coins: [T, A2],
       players: [{ cell: cell(10, 9) }, { cell: FAR }],
     });
     expect(dirOf(stick.decide(s1, 0, 201))).toBe('up');
@@ -372,10 +381,16 @@ describe('反應延遲', () => {
       const view = seen[t] as DAState;
       expect(view.tick).toBe(t);
       expect(view.players[0].cell).toBe((truth[t] as DAState).players[0].cell);
-      expect(view.players[1].cell).toBe((truth[t - 12] as DAState).players[1].cell);
+      // 對手：舊世界裡它鎖定的方向在重播（它「沒按鍵」）裡走掉一次，之後不動。
+      const old = truth[t - 12] as DAState;
+      expect(view.players[1].cell).toBe(nextCell(old.walls, old.players[1]));
     }
     // 前 12 個 tick 沒有更舊的世界：對手還在起點。
     expect((seen[5] as DAState).players[1].cell).toBe((truth[0] as DAState).players[1].cell);
+    // 自己撿過的金幣在重播裡已經不在（沒有「幽靈金幣」）：任何時刻 view 的金幣都不在我現在站的格子上。
+    for (const view of seen) {
+      expect(view.coins).not.toContain(view.players[0].cell);
+    }
   });
 
   it('1 號邊的延遲：自己是 players[1]', () => {
@@ -398,7 +413,8 @@ describe('反應延遲', () => {
     }
     const view = seen[30] as DAState;
     expect(view.players[1].cell).toBe((truth[30] as DAState).players[1].cell);
-    expect(view.players[0].cell).toBe((truth[20] as DAState).players[0].cell);
+    const old = truth[20] as DAState;
+    expect(view.players[0].cell).toBe(nextCell(old.walls, old.players[0]));
   });
 });
 
