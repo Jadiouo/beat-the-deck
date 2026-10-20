@@ -562,7 +562,11 @@ function evaluateHK(state: HKState, side: Side): { gain: number; danger: number 
       }
       // 淺搜尋（深度 1、2）只走到這裡：只剩反射規則，加倍牌留到最後一場。
       const reflex: Move = state.stageIdx === LAST && state.doublers[side] > 0 ? 1 : 0;
-      return { gain: diff + (mine === reflex ? HABIT : 0), danger: 0 };
+      // danger：用了加倍牌卻輸掉這一場的機率（只讀公開的場次表，不讀對方的選擇）。
+      // 搜尋型的 gain − 2 × 範圍 × danger 在這裡 = 「這一場對自己有利（edge > 0.5）才用」，
+      // 精準型 = 「輸的機率 ≤ 0.3 才用」，賭徒型 = 落後時 danger 反而加分，貪心型不看。
+      const danger = mine === 1 ? 1 - edgeOf(state, side, state.stageIdx) : 0;
+      return { gain: diff + (mine === reflex ? HABIT : 0), danger };
     }
     case 'betReveal':
       // 對方這場選了什麼、倍數、對方的 used 都不讀（搜尋裡它們會洩漏 pending）；對手用模型。
