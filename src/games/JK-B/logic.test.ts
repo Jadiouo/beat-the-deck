@@ -153,7 +153,7 @@ describe('JK-B｜基底：走格', () => {
     expect(MOVE_EVERY).toBe(4);
   });
 
-  it('不是走格的 tick 按方向不會走；下一個走格的 tick 還按著才走', () => {
+  it('不是走格的 tick 按方向不會走；走格的那個 tick 還按著才走', () => {
     const s = makeState({
       tick: 1,
       avatars: [
@@ -162,9 +162,9 @@ describe('JK-B｜基底：走格', () => {
       ],
     });
     expect(at(step(s, go(RIGHT)), 0)).toEqual([5, 5]);
-    expect(at(run(s, 3, go(RIGHT)), 0)).toEqual([6, 5]);
+    expect(at(run(s, 4, go(RIGHT)), 0)).toEqual([6, 5]);
     // 走格那一刻放開了就不走
-    expect(at(run(s, 3, go()), 0)).toEqual([5, 5]);
+    expect(at(step(run(s, 3, go(RIGHT)), go()), 0)).toEqual([5, 5]);
   });
 
   it('四個方向都能走，可以掉頭（沒有身體）', () => {
@@ -315,7 +315,7 @@ describe('JK-B｜基底：推擠與冷卻', () => {
     expect(wall.shoves).toEqual([0, 0]);
   });
 
-  it('冷卻每個 tick 減 1；冷卻中走進對手就走不動；冷卻到 0 的下一個走格 tick 又推得動', () => {
+  it('冷卻每個 tick 減 1；冷卻中走進對手就走不動；冷卻回到 0 之後的走格 tick 又推得動', () => {
     let s = step(
       makeState({
         avatars: [
@@ -325,17 +325,20 @@ describe('JK-B｜基底：推擠與冷卻', () => {
       }),
       go(RIGHT),
     );
+    expect(s.tick).toBe(1);
     expect(s.avatars[0].shoveCd).toBe(30);
     s = step(s, IDLE);
     expect(s.avatars[0].shoveCd).toBe(29);
-    // tick 4：冷卻中，走不動
-    s = run(s, 3);
+    // tick 8 是走格的 tick，冷卻還剩 23：走不動
+    s = run(s, 6);
+    expect(s.tick).toBe(8);
+    expect(s.avatars[0].shoveCd).toBe(23);
     const blocked = step(s, go(RIGHT));
     expect(at(blocked, 0)).toEqual([6, 5]);
     expect(at(blocked, 1)).toEqual([7, 5]);
     expect(blocked.shoves).toEqual([1, 0]);
-    // tick 32（冷卻在 tick 30 回到 0）：推得動
-    let t = run(s, 28);
+    // 冷卻在 tick 31 回到 0；tick 32 是走格的 tick：推得動
+    let t = run(s, 24);
     expect(t.tick).toBe(32);
     expect(t.avatars[0].shoveCd).toBe(0);
     t = step(t, go(RIGHT));
@@ -1206,8 +1209,8 @@ describe('JK-B｜evaluate：準備項（只在預告期、寫死的習慣）', (
     expect(g(4, 300)).toBe(g(18, 300));
   });
 
-  it('分數互換的時間項只看最後 1 秒（ruleTick ≥ 540）：之前沒有，之後對手搆不到金幣時，領先才算數', () => {
-    const lead = (ruleTick: number, oppX: number): number =>
+  it('分數互換的時間項只看最後 1 秒（ruleTick ≥ 540）：之前沒有；之後領先時，對手搆不到金幣（走過去要的 tick 比剩下的多）才算數', () => {
+    const lead = (ruleTick: number, opp: [number, number]): number =>
       evaluate(
         makeState({
           phase: 1,
@@ -1217,16 +1220,39 @@ describe('JK-B｜evaluate：準備項（只在預告期、寫死的習慣）', (
           scores: [2, 0],
           avatars: [
             { x: 5, y: 5 },
-            { x: oppX, y: 20 },
+            { x: opp[0], y: opp[1] },
           ],
           coins: [cell(28, 4)],
         }),
         0,
       ).gain;
-    // 最後 1 秒、對手離金幣太遠（搆不到）：比對手搆得到時 gain 高
-    expect(lead(560, 3)).toBeGreaterThan(lead(560, 27));
-    // 最後 1 秒之前，對手離金幣多遠都一樣（除了「離金幣的距離」本身不會被這一項改變）
-    expect(lead(500, 3) - lead(500, 27)).toBe(lead(539, 3) - lead(539, 27));
+    const near: [number, number] = [27, 5];
+    const far: [number, number] = [3, 20];
+    // 最後 1 秒、對手兩步就搆得到：沒有加成；對手遠遠搆不到：有加成
+    expect(lead(560, far)).toBeGreaterThan(lead(560, near));
+    // 對手剛好走得到（距離 × 4 ≤ 剩下的 tick）與剛好走不到
+    expect(lead(580, [26, 4])).toBeLessThan(lead(580, [20, 4]));
+    // 最後 1 秒之前，對手在哪都一樣
+    expect(lead(500, far)).toBe(lead(500, near));
+    expect(lead(539, far)).toBe(lead(539, near));
+    // 沒有領先的時候，這一項不存在
+    const behind = (opp: [number, number]): number =>
+      evaluate(
+        makeState({
+          phase: 1,
+          rule: 'exchange',
+          next: 'normal',
+          ruleTick: 560,
+          scores: [0, 2],
+          avatars: [
+            { x: 5, y: 5 },
+            { x: opp[0], y: opp[1] },
+          ],
+          coins: [cell(28, 4)],
+        }),
+        0,
+      ).gain;
+    expect(behind(far)).toBe(behind(near));
   });
 });
 
