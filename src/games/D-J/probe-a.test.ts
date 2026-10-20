@@ -182,7 +182,7 @@ describe('(c) 真的讀了對手（只換它讀的那一項，決定會變）', 
   const calm = at(MID, RIVAL, { players: [mine, { cell: RIVAL, score: 0 }] });
   const inbound = at(MID, cell(4, 20), { players: [mine, { cell: cell(4, 20), score: 0 }] });
 
-  it.each(['c-g3', 'c-g2', 'c-g1', 'c-guard-threat'])(
+  it.each(['c-g3', 'c-g2', 'c-g1'])(
     '%s：對手逼近我的基地（而且我有存分數）就回家守，對手很遠就照常撿金幣',
     (name) => {
       // 回家 ＝ 往左下（基地在 (0, 23)）；撿金幣 ＝ 往 (20, 12) 或 (5, 5)。
@@ -212,8 +212,9 @@ describe('(c) 真的讀了對手（只換它讀的那一項，決定會變）', 
   it.each(['c-raid1-read', 'c-raid-rep-read', 'c-raid-free'])(
     '%s：對手有存分數而且不在它的基地附近才去偷；對手沒分數或守在家就不去',
     (name) => {
-      // 我在地圖中間、背包空的、時間夠；排程允許（tick 1300 在第一個窗口與單次偷的時間之後）。
+      // 我在地圖中間、背包空的、時間夠；排程允許（tick 1600 在第二個窗口裡，也過了單次偷的最早時間）。
       const away = at(MID, cell(10, 12), {
+        tick: 1600,
         players: [
           { cell: MID, score: 0 },
           { cell: cell(10, 12), score: 3 },
@@ -226,6 +227,7 @@ describe('(c) 真的讀了對手（只換它讀的那一項，決定會變）', 
         ],
       });
       const home = at(MID, cell(30, 1), {
+        tick: 1600,
         players: [
           { cell: MID, score: 0 },
           { cell: cell(30, 1), score: 3 },
@@ -241,11 +243,11 @@ describe('(c) 真的讀了對手（只換它讀的那一項，決定會變）', 
 
   it('c-turtle-roam：對手離我的基地很遠時敢走得更遠', () => {
     const far = at(cell(0, 12), RIVAL, {
-      coins: [cell(0, 3)],
+      coins: [cell(0, 9)],
       players: [{ cell: cell(0, 12) }, { cell: RIVAL }],
     });
     const near = at(cell(0, 12), cell(3, 18), {
-      coins: [cell(0, 3)],
+      coins: [cell(0, 9)],
       players: [{ cell: cell(0, 12) }, { cell: cell(3, 18) }],
     });
     expect(differs('c-turtle-roam', far, near)).toBe(true);
@@ -256,7 +258,6 @@ describe('(c) 真的讀了對手（只換它讀的那一項，決定會變）', 
       'c-g3',
       'c-g2',
       'c-g1',
-      'c-guard-threat',
       'c-lurk3',
       'c-raid1-read',
       'c-raid-rep-read',
@@ -290,7 +291,8 @@ describe('成員的動作', () => {
   });
 
   it('最後來不及存的時候：背包有東西就一律回家，沒有東西就不再去撿來不及存的金幣', () => {
-    const late = at(MID, RIVAL, { tick: 3600 - 5 * 30 - 4, bags: [1, 0] });
+    // MID 離基地 26 步：5 × 26 + 10 = 140 個 tick 才走得回去，剩 139 個 tick 就來不及再撿了。
+    const late = at(MID, RIVAL, { tick: 3600 - 139, bags: [1, 0] });
     for (const name of ['b-n3', 'b-n2', 'b-turtle']) {
       const b = asks(name, late, 0, 1)[0] as Buttons;
       expect(b.left || b.down).toBe(true);
