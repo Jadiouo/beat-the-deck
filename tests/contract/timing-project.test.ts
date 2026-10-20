@@ -1,5 +1,5 @@
-import { existsSync, readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { matchesGlob, resolve } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
@@ -62,5 +62,35 @@ describe('時間類檢查一定有人跑', () => {
     // 分檔合起來涵蓋的牌 ＝ timing 檔涵蓋的牌（都是 ALL_ENTRIES）。
     const covered = BUCKETS.flatMap((b) => entriesOfBucket(b).map((e) => e.id));
     expect(covered.sort()).toEqual(ALL_ENTRIES.map((e) => e.id).sort());
+  });
+});
+
+/**
+ * 量測測試（`src/games/<牌>/measure.test.ts`）一場就跑幾十秒到幾十分鐘，必須在 heavy，
+ * 不能擠在「快、每次都跑」的 light。用 glob 判斷，所以以後新增的牌自動受檢查。
+ * 同時守住「搬走不等於沒人跑」：在 heavy 的 include 裡、同時被 light 的 exclude 擋掉。
+ */
+describe('量測測試都在 heavy（不在 light）', () => {
+  const gamesDir = resolve(__dirname, '../../src/games');
+  const measureFiles = readdirSync(gamesDir, { withFileTypes: true })
+    .filter((d) => d.isDirectory() && existsSync(resolve(gamesDir, d.name, 'measure.test.ts')))
+    .map((d) => `src/games/${d.name}/measure.test.ts`);
+  const matchesAny = (file: string, globs: string[]): boolean =>
+    globs.some((g) => matchesGlob(file, g));
+  const heavyInclude = byName('heavy')?.test.include as string[];
+  const lightExclude = byName('light')?.test.exclude as string[];
+
+  it('至少找得到一個量測測試（避免這條檢查空轉）', () => {
+    expect(measureFiles.length).toBeGreaterThan(0);
+  });
+
+  it('每個量測測試都被 heavy 收進去', () => {
+    const missing = measureFiles.filter((f) => !matchesAny(f, heavyInclude));
+    expect(missing).toEqual([]);
+  });
+
+  it('每個量測測試都被 light 排除（不重跑）', () => {
+    const leaked = measureFiles.filter((f) => !matchesAny(f, lightExclude));
+    expect(leaked).toEqual([]);
   });
 });
