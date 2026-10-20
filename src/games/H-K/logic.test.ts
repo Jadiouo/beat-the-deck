@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
+import { gambler } from '../../ai/policies/gambler';
+import { greedy } from '../../ai/policies/greedy';
 import { pathfinder } from '../../ai/policies/pathfinder';
+import { precise } from '../../ai/policies/precise';
+import type { Policy } from '../../ai/types';
 import { hashState } from '../../core/hash';
 import type { Buttons, Game, Inputs, Side } from '../../core/types';
 import {
@@ -588,6 +592,58 @@ describe('H-K 紅心馬拉松｜加倍牌的開場決定：用在對自己最強
     }
     const spent = betState({ stages: FOUR, stageIdx: 3, doublers: [1, 0] });
     expect(hkGame.actions(spent, 1)).toEqual([IDLE]);
+  });
+});
+
+describe('H-K 紅心馬拉松｜四個性格在開場決定上的機制（一步看的三種性格只讀 gain 與 danger）', () => {
+  const decide = (policy: Policy, state: HKState, side: Side): Buttons =>
+    policy.decide(hkGame, state, side, 0, { depth: 1, seed: 0 });
+  /** 最後一場是 H-J（edge 0.48，對自己不利）／H-10（edge 0.95，對自己很有利）。 */
+  const lastIsWeak = betState({ stages: ['H-4', 'H-5', 'H-9', 'H-J'], stageIdx: 3 });
+  const lastIsStrong = betState({ stages: ['H-4', 'H-5', 'H-9', 'H-10'], stageIdx: 3 });
+  const early = betState({ stages: ['H-J', 'H-4', 'H-5', 'H-10'], stageIdx: 0 });
+
+  it('貪心型：只看反射規則的 gain，不看 danger：最後一場一律用（不管這一場對自己有利還是不利）、其餘場一律不用', () => {
+    for (const side of [0, 1] as const) {
+      expect(decide(greedy, lastIsWeak, side)).toEqual(PRESS_A);
+      expect(decide(greedy, lastIsStrong, side)).toEqual(PRESS_A);
+      expect(decide(greedy, early, side)).toEqual(PRESS_B);
+    }
+  });
+
+  it('精準型：用加倍牌的 danger 是「輸掉這一場的機率」，超過 0.3 就不用：最後一場只在對自己有利時才用', () => {
+    for (const side of [0, 1] as const) {
+      expect(decide(precise, lastIsWeak, side)).toEqual(PRESS_B);
+      expect(decide(precise, lastIsStrong, side)).toEqual(PRESS_A);
+      expect(decide(precise, early, side)).toEqual(PRESS_B);
+    }
+  });
+
+  it('賭徒型：落後（對自己的展望是輸面）就提早用，連對自己不利的 H-J 也用；領先或持平就和貪心型一樣留著', () => {
+    for (const side of [0, 1] as const) {
+      const behind: [number, number] = side === 0 ? [70, 130] : [130, 70];
+      const ahead: [number, number] = side === 0 ? [130, 70] : [70, 130];
+      expect(decide(gambler, { ...early, chips: behind }, side)).toEqual(PRESS_A);
+      expect(decide(gambler, { ...early, chips: ahead }, side)).toEqual(PRESS_B);
+      expect(decide(gambler, early, side)).toEqual(PRESS_B);
+    }
+  });
+
+  it('搜尋型深度 1 到 2：score = gain − 2 × 範圍 × danger，所以最後一場用不用 = 這一場對自己是不是有利（edge > 0.5）', () => {
+    for (const depth of [1, 2]) {
+      const pf = (state: HKState): Buttons =>
+        pathfinder.decide(hkGame, state, 1, 0, { depth, seed: 0 });
+      expect(pf(lastIsWeak)).toEqual(PRESS_B);
+      expect(pf(lastIsStrong)).toEqual(PRESS_A);
+      expect(pf(early)).toEqual(PRESS_B);
+    }
+  });
+
+  it('evaluate 的 danger：選了用 = 輸掉這一場的機率（1 − edge），選了不用 = 0；只在一步看的局面（bet、betLocked）', () => {
+    const locked = (move: 0 | 1): HKState =>
+      hkGame.step(lastIsWeak, [move === 1 ? PRESS_A : PRESS_B, PRESS_B]);
+    expect(hkGame.evaluate(locked(1), 0).danger).toBeCloseTo(1 - EDGE['H-J'][0], 9);
+    expect(hkGame.evaluate(locked(0), 0).danger).toBe(0);
   });
 });
 
