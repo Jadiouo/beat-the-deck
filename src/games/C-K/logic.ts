@@ -17,8 +17,8 @@ import {
   warningAt as c3WarningAt,
 } from '../C-3/logic';
 import type { C3State, FoodColor } from '../C-3/logic';
-import { c4Game, makeState as makeC4State } from '../C-4/logic';
-import type { C4State } from '../C-4/logic';
+import { c4Game, isVisible, makeState as makeC4State } from '../C-4/logic';
+import type { C4State, Memory } from '../C-4/logic';
 import {
   CELLS,
   FOOD_COUNT,
@@ -217,22 +217,37 @@ function enterC3(
   };
 }
 
+/** 進入霧時所有格子都「剛看過」：一份全 0 的 `seen`，兩邊共用同一個（凍結的）陣列，不用每次換段配置 768 格。 */
+const ZERO_SEEN: readonly number[] = Object.freeze(Array.from({ length: CELLS }, () => 0));
+
+/** 進入 C-4 時 `side` 的記憶：記得所有食物；對手只記視野內的部分（同 C-4 掃視一次的規則）。 */
+function fogMemory(side: Side, snakes: readonly [Snake, Snake], foods: readonly number[]): Memory {
+  const head = snakes[side].body[0] as number;
+  const rival = snakes[side === 0 ? 1 : 0];
+  const rivalHead = rival.body[0] as number;
+  return {
+    foods,
+    seen: ZERO_SEEN,
+    rival: rival.body.filter((c) => isVisible(head, c)),
+    rivalHead: isVisible(head, rivalHead) ? rivalHead : -1,
+    rivalTurn: rival.dir,
+    goal: -1,
+  };
+}
+
 /**
  * 進入 C-4：兩邊的記憶都記得換段那一刻場上所有的食物、所有格子都「剛看過」（進霧之前大家都看過整張圖）；
- * 對手只記視野內的部分（用 C-4 自己掃視的結果，範圍外的蛇身不進 `rival`），所以不洩漏對手的位置。
+ * 對手只記視野內的部分（範圍外的蛇身不進 `rival`），所以不洩漏對手的位置。
+ * 不呼叫 C-4 的 `makeState`：那會掃視兩次、複製兩份 768 格的 `seen` 再丟掉，而換段在搜尋型的前瞻裡會被走過很多次（10.44）。
  */
-function enterC4(rng: RngState, snakes: readonly [Snake, Snake], foods: readonly number[]): Sub {
-  const seen = Array.from({ length: CELLS }, () => 0);
-  const memory = { foods, seen, goal: -1 };
-  const made = makeC4State({
-    tick: 0,
-    maxTicks: NEVER,
-    snakes,
-    foods,
-    rng,
-    memory: [memory, memory],
-  });
-  return subOf('C-4', made);
+function enterC4(snakes: readonly [Snake, Snake], foods: readonly number[]): Sub {
+  return {
+    memory: [fogMemory(0, snakes, foods), fogMemory(1, snakes, foods)],
+    ateAt: [-1, -1],
+    prevDir: [snakes[0].dir, snakes[1].dir],
+    endAt: -1,
+    pendingWinner: null,
+  };
 }
 
 function advance(state: CKState): CKState {
@@ -264,7 +279,7 @@ function advance(state: CKState): CKState {
       break;
     }
     case 'C-4':
-      sub = enterC4(rng, state.snakes, foods);
+      sub = enterC4(state.snakes, foods);
       break;
   }
   return {
