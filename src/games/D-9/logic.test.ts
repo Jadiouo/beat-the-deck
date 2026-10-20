@@ -563,7 +563,7 @@ describe('D-9 擺放｜actions', () => {
     expect(stepN(locked, LOCK_TICKS).phase).toBe('run');
   });
 
-  it('搜尋型深度 ≥ 3 真的走得到揭曉（10.6 陷阱一）：從擺放出發，depth 6 的前瞻評價過 run 階段的 state；depth 2 沒有', () => {
+  it('搜尋型深度 ≥ 3 真的走得到揭曉（10.6 陷阱一）：從擺放出發（游標在最肥的礦脈，擺下去是好選擇），depth 6 的前瞻評價過 run 階段的 state；depth 2 沒有', () => {
     const seen = (depth: number): Set<string> => {
       const phases = new Set<string>();
       const spy: Game<D9State> = {
@@ -578,7 +578,7 @@ describe('D-9 擺放｜actions', () => {
         pathfinder,
         { reactionTicks: 0, decideEvery: 1, depth, epsilon: 0 },
         1,
-      ).decide(placing(), 1, 0);
+      ).decide(placing({ sel: [9, 9] }), 1, 0);
       return phases;
     };
     expect(seen(6).has('run')).toBe(true);
