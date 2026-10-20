@@ -1,16 +1,19 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
+import { compareBC, pairedStats, shadow } from '../../../tests/ai/probe-a.shared';
 import { deepFreeze } from '../../../tests/contract/freeze';
-import { CLEAR_CAP, makeState } from './logic';
+import { CLEAR_CAP, canClear, makeState } from './logic';
 import type { S10State } from './logic';
 import {
   B_FAMILY,
   C_FAMILY,
   makeRule,
-  pairedStats,
   playMulti,
   playPair,
+  playWith,
+  ruleController,
+  s10Spec,
   selectBest,
 } from './probe-a.test-helpers';
 
@@ -202,14 +205,6 @@ describe('對局、分歧率與統計', () => {
     const fast = playPair('b-habit', 'b-wait10', 4, { level: 10 });
     expect(fast.margin).toBeGreaterThan(slow.margin);
   });
-  it('配對差與標準誤', () => {
-    const { mean, se } = pairedStats([1, 0, 0.5, 1], [0.5, 0, 0.5, 0]);
-    expect(mean).toBeCloseTo(0.375, 10);
-    // 差 = [0.5, 0, 0, 1]，平均 0.375，樣本標準差 sqrt(((0.125)^2+(0.375)^2*2+(0.625)^2)/3)，除以 sqrt(4)
-    const sd = Math.sqrt((0.125 ** 2 + 0.375 ** 2 * 2 + 0.625 ** 2) / 3);
-    expect(se).toBeCloseTo(sd / 2, 10);
-    expect(pairedStats([1, 1], [1, 1])).toEqual({ mean: 0, se: 0 });
-  });
   it('選法：勝率高者；同勝率取分差高；再同取排在前面的', () => {
     expect(
       selectBest([
@@ -295,5 +290,50 @@ describe('playMulti', () => {
     });
     expect(multi.margin).toBe(a.margin);
     expect(multi.margin).toBe(b.margin);
+  }, 120_000);
+});
+
+describe('收斂到共用影子層（tests/ai/probe-a.shared.ts）', () => {
+  it('工具檔 import 共用的影子與統計，不再自己定義 pairedStats 或逐 tick 的分歧計數', () => {
+    const text = readFileSync(new URL('./probe-a.test-helpers.ts', import.meta.url), 'utf8');
+    expect(text).toMatch(/from '\.\.\/\.\.\/\.\.\/tests\/ai\/probe-a\.shared'/);
+    expect(text).not.toMatch(/export function pairedStats/);
+    expect(text).not.toMatch(/diffPoints \+= 1/);
+  });
+
+  it('影子不影響對局（逐位元）：帶影子與不帶影子的 inputs 與 finalHash 相同，而亂按的影子真的做了不同的決定', () => {
+    const seed = 3;
+    for (const driver of ['b-habit', 'c-learn']) {
+      const plain = playWith(seed, ruleController(driver, seed), { level: 5 });
+      // b-prob25 是亂按性格：每個能按的 tick 以 0.25 的機率按，與兩個驅動者的決定都大不相同。
+      const { ctl, stat } = shadow(
+        ruleController(driver, seed),
+        ruleController('b-prob25', seed),
+        (state, side) => canClear(state) && state.lock[side] === 0,
+      );
+      const shadowed = playWith(seed, ctl, { level: 5 });
+      expect(stat.diffTicks).toBeGreaterThan(0);
+      expect(stat.pointsDiff).toBeGreaterThan(0);
+      expect(shadowed.match.inputs).toEqual(plain.match.inputs);
+      expect(shadowed.match.finalHash).toBe(plain.match.finalHash);
+      expect(shadowed.clears).toEqual(plain.clears);
+    }
+  }, 120_000);
+
+  it('compareBC 與逐個 playPair 一致：勝率、分差、場級與點級分歧', () => {
+    const seeds = [3, 4];
+    const r = compareBC(s10Spec('b-habit', 'b-wait3', seeds, { level: 5 }));
+    const bs = seeds.map((s) => playPair('b-habit', 'b-wait3', s, { level: 5 }));
+    const cs = seeds.map((s) => playPair('b-wait3', 'b-habit', s, { level: 5 }));
+    expect(r.divergence.gamesDiffer).toBe(bs.filter((x) => x.firstDiffTick >= 0).length);
+    expect(r.divergence.points).toBe(bs.reduce((a, x) => a + x.points, 0));
+    expect(r.divergence.pointsDiff).toBe(bs.reduce((a, x) => a + x.diffPoints, 0));
+    expect(r.win.b).toBe(pairedStats(bs.map((x) => x.win)).mean);
+    expect(r.win.c).toBe(pairedStats(cs.map((x) => x.win)).mean);
+    expect(r.margin.diff.mean).toBe(
+      pairedStats(cs.map((x, i) => x.margin - (bs[i] as { margin: number }).margin)).mean,
+    );
+    expect(r.winBoundHolds).toBe(true);
+    expect(r.inconsistentSeeds).toEqual([]);
   }, 120_000);
 });
