@@ -164,11 +164,23 @@ describe('selfFromPresent：沒宣告的牌一個 tick 都不變', () => {
   });
 });
 
-describe('selfFromPresent：只有 S-8 宣告', () => {
-  it('登記表裡宣告 selfFromPresent 的牌只有 S-8（其他牌一行都不改，行為一個 tick 都不能變）', () => {
+describe('selfFromPresent：核准宣告的牌只有 S-8 與 JK-B', () => {
+  /**
+   * 宣告要先有數字（DESIGN-AI-FUN 10.56）。核准的牌與數字：
+   * - S-8：兩個人互相是實心的，重播裡「自己」的位置被對手擠開之後完全不一樣（擠的劇本 97.5% → 20.0%，見 S-8 小規格）。
+   * - JK-B：重播把對手當作放開、停在 12 個 tick 以前的位置，所以我的點在重播裡會撞到（甚至推到）一個真實世界裡早就走開的對手。
+   *   量法：20 場（種子 0..19）、每個決定比較「性格看到的自己」與真實的現在，AI 等級 10（reactionTicks 12）：
+   *   位置不同的決定占比 L10 對 L10 14.05%（10,119／72,000）、對 chase 22.52%、對 stalk 59.78%、對 b 16.84%；
+   *   推擠冷卻不同 8.57%／10.03%／28.36%／8.19%。（`docs/cards/JK-B.md`「wrapPolicy 的自己」一節）
+   * 要宣告第三張牌，先在小規格裡附上同一種量測。
+   */
+  const APPROVED = ['JK-B', 'S-8'];
+
+  it('登記表裡宣告 selfFromPresent 的牌只有核准的（其他牌一行都不改，行為一個 tick 都不能變）', () => {
     const declared = registry
       .filter((entry) => typeof (entry.game as Partial<GameWithSelfFromPresent<unknown>>).selfFromPresent === 'function')
-      .map((entry) => entry.id);
-    expect(declared).toEqual(['S-8']);
+      .map((entry) => entry.id)
+      .sort();
+    expect(declared).toEqual(APPROVED.filter((id) => registry.some((e) => e.id === id)).sort());
   });
 });

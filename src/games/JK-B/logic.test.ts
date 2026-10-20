@@ -1052,6 +1052,78 @@ describe('JK-B｜step 與契約', () => {
   });
 });
 
+describe('JK-B｜selfFromPresent（外力造成的自身位移，DESIGN-AI-FUN 10.56）', () => {
+  const hook = (): ((replayed: JKBState, present: JKBState, side: 0 | 1) => JKBState) => {
+    const game = jkbGame as unknown as {
+      selfFromPresent?: (replayed: JKBState, present: JKBState, side: 0 | 1) => JKBState;
+    };
+    expect(typeof game.selfFromPresent).toBe('function');
+    return game.selfFromPresent?.bind(jkbGame) as never;
+  };
+
+  it('只把 side 這一邊自己的點（位置、冷卻、按著的方向）換成真實的現在；對手、分數、金幣、亂數維持重播的樣子', () => {
+    const replayed = makeState({
+      tick: 40,
+      avatars: [
+        { x: 8, y: 5, shoveCd: 0, want: RIGHT },
+        { x: 20, y: 9, shoveCd: 3, want: LEFT },
+      ],
+      coins: [cell(9, 5)],
+      scores: [4, 1],
+    });
+    const present = makeState({
+      tick: 52,
+      avatars: [
+        { x: 5, y: 7, shoveCd: 11, want: UP },
+        { x: 14, y: 3, shoveCd: 0, want: DOWN },
+      ],
+      coins: [cell(2, 2)],
+      scores: [0, 9],
+    });
+    const out = hook()(replayed, present, 0);
+    expect(out.avatars[0]).toEqual(present.avatars[0]);
+    expect(out.avatars[1]).toEqual(replayed.avatars[1]);
+    expect(out.scores).toEqual(replayed.scores);
+    expect(out.coins).toEqual(replayed.coins);
+    expect(out.tick).toBe(replayed.tick);
+    expect(out.rng).toBe(replayed.rng);
+    const other = hook()(replayed, present, 1);
+    expect(other.avatars[1]).toEqual(present.avatars[1]);
+    expect(other.avatars[0]).toEqual(replayed.avatars[0]);
+  });
+
+  it('純函式：不改動傳入的兩個 state', () => {
+    const replayed = deepFreeze(
+      makeState({
+        avatars: [
+          { x: 8, y: 5 },
+          { x: 20, y: 9 },
+        ],
+      }),
+    );
+    const present = deepFreeze(
+      makeState({
+        avatars: [
+          { x: 5, y: 7 },
+          { x: 14, y: 3 },
+        ],
+      }),
+    );
+    const out = hook()(replayed, present, 1);
+    expect(out).not.toBe(replayed);
+    expect(hashState(replayed)).toBe(
+      hashState(
+        makeState({
+          avatars: [
+            { x: 8, y: 5 },
+            { x: 20, y: 9 },
+          ],
+        }),
+      ),
+    );
+  });
+});
+
 describe('JK-B｜evaluate：基本性質', () => {
   const rules: readonly Rule[] = ['normal', 'poison', 'gift', 'rain', 'gravity', 'rob', 'exchange'];
 
