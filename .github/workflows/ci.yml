@@ -32,9 +32,16 @@ jobs:
 
       - run: npm run test:light
 
-  # 逐張牌的契約檢查（K1–K13、R1–R3）與 A1–A5 統計檢查，分成 6 份、每份一台機器並行跑。
-  # 檔案已經依牌的序號分成 13 份（tests/ai/a-checks.shared.ts 的 SLOT_COUNT），所以 --shard 切得平均。
-  # 要加快就把 shard 清單加長（例如 [1, …, 8]）並把 --shard 的分母改成同一個數字。
+  # heavy project 的所有測試檔（逐張牌的契約檢查 K1–K13、R1–R3，A1–A5 統計檢查，每張牌的 measure.test.ts……）
+  # 分成 6 份、每份一台機器並行跑。
+  # --shard 的切法（vitest 5.0.3，BaseSequencer.shard）：把檔案路徑（相對於專案根目錄、開頭有斜線，例如
+  # `/src/games/C-Q/measure.test.ts`）取 sha1，依雜湊值排序，再依檔案「個數」等分切片（47 個檔案、6 份 → 8、8、8、8、8、7）。
+  # **完全不看耗時**，所以每份拿到的檔案多慢是運氣；檔案的增減會讓所有檔案重新洗牌（某張牌的檔案可能換到另一份）。
+  # tests/ai/a-checks.shared.ts 的 SLOT_COUNT（13 份）只是把 A1–A5 與契約檢查依牌的序號拆成 13 個檔案，
+  # 讓單一檔案不至於太大，與 --shard 怎麼切無關。
+  # 一份的牆鐘時間 ≈ 它拿到的最慢那個檔案（同一份裡的檔案由 vitest 的 worker 並行跑），所以要讓分片平均，
+  # 重點是不要有單一檔案遠比別的慢（measure.test.ts 的慣例見 S-K 的 measure.test.ts：
+  # 預設場數縮小、大場次用環境變數開）。要加快就把 shard 清單加長（例如 [1, …, 8]）並把 --shard 的分母改成同一個數字。
   ai-stats:
     name: ai-stats (${{ matrix.shard }}/6)
     runs-on: ubuntu-latest
