@@ -29,7 +29,10 @@ const at = (tick: number, n: number, extra: Parameters<typeof makeState>[0] = {}
     tick,
     bullets: bullets(n),
     clears: 3,
-    players: [{ x: 20, y: 120 }, { x: 130, y: 120 }],
+    players: [
+      { x: 20, y: 120 },
+      { x: 130, y: 120 },
+    ],
     ...extra,
   });
 
@@ -43,25 +46,37 @@ describe('族的定義', () => {
 
 describe('(b) 不讀對手的任何狀態', () => {
   const variants: readonly ((s: S10State) => S10State)[] = [
-    (s) => ({ ...s, players: [s.players[0], { ...s.players[1], x: 5, y: 5, invuln: 40, hits: 3, vx: 1, vy: -1 }] }),
+    (s) => ({
+      ...s,
+      players: [s.players[0], { ...s.players[1], x: 5, y: 5, invuln: 40, hits: 3, vx: 1, vy: -1 }],
+    }),
     (s) => ({ ...s, exposure: [s.exposure[0], 0.04] }),
     (s) => ({ ...s, lock: [s.lock[0], 90] }),
     (s) => ({ ...s, cleared: [s.cleared[0], 50] }),
   ];
-  const sample = (): S10State[] => [at(300, 24), at(330, 30), at(360, 12), at(400, 30, { clears: 2 }), at(1200, 40, { clears: 1 })];
+  const sample = (): S10State[] => [
+    at(300, 24),
+    at(330, 30),
+    at(360, 12),
+    at(400, 30, { clears: 2 }),
+    at(1200, 40, { clears: 1 }),
+  ];
 
-  it.each(B_FAMILY.map((name) => [name]))('%s：換掉對手的位置、險度、鎖、分數，每個 tick 的決定都一樣', (name) => {
-    for (const vary of variants) {
-      const plain = makeRule(name, 3);
-      const varied = makeRule(name, 3);
-      for (const s of sample()) {
-        for (let k = 0; k < 40; k += 1) {
-          const base = { ...s, tick: s.tick + k };
-          expect(varied.press(vary(base), 0, base.tick)).toBe(plain.press(base, 0, base.tick));
+  it.each(B_FAMILY.map((name) => [name]))(
+    '%s：換掉對手的位置、險度、鎖、分數，每個 tick 的決定都一樣',
+    (name) => {
+      for (const vary of variants) {
+        const plain = makeRule(name, 3);
+        const varied = makeRule(name, 3);
+        for (const s of sample()) {
+          for (let k = 0; k < 40; k += 1) {
+            const base = { ...s, tick: s.tick + k };
+            expect(varied.press(vary(base), 0, base.tick)).toBe(plain.press(base, 0, base.tick));
+          }
         }
       }
-    }
-  });
+    },
+  );
 });
 
 describe('(c) 真的讀了對手（換掉它讀的東西，決定會變）', () => {
@@ -71,17 +86,19 @@ describe('(c) 真的讀了對手（換掉它讀的東西，決定會變）', () 
       const ra = makeRule(name, 1);
       const rb = makeRule(name, 1);
       for (let k = 0; k < 80; k += 1) {
-        if (ra.press({ ...a, tick: a.tick + k }, 0, a.tick + k) !== rb.press({ ...b, tick: b.tick + k }, 0, b.tick + k)) {
+        if (
+          ra.press({ ...a, tick: a.tick + k }, 0, a.tick + k) !==
+          rb.press({ ...b, tick: b.tick + k }, 0, b.tick + k)
+        ) {
           return true;
         }
       }
     }
     return false;
   };
-  const pair = (tick: number, other: Partial<S10State>): ((n: number) => [S10State, S10State]) => (n) => [
-    at(tick, n, { clears: 2 }),
-    { ...at(tick, n, { clears: 2 }), ...other },
-  ];
+  const pair =
+    (tick: number, other: Partial<S10State>): ((n: number) => [S10State, S10State]) =>
+    (n) => [at(tick, n, { clears: 2 }), { ...at(tick, n, { clears: 2 }), ...other }];
 
   it('c-reader 與 c-expfull 讀險度', () => {
     expect(differs('c-reader', pair(400, { exposure: [0, 0.05] }))).toBe(true);
@@ -95,20 +112,34 @@ describe('(c) 真的讀了對手（換掉它讀的東西，決定會變）', () 
   });
   it('c-oppinvuln 讀對手的無敵', () => {
     expect(
-      differs('c-oppinvuln', (n) => [at(360, n), { ...at(360, n), players: [at(360, n).players[0], { ...at(360, n).players[1], invuln: 30 }] }]),
+      differs('c-oppinvuln', (n) => [
+        at(360, n),
+        {
+          ...at(360, n),
+          players: [at(360, n).players[0], { ...at(360, n).players[1], invuln: 30 }],
+        },
+      ]),
     ).toBe(true);
   });
   it('c-oppdanger 讀對手此刻的危險（對手貼著子彈）', () => {
     const near = (n: number): S10State => {
       const s = at(400, n, { clears: 2 });
-      return { ...s, bullets: [...s.bullets, { x: 130, y: 118, vx: 0, vy: 1 }], players: [s.players[0], { ...s.players[1], x: 130, y: 121 }] };
+      return {
+        ...s,
+        bullets: [...s.bullets, { x: 130, y: 118, vx: 0, vy: 1 }],
+        players: [s.players[0], { ...s.players[1], x: 130, y: 121 }],
+      };
     };
     expect(differs('c-oppdanger', (n) => [at(400, n, { clears: 2 }), near(n)])).toBe(true);
   });
   it('c-wait-opp-far 讀對手的位置與險度', () => {
     const near = (n: number): S10State => {
       const s = at(360, n);
-      return { ...s, bullets: [...s.bullets, { x: 130, y: 118, vx: 0, vy: 1 }], players: [s.players[0], { ...s.players[1], x: 130, y: 121 }] };
+      return {
+        ...s,
+        bullets: [...s.bullets, { x: 130, y: 118, vx: 0, vy: 1 }],
+        players: [s.players[0], { ...s.players[1], x: 130, y: 121 }],
+      };
     };
     expect(differs('c-wait-opp-far', (n) => [at(360, n), near(n)])).toBe(true);
   });
@@ -180,16 +211,34 @@ describe('對局、分歧率與統計', () => {
     expect(pairedStats([1, 1], [1, 1])).toEqual({ mean: 0, se: 0 });
   });
   it('選法：勝率高者；同勝率取分差高；再同取排在前面的', () => {
-    expect(selectBest([{ name: 'x', win: 40, margin: 9 }, { name: 'y', win: 51, margin: 1 }])).toBe('y');
-    expect(selectBest([{ name: 'x', win: 51, margin: 1 }, { name: 'y', win: 51, margin: 2 }])).toBe('y');
-    expect(selectBest([{ name: 'x', win: 51, margin: 2 }, { name: 'y', win: 51, margin: 2 }])).toBe('x');
+    expect(
+      selectBest([
+        { name: 'x', win: 40, margin: 9 },
+        { name: 'y', win: 51, margin: 1 },
+      ]),
+    ).toBe('y');
+    expect(
+      selectBest([
+        { name: 'x', win: 51, margin: 1 },
+        { name: 'y', win: 51, margin: 2 },
+      ]),
+    ).toBe('y');
+    expect(
+      selectBest([
+        { name: 'x', win: 51, margin: 2 },
+        { name: 'y', win: 51, margin: 2 },
+      ]),
+    ).toBe('x');
   });
 });
 
 describe('(c) 不用 AI 的引擎', () => {
   it('工具檔不 import evaluate、predictOpponent，也不拿 levelController 的 AI 當 (c) 成員', () => {
     const text = readFileSync(new URL('./probe-a.test-helpers.ts', import.meta.url), 'utf8');
-    const imports = text.split('\n').filter((l) => /^\s*(import|\}\s*from|\s+\w+,?\s*$)/.test(l)).join('\n');
+    const imports = text
+      .split('\n')
+      .filter((l) => /^\s*(import|\}\s*from|\s+\w+,?\s*$)/.test(l))
+      .join('\n');
     expect(imports).not.toMatch(/\bevaluate\b/);
     expect(text).not.toMatch(/predictOpponent/);
     // 工具檔不呼叫 s10Game.evaluate / evaluate(
@@ -200,7 +249,9 @@ describe('(c) 不用 AI 的引擎', () => {
 describe('影子不影響對局', () => {
   it('同一個驅動者配三個不同的影子：對局的結果、分差、清場紀錄逐項相同，而分歧點數確實不同', () => {
     for (const driver of ['b-wait3', 'c-learn']) {
-      const runs = ['b-habit', 'b-prob25', 'c-oppinvuln'].map((shadow) => playPair(driver, shadow, 3, { level: 5 }));
+      const runs = ['b-habit', 'b-prob25', 'c-oppinvuln'].map((shadow) =>
+        playPair(driver, shadow, 3, { level: 5 }),
+      );
       const [first, ...rest] = runs;
       for (const r of rest) {
         expect(r.win).toBe(first?.win);
@@ -209,14 +260,18 @@ describe('影子不影響對局', () => {
         expect(r.clears).toEqual(first?.clears);
       }
     }
-    const diffs = ['b-habit', 'b-wait10'].map((shadow) => playPair('b-wait3', shadow, 3, { level: 5 }).diffPoints);
+    const diffs = ['b-habit', 'b-wait10'].map(
+      (shadow) => playPair('b-wait3', shadow, 3, { level: 5 }).diffPoints,
+    );
     expect(diffs[0]).not.toBe(diffs[1]);
   }, 120_000);
   it('20 個成員在凍結的 state 上跑，沒有任何一個會寫 state（寫了會丟錯）', () => {
     for (const name of [...B_FAMILY, ...C_FAMILY, 'absent', 'd-sniper', 'd-sweep3']) {
       const rule = makeRule(name, 2);
       for (let k = 0; k < 70; k += 1) {
-        const s = deepFreeze(at(300 + k, 24 + (k % 9), { lock: [0, k % 3 === 0 ? 5 : 0], exposure: [0, 0.01] }));
+        const s = deepFreeze(
+          at(300 + k, 24 + (k % 9), { lock: [0, k % 3 === 0 ? 5 : 0], exposure: [0, 0.01] }),
+        );
         expect(() => rule.press(s, k % 2 === 0 ? 0 : 1, s.tick)).not.toThrow();
       }
     }
@@ -228,8 +283,16 @@ describe('playMulti', () => {
     const multi = playMulti('b-habit', ['b-wait3', 'c-reader'], 3, { level: 5 });
     const a = playPair('b-habit', 'b-wait3', 3, { level: 5 });
     const b = playPair('b-habit', 'c-reader', 3, { level: 5 });
-    expect(multi.shadows[0]).toEqual({ points: a.points, diffPoints: a.diffPoints, firstDiffTick: a.firstDiffTick });
-    expect(multi.shadows[1]).toEqual({ points: b.points, diffPoints: b.diffPoints, firstDiffTick: b.firstDiffTick });
+    expect(multi.shadows[0]).toEqual({
+      points: a.points,
+      diffPoints: a.diffPoints,
+      firstDiffTick: a.firstDiffTick,
+    });
+    expect(multi.shadows[1]).toEqual({
+      points: b.points,
+      diffPoints: b.diffPoints,
+      firstDiffTick: b.firstDiffTick,
+    });
     expect(multi.margin).toBe(a.margin);
     expect(multi.margin).toBe(b.margin);
   }, 120_000);

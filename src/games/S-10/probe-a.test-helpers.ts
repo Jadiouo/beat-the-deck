@@ -55,7 +55,10 @@ const clamp = (v: number, lo: number, hi: number): number => Math.max(lo, Math.m
 const count = (state: S10State): number => Math.min(state.bullets.length, CLEAR_CAP);
 
 /** 準備時刻追蹤：回傳「準備後第幾個 tick」（準備好的第一個 tick 是 0），還沒準備好是 −1。 */
-function readyTracker(): { waited(state: S10State, side: Side, tick: number): number; since(): number | null } {
+function readyTracker(): {
+  waited(state: S10State, side: Side, tick: number): number;
+  since(): number | null;
+} {
   let since: number | null = null;
   return {
     waited(state, side, tick): number {
@@ -187,7 +190,12 @@ export function makeRule(name: string, seed: number): PressRule {
       };
     case 'c-learn': {
       // 記對手上一次清場相對準備時刻晚了幾個 tick（同刻按是 0）；我自己單獨先按就不知道（null）。
-      let previous: { clears: number; cleared: readonly [number, number]; tick: number; since: number } | null = null;
+      let previous: {
+        clears: number;
+        cleared: readonly [number, number];
+        tick: number;
+        since: number;
+      } | null = null;
       let oppLag: number | null = null;
       return {
         press(state, side, tick): boolean {
@@ -221,7 +229,8 @@ export function makeRule(name: string, seed: number): PressRule {
       };
     case 'd-sniper':
       return {
-        press: (state, side, tick) => ready.waited(state, side, tick) >= 0 && pressDecision('sniper', state, side),
+        press: (state, side, tick) =>
+          ready.waited(state, side, tick) >= 0 && pressDecision('sniper', state, side),
       };
     default: {
       const sweep = /^d-sweep(\d+)$/.exec(name);
@@ -272,7 +281,11 @@ export interface PairResult {
   readonly hitsMe: number;
   readonly hitsAi: number;
   /** 每次清場：誰按的、按下去那一刻的子彈數、第幾個 tick。 */
-  readonly clears: readonly { readonly who: 'me' | 'ai' | 'both'; readonly n: number; readonly tick: number }[];
+  readonly clears: readonly {
+    readonly who: 'me' | 'ai' | 'both';
+    readonly n: number;
+    readonly tick: number;
+  }[];
 }
 
 /**
@@ -280,7 +293,12 @@ export interface PairResult {
  * 偶數種子坐 0 號邊；AI 是 `policy`（預設精準型）的等級 `level`，種子是玩家種子 ＋ 1,000,003。
  * 驅動者是 (b*) 時，這就是真正的 (b) 對局，第一個分歧的 tick 就是 (b)、(c) 兩條對局真正分開的地方。
  */
-export function playPair(driver: string, shadow: string, seed: number, options: PairOptions): PairResult {
+export function playPair(
+  driver: string,
+  shadow: string,
+  seed: number,
+  options: PairOptions,
+): PairResult {
   const { shadows, ...result } = playMulti(driver, [shadow], seed, options);
   return { ...result, ...(shadows[0] as ShadowStat) };
 }
@@ -297,13 +315,23 @@ export interface MultiResult extends Omit<PairResult, keyof ShadowStat> {
 }
 
 /** 同一場對局配多個影子（影子的回答不被採用，所以驅動者的對局與影子的數量無關）。 */
-export function playMulti(driver: string, shadowNames: readonly string[], seed: number, options: PairOptions): MultiResult {
+export function playMulti(
+  driver: string,
+  shadowNames: readonly string[],
+  seed: number,
+  options: PairOptions,
+): MultiResult {
   const me: Side = seed % 2 === 0 ? 0 : 1;
   const opp = other(me);
   const drive = makeRule(driver, seed);
   const shades = shadowNames.map((n) => makeRule(n, seed));
   const stats = shadowNames.map(() => ({ points: 0, diffPoints: 0, firstDiffTick: -1 }));
-  const ai = levelController(s10Game, policyByName(options.policy ?? 'precise'), options.level, seed + TRAINING_SEED_OFFSET);
+  const ai = levelController(
+    s10Game,
+    policyByName(options.policy ?? 'precise'),
+    options.level,
+    seed + TRAINING_SEED_OFFSET,
+  );
   let state = s10Game.init(seed, { maxTicks: 3600, params: {} });
   const clears: { who: 'me' | 'ai' | 'both'; n: number; tick: number }[] = [];
   for (let tick = 0; !s10Game.isOver(state); tick += 1) {
@@ -355,7 +383,10 @@ export function playMulti(driver: string, shadowNames: readonly string[], seed: 
 // ---------------------------------------------------------------------------
 
 /** 同種子配對差 a − b 的平均與標準誤（樣本標準差 ÷ √n）。 */
-export function pairedStats(a: readonly number[], b: readonly number[]): { mean: number; se: number } {
+export function pairedStats(
+  a: readonly number[],
+  b: readonly number[],
+): { mean: number; se: number } {
   const n = Math.min(a.length, b.length);
   if (n === 0) {
     return { mean: 0, se: 0 };
