@@ -238,3 +238,141 @@ export function scriptedWinRate(
   }
   return points / seeds.length;
 }
+
+// ---------------------------------------------------------------------------
+// 「誤放」的期望分差（DESIGN-AI-FUN 10.19 的第 4 題判準：每次 ≥ 0.5）
+// ---------------------------------------------------------------------------
+
+export interface ForcedLaunch {
+  /** 被強迫放出的那一邊。 */
+  readonly side: Side;
+  /** 放出的那個 tick 起，被強迫放出的那一邊的分差（我 − 對手）比不強迫時多多少：放出後 `horizon` tick 時量。 */
+  readonly deltaHorizon: number;
+  /** 同上，整場結束時量。 */
+  readonly deltaFinal: number;
+  /** 勝負（贏 1、平 0.5、輸 0）比不強迫時多多少。 */
+  readonly deltaWin: number;
+  /** 這台僚機有沒有命中（鎖定生效）。 */
+  readonly hit: boolean;
+  /** 放出時，放的人的尾端離對手蛇身最近一格的曼哈頓距離。 */
+  readonly near: number;
+}
+
+/**
+ * 強迫放出的對照實驗。每個種子：兩個等級 10 搜尋型對打（種子 s 與 s + 1_000_003）；
+ * 先跑一場不干預的，記下「被測的那一邊可以放、而且 300 tick 之後」的所有 tick，用種子雜湊挑一個 tick T；
+ * 再跑一場完全一樣的，只在 T 那個 tick 替被測的一邊多按一個 a。比較兩場：
+ * 放出後 `horizon` tick 時的分差、整場結束的分差、勝負。偶數種子被測的是 0 號邊，奇數是 1 號邊。
+ *
+ * 這量的是「在一個隨機時刻多放一台」的淨效果：AI 自己之後本來也會放，所以強迫放出佔用了冷卻，
+ * 淨效果包含「少了一次它自己挑的放法」。這正是 10.19 第 4 題問的「放錯的代價」。
+ */
+export function forcedLaunches(
+  game: Game<CQState>,
+  seeds: readonly number[],
+  config: GameConfig,
+  horizon = 900,
+): ForcedLaunch[] {
+  const rows: ForcedLaunch[] = [];
+  for (const seed of seeds) {
+    const side: Side = seed % 2 === 0 ? 0 : 1;
+    const other: Side = side === 0 ? 1 : 0;
+    const run = (forceTick: number | null) => {
+      const controllers = [
+        levelController(game, pathfinder, 10, seed),
+        levelController(game, pathfinder, 10, seed + 1_000_003),
+      ] as const;
+      let state = game.init(seed, config);
+      const ready: number[] = [];
+      let tick = 0;
+      let forced = false;
+      let hitsAt = 0;
+      let hit = false;
+      let near = -1;
+      let atHorizon: number | null = null;
+      while (!game.isOver(state)) {
+        const b0 = copyButtons(controllers[0].decide(state, 0, tick));
+        const b1 = copyButtons(controllers[1].decide(state, 1, tick));
+        const can = game.actions(state, side).some((b) => b.a);
+        if (forceTick === null && can && tick >= 300) {
+          ready.push(tick);
+        }
+        if (forceTick === tick && can) {
+          (side === 0 ? b0 : b1).a = true;
+          forced = true;
+          hitsAt = state.hits[side];
+          const mine = state.snakes[side].body;
+          const tail = mine[mine.length - 1] as number;
+          near = Math.min(...state.snakes[other].body.map((c) => manhattan(tail, c)));
+        }
+        state = game.step(state, [b0, b1]);
+        tick += 1;
+        hit = hit || (forced && state.hits[side] > hitsAt);
+        if (forceTick !== null && tick === forceTick + horizon) {
+          atHorizon = state.snakes[side].score - state.snakes[other].score;
+        }
+      }
+      const final = state.snakes[side].score - state.snakes[other].score;
+      const winner = game.winner(state);
+      return {
+        ready,
+        final,
+        atHorizon: atHorizon ?? final,
+        win: winner === null ? 0.5 : winner === side ? 1 : 0,
+        forced,
+        hit,
+        near,
+      };
+    };
+    const base = run(null);
+    if (base.ready.length === 0) {
+      continue;
+    }
+    const mix = Math.imul(seed + 1, 2654435761) >>> 0;
+    const pickTick = base.ready[(mix ^ (mix >>> 15)) % base.ready.length] as number;
+    // 不干預的那場在 horizon 時的分差：同樣的對局再跑一次，在 pickTick + horizon 取值
+    const controllers = [
+      levelController(game, pathfinder, 10, seed),
+      levelController(game, pathfinder, 10, seed + 1_000_003),
+    ] as const;
+    let state = game.init(seed, config);
+    let baseHorizon: number | null = null;
+    let tick = 0;
+    while (!game.isOver(state)) {
+      state = game.step(state, [
+        copyButtons(controllers[0].decide(state, 0, tick)),
+        copyButtons(controllers[1].decide(state, 1, tick)),
+      ]);
+      tick += 1;
+      if (tick === pickTick + horizon) {
+        baseHorizon = state.snakes[side].score - state.snakes[other].score;
+      }
+    }
+    const forced = run(pickTick);
+    if (!forced.forced) {
+      continue;
+    }
+    rows.push({
+      side,
+      deltaHorizon: forced.atHorizon - (baseHorizon ?? base.final),
+      deltaFinal: forced.final - base.final,
+      deltaWin: forced.win - base.win,
+      hit: forced.hit,
+      near: forced.near,
+    });
+  }
+  return rows;
+}
+
+export interface Summary {
+  readonly n: number;
+  readonly mean: number;
+  readonly se: number;
+}
+
+export function summarize(values: readonly number[]): Summary {
+  const n = values.length;
+  const mean = n === 0 ? 0 : values.reduce((a, b) => a + b, 0) / n;
+  const variance = n < 2 ? 0 : values.reduce((a, b) => a + (b - mean) * (b - mean), 0) / (n - 1);
+  return { n, mean, se: Math.sqrt(variance / Math.max(1, n)) };
+}
