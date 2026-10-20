@@ -132,18 +132,18 @@ export const diamondsEntries: readonly RegistryEntry[] = [
     render: dJRender,
     meta: dJMeta,
   }),
-  defineEntry<DKState>({
-    id: dKMeta.id,
-    kind: 'card',
-    game: dKGame,
-    render: dKRender,
-    meta: dKMeta,
-  }),
   defineEntry<DQState>({
     id: dQMeta.id,
     kind: 'card',
     game: dQGame,
     render: dQRender,
     meta: dQMeta,
+  }),
+  defineEntry<DKState>({
+    id: dKMeta.id,
+    kind: 'card',
+    game: dKGame,
+    render: dKRender,
+    meta: dKMeta,
   }),
 ];
