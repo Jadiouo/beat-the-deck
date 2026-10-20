@@ -154,7 +154,7 @@ export function jkbRender(ctx: CanvasRenderingContext2D, state: JKBState): void 
   text(ctx, `${strings.brokenRules.you} ${state.scores[0]}`, 6, 4, 14, COLOR.clubs);
   text(ctx, `${state.scores[1]} ${strings.brokenRules.ai}`, 314, 4, 14, COLOR.accent, 'right');
   const flashing = state.ruleTick < 20 && state.phase > 0 && state.tick % 8 < 4;
-  text(ctx, names[state.rule], 160, 1, 12, flashing ? COLOR.fg : COLOR.light, 'center');
+  text(ctx, names[state.rule], 160, 2, 11, flashing ? COLOR.fg : COLOR.light, 'center');
   if (notice) {
     const seconds = Math.ceil((PHASE_TICKS - state.ruleTick) / 60);
     text(
