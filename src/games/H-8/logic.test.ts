@@ -21,6 +21,7 @@ import {
   LEVELS,
   LOCK_TICKS,
   Q_VALUES,
+  REFLEX_P,
   RESULT_TICKS,
   STOP,
   h8Game,
@@ -174,6 +175,10 @@ describe('H-8 加倍或歸零｜初始與常數', () => {
     for (let i = 1; i < BASE.length; i += 1) {
       expect(BASE[i] as number).toBeLessThan(BASE[i - 1] as number);
     }
+  });
+
+  it('反射規則的門檻是 0.6（p ≥ 0.65 才爬；小規格原本的 0.5 讓 A3 掉到 40.7%，見小規格「決定 1」）', () => {
+    expect(REFLEX_P).toBe(0.6);
   });
 
   it('successProb：BASE + q，夾在 0.05 到 0.95（邊界：0.85 + 0.2 夾到 0.95；0.35 − 0.2 = 0.15 不夾）', () => {
@@ -611,15 +616,15 @@ describe('H-8 加倍或歸零｜actions 與 evaluate', () => {
     expect(h8Game.evaluate(tied, 0).gain).toBe(0);
   });
 
-  it('evaluate（locked 以前）：gain = 總分差 + 0.01 × [我選的 = 反射規則（自己這層 p > 0.5 就爬）]；danger = 爬的失敗率', () => {
+  it('evaluate（locked 以前）：gain = 總分差 + 0.01 × [我選的 = 反射規則（自己這層 p > 0.6 就爬）]；danger = 爬的失敗率', () => {
     for (const q of Q_VALUES) {
       for (let k = 0; k < LEVELS; k += 1) {
         const p = successProb(k, q);
         const base = ladderAt(k, { q: [q, 0], scores: [3, 1], phase: 'locked', wait: 2 });
         const climb = h8Game.evaluate({ ...base, pending: [CLIMB, STOP] }, 0);
         const stop = h8Game.evaluate({ ...base, pending: [STOP, STOP] }, 0);
-        expect(climb.gain).toBeCloseTo(2 + (p > 0.5 ? 0.01 : 0), 10);
-        expect(stop.gain).toBeCloseTo(2 + (p > 0.5 ? 0 : 0.01), 10);
+        expect(climb.gain).toBeCloseTo(2 + (p > 0.6 ? 0.01 : 0), 10);
+        expect(stop.gain).toBeCloseTo(2 + (p > 0.6 ? 0 : 0.01), 10);
         expect(climb.danger).toBeCloseTo(1 - p, 10);
         expect(stop.danger).toBe(0);
       }
@@ -1032,7 +1037,7 @@ describe('H-8 加倍或歸零｜等級曲線（出手 → 鎖定 2 → 第 3 步
     return states;
   }
 
-  it('深度 1、2：反射規則——自己這層 p > 0.5 就爬，否則停；完全不管對方（對方的賭注、狀態、紀錄、歷史怎麼換，決定都一樣）', () => {
+  it('深度 1、2：反射規則——自己這層 p > 0.6 就爬，否則停；完全不管對方（對方的賭注、狀態、紀錄、歷史怎麼換，決定都一樣）', () => {
     const alts: Partial<H8State>[] = [
       {},
       { log: climbs(3) },
@@ -1049,7 +1054,7 @@ describe('H-8 加倍或歸零｜等級曲線（出手 → 鎖定 2 → 第 3 步
             variant.pot = [s.pot[0], s.pot[0] * 2];
           }
           expect(nameOf(decideWith(pathfinder, depth, variant, 0)), `p ${p} 深度 ${depth}`).toBe(
-            p > 0.5 ? '爬' : '停',
+            p > 0.6 ? '爬' : '停',
           );
         }
       }
@@ -1069,7 +1074,7 @@ describe('H-8 加倍或歸零｜等級曲線（出手 → 鎖定 2 → 第 3 步
     const behind = choosing({ level: [1, 3], pot: [2, 8], status: ['active', 'stopped'] });
     expect(nameOf(decideWith(pathfinder, 4, lead, 0))).toBe('停');
     expect(nameOf(decideWith(pathfinder, 4, behind, 0))).toBe('爬');
-    // 深度 1 的反射規則看不到：兩個局面都是 p > 0.5 就爬
+    // 深度 1 的反射規則看不到：兩個局面都是 p > 0.6 就爬
     expect(nameOf(decideWith(pathfinder, 1, lead, 0))).toBe('爬');
   });
 
@@ -1127,7 +1132,7 @@ describe('H-8 加倍或歸零｜四種性格（機制：爬升門檻）', () => 
   const act = (policy: Policy, depth: number, s: H8State): string =>
     nameOf(decideWith(policy, depth, s, 0));
 
-  it('貪心型：一步看，p > 0.5 就爬（與賭注大小、落後多少無關）', () => {
+  it('貪心型：一步看，p > 0.6 就爬（與賭注大小、落後多少無關）', () => {
     for (const s of [
       ...Array.from({ length: LEVELS }, (_v, k) => k).flatMap((k) =>
         Q_VALUES.flatMap((q) => [
@@ -1136,7 +1141,7 @@ describe('H-8 加倍或歸零｜四種性格（機制：爬升門檻）', () => 
         ]),
       ),
     ]) {
-      expect(act(greedy, 1, s)).toBe(successProb(s.level[0], s.q[0]) > 0.5 ? '爬' : '停');
+      expect(act(greedy, 1, s)).toBe(successProb(s.level[0], s.q[0]) > 0.6 ? '爬' : '停');
     }
   });
 
@@ -1149,15 +1154,15 @@ describe('H-8 加倍或歸零｜四種性格（機制：爬升門檻）', () => 
     }
   });
 
-  it('賭徒型：領先或平手時像貪心型（p > 0.5 才爬）；落後時 p 低也爬', () => {
+  it('賭徒型：領先或平手時像貪心型（p > 0.6 才爬）；落後時 p 低也爬', () => {
     for (let k = 0; k < LEVELS; k += 1) {
       for (const q of Q_VALUES) {
         const p = successProb(k, q);
         expect(act(gambler, 1, ladderAt(k, { q: [q, 0], scores: [3, 3] }))).toBe(
-          p > 0.5 ? '爬' : '停',
+          p > 0.6 ? '爬' : '停',
         );
         expect(act(gambler, 1, ladderAt(k, { q: [q, 0], scores: [5, 3] }))).toBe(
-          p > 0.5 ? '爬' : '停',
+          p > 0.6 ? '爬' : '停',
         );
       }
     }
