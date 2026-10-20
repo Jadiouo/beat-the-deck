@@ -309,6 +309,7 @@ describe('Wilson 區間與分類門檻（量之前固定，10.54）', () => {
         flip: { queries: 0, changed: 0 },
         noflip: { queries: 1000, changed: Math.round(rate * 1000) },
         byKind: {},
+        byPath: {},
         self: { queries: 1000, changed: Math.round(selfRate * 1000) },
         nullChanged: 0,
       };
