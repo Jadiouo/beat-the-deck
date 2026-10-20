@@ -407,9 +407,12 @@ function withLaunch(base: readonly Buttons[]): readonly Buttons[] {
  * 放僚機的 a 是否與轉向同時按，對結果沒有差別（a 是邊緣觸發、轉向只要在走格前鎖定），所以只加一個「全放開＋a」。
  */
 function actionsWith(options: Resolved, state: CQState, side: Side): readonly Buttons[] {
-  // 被僚機鎖住：任何轉向輸入都作廢，只剩「全放開」一個有意義的動作（其餘是重複的搜尋分支）。
-  const locked = !state.over && state.snakes[side].alive && state.lock[side] > 0;
-  const base = locked ? IDLE : orderedActions(state, side);
+  // 局結束、死了、這個走格週期已經鎖定轉向（turn ≠ dir）、被僚機鎖住（轉向輸入作廢）：只有「全放開」是有意義的動作。
+  // 這個走格週期已鎖定轉向時，C-A 仍提供 5 個等價動作；搜尋型的束搜尋會被這些重複的分支塞滿（A2 63.5%，
+  // 只留全放開是 93%，種子 0..99），所以 C-Q 只留一個。
+  const me = state.snakes[side];
+  const idleOnly = state.over || !me.alive || me.turn !== me.dir || state.lock[side] > 0;
+  const base = idleOnly ? IDLE : orderedActions(state, side);
   return canLaunch(options, state, side) ? withLaunch(base) : base;
 }
 
