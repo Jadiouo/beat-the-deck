@@ -24,8 +24,10 @@ import type { DKState } from './logic';
  * 劇本玩家是固定規則的 Controller：沒有反應延遲，只看公開資訊（地盤、寶石、金幣、背包、位置、分數）。
  * 每一段各有幾種寫法，`script(s1, s2, s3)` 把三段接起來；過場一律全放開。
  * 第 1 段：`greedy`（D-8 的最近目標）、`wander`（亂走）、`home`（先鋪家附近 40 格再貪心）、`outward`（只塗離家 > 12 的格子）。
- * 第 2 段：`nearest`（最近的寶石）、`plain`（D-3 的吸引力，不看顏色）、`turf`（吸引力把地盤紅利算進價值）。
- * 第 3 段：`dj`（D-J 的目標：金幣、存、偷）、`coins`（D-2：只撿存、不偷）、`lurk`（站在對手基地旁邊等，不撿金幣）。
+ * 第 2 段：`nearest`（最近的寶石）、`plain`（D-3 的吸引力，不看顏色）、`turf`（吸引力把地盤紅利算進價值）、
+ *   `turfContest`（再加：對手比我近的寶石距離加 8）。
+ * 第 3 段：`dj`（D-J 的目標：金幣、存、偷）、`coins`（D-2：只撿存、不偷）、`lurk`（站在對手基地旁邊等，不撿金幣）、
+ *   `smart`（讀對手的狀態：對手在偷我就退回自己的顏色上；對手站在自己的顏色上就不去偷，改撿金幣；否則 `dj`）。
  */
 
 export const CONFIG: GameConfig = { maxTicks: 3600, params: {} };
@@ -39,8 +41,8 @@ const NONE: Buttons = {
 };
 
 export type Stage1Mode = 'greedy' | 'wander' | 'home' | 'outward' | 'center';
-export type Stage2Mode = 'nearest' | 'plain' | 'turf';
-export type Stage3Mode = 'dj' | 'coins' | 'lurk';
+export type Stage2Mode = 'nearest' | 'plain' | 'turf' | 'turfContest';
+export type Stage3Mode = 'dj' | 'coins' | 'lurk' | 'smart';
 
 export const HOME_RADIUS = 10;
 export const HOME_CELLS = 40;
@@ -133,6 +135,7 @@ function stage2(mode: Stage2Mode, state: DKState, side: Side): Buttons {
   }
   const me = state.players[side];
   const dist = bfsDistances(state.walls, me.cell);
+  const oppDist = bfsDistances(state.walls, state.players[side === 0 ? 1 : 0].cell);
   let best: number | null = null;
   let bestScore = -1;
   for (const gem of state.gems) {
@@ -151,7 +154,9 @@ function stage2(mode: Stage2Mode, state: DKState, side: Side): Buttons {
     const arrival = state.tick + MOVE_EVERY * d;
     const v = gemValue(arrival - 1, gem.born);
     const bonus = state.paint[gem.cell] === side + 1 ? Math.ceil(v / 2) : 0;
-    const score = (100 * (v + bonus)) / (d + 2);
+    const theirs = oppDist[gem.cell] as number;
+    const effective = mode === 'turfContest' && theirs < d ? d + 8 : d;
+    const score = (100 * (v + bonus)) / (effective + 2);
     if (score > bestScore) {
       bestScore = score;
       best = gem.cell;
@@ -168,6 +173,34 @@ function stage3(mode: Stage3Mode, state: DKState, side: Side): Buttons {
     return d2Game.actions(state as never, side)[0] as Buttons;
   }
   const other: Side = side === 0 ? 1 : 0;
+  if (mode === 'smart') {
+    const me = state.players[side];
+    const mine = side + 1;
+    const theyAtMyBase = manhattan(state.players[other].cell, START_CELLS[side]) <= 1;
+    if (theyAtMyBase && state.paint[me.cell] === mine) {
+      return NONE; // 對手貼著我的基地：我站在自己的顏色上，它偷不了，不要走開
+    }
+    if (theyAtMyBase) {
+      // 對手貼著我的基地：退到最近的自己的顏色上
+      const dist = bfsDistances(state.walls, me.cell);
+      let best: number | null = null;
+      let bestD = UNREACHABLE;
+      for (let c = 0; c < CELLS; c += 1) {
+        const d = dist[c] as number;
+        if (state.paint[c] === mine && d < bestD) {
+          bestD = d;
+          best = c;
+        }
+      }
+      if (best !== null) {
+        return toward(state, side, best);
+      }
+    }
+    if (state.paint[state.players[other].cell] === other + 1) {
+      return d2Game.actions(state as never, side)[0] as Buttons;
+    }
+    return dJGame.actions(state as never, side)[0] as Buttons;
+  }
   return toward(state, side, START_CELLS[other]);
 }
 

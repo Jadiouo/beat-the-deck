@@ -5,6 +5,9 @@ import type { CardMeta } from '../types';
  *
  * 這張牌是變化牌（DESIGN-AI-FUN 10.27）：互動借自被包的三張牌（D-8、D-3、D-J），
  * 但三條連結把段與段綁成同一個計分，所以它要過自己的原型關卡（見小規格）。
+
+ * 預設性格是貪心型，不是小規格原本寫的精準型：同樣的評估，精準型（danger 門檻會讓它繞開接觸區、家附近太薄時放下別的事）
+ * 在 A4 的 200 場是人類模型贏 39.0%，貪心型是 13.0%（`docs/cards/D-K.md`「為什麼改成貪心型」）。
  * 量測數字見小規格「實作與量測」（`CardMeta` 沒有放探針數字的欄位，而那是共用檔案）。
  */
 export const dKMeta: CardMeta = {
@@ -16,7 +19,7 @@ export const dKMeta: CardMeta = {
     '方向鍵或 WASD 移動，每 0.08 秒走一格。上方是現在這一段的名稱與倒數，段與段之間有一秒過場、不能動。第一段走過的格子變成你的顏色；第二段站在自己顏色上撿寶石多得一半；第三段撿金幣走回基地存、貼著對手的基地待上一秒偷它的分，它站在自己顏色上就偷不到。',
   suit: 'D',
   rank: 'K',
-  defaultPolicy: 'precise',
+  defaultPolicy: 'greedy',
   baseLevel: 4,
   symmetric: true,
 };
