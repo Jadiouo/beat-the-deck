@@ -23,6 +23,7 @@ import {
   stageOf,
   STEAL_EXTRA,
   TURF_POINTS,
+  COIN_POINTS,
 } from './logic';
 import type { DKState } from './logic';
 
@@ -49,7 +50,8 @@ describe('D-K｜時間表與段落', () => {
     expect(STAGE2_START).toBe(1140);
     expect(STAGE2_END).toBe(2520);
     expect(STAGE3_START).toBe(2580);
-    expect(TURF_POINTS).toBe(10);
+    expect(TURF_POINTS).toBe(1);
+    expect(COIN_POINTS).toBe(20);
     expect(STEAL_EXTRA).toBe(1);
   });
 
@@ -128,33 +130,29 @@ describe('D-K｜第 1 段：圈地與分數', () => {
     expect(next.turfCells).toEqual([2, 1]);
   });
 
-  it('分數 = ⌊顏色格數 ÷ 10⌋：9 格是 0 分、10 格是 1 分（邊界）', () => {
-    // 已經有 8 格，再走一格變 9 格 → 0 分
+  it('分數 = ⌊顏色格數 ÷ TURF_POINTS⌋：TURF_POINTS 是 1，所以 1 格 1 分，和 D-8 原本的算法一致（D-8 的 evaluate 可以直接讀 score）', () => {
     const eight = makeState({ tick: 60, paint0: [BASE_0, ...row(22, 0, 7)] });
+    expect(eight.players[0].score).toBe(8);
     const nine = run(dKGame, eight, 5, RIGHT_ONLY);
     expect(nine.turfCells[0]).toBe(9);
-    expect(nine.players[0].score).toBe(0);
-    // 已經有 9 格，再走一格變 10 格 → 1 分
-    const nineNow = makeState({ tick: 60, paint0: [BASE_0, ...row(22, 0, 8)] });
-    const ten = run(dKGame, nineNow, 5, RIGHT_ONLY);
-    expect(ten.turfCells[0]).toBe(10);
-    expect(ten.players[0].score).toBe(1);
+    expect(nine.players[0].score).toBe(Math.floor(9 / TURF_POINTS));
+    expect(nine.players[0].score).toBe(9);
   });
 
-  it('分數是 D-K 的累計分，不是 D-8 的顏色格數：25 格是 2 分', () => {
+  it('分數是 D-K 的累計分：第 1 段只有顏色格數，沒有別的來源（25 格是 25 分）', () => {
     const state = makeState({ tick: 60, paint0: row(20, 0, 24) });
     const next = run(dKGame, state, 5, RIGHT_ONLY);
     expect(next.turfCells[0]).toBe(25);
-    expect(next.players[0].score).toBe(2);
+    expect(next.players[0].score).toBe(25);
   });
 
-  it('第 1 段結束（tick 1080）以及之後的過場：score 仍是 ⌊格數 ÷ 10⌋，turfCells 凍結，不被重算', () => {
+  it('第 1 段結束（tick 1080）以及之後的過場：score 仍是顏色格數，turfCells 凍結，不被重算', () => {
     const state = makeState({ tick: 1075, paint0: row(20, 0, 24), paint1: [BASE_1, ...row(2, 8, 11)] });
     // 1075 → 1080：最後一個走格 tick（1080）人往右走一格
     const end = run(dKGame, state, 5, RIGHT_ONLY);
     expect(end.tick).toBe(1080);
     expect(end.turfCells).toEqual([25, 12]);
-    expect(end.players.map((p) => p.score)).toEqual([2, 1]);
+    expect(end.players.map((p) => p.score)).toEqual([25, 12]);
     const after = run(dKGame, end, 60, [PRESS_RIGHT, PRESS_RIGHT]);
     expect(after.tick).toBe(1140);
     expect(after.turfCells).toEqual([25, 12]);
@@ -209,13 +207,13 @@ describe('D-K｜第 2 段：寶石與連結 1（地盤紅利）', () => {
     const target = cell(1, 23);
     const state = makeState({
       tick: 1140,
-      players: [{ score: 2 }, { score: 0 }],
+      players: [{ score: 200 }, { score: 0 }],
       paint0: [BASE_0, target],
       gems: [{ cell: target, born: 1140 }],
     });
     const next = run(dKGame, state, 5, RIGHT_ONLY);
     expect(next.players[0].cell).toBe(target);
-    expect(next.players[0].score).toBe(2 + 9 + 5);
+    expect(next.players[0].score).toBe(200 + 9 + 5);
     expect(next.turfGems).toEqual([5, 0]);
     expect(next.gems.some((g) => g.cell === target)).toBe(false);
   });
@@ -225,13 +223,13 @@ describe('D-K｜第 2 段：寶石與連結 1（地盤紅利）', () => {
     for (const paint of [{}, { paint1: [target] }]) {
       const state = makeState({
         tick: 1140,
-        players: [{ score: 2 }, { score: 0 }],
+        players: [{ score: 200 }, { score: 0 }],
         paint0: [BASE_0],
         gems: [{ cell: target, born: 1140 }],
         ...paint,
       });
       const next = run(dKGame, state, 5, RIGHT_ONLY);
-      expect(next.players[0].score).toBe(2 + 9);
+      expect(next.players[0].score).toBe(200 + 9);
       expect(next.turfGems).toEqual([0, 0]);
     }
   });
@@ -272,28 +270,32 @@ describe('D-K｜第 2 段：寶石與連結 1（地盤紅利）', () => {
   });
 });
 
-describe('D-K｜第 3 段：連結 2（地盤是安全區）、連結 3（累計分數可被偷）、STEAL_EXTRA', () => {
+describe('D-K｜第 3 段：金幣的分數、連結 2（地盤是安全區）、連結 3（累計分數可被偷）、STEAL_EXTRA', () => {
   const NEAR_BASE_1 = cell(30, 0);
   const AWAY = cell(10, 10);
+  const K = COIN_POINTS;
 
-  /** 0 號貼著 1 號的基地偷、1 號在遠處、1 號已有 5 分；0 號的 lurk 差 1 個 tick 就偷到。下一步不是走格。 */
+  /** 0 號貼著 1 號的基地偷、1 號在遠處、1 號已有 100 分；0 號的 lurk 差 1 個 tick 就偷到。下一步不是走格。 */
   function stealing(overrides: Parameters<typeof makeState>[0] = {}): DKState {
     return makeState({
       tick: 2601,
-      players: [{ cell: NEAR_BASE_1 }, { cell: AWAY, score: 5 }],
+      players: [{ cell: NEAR_BASE_1 }, { cell: AWAY, score: 100 }],
       lurk: [59, 0],
       ...overrides,
     });
   }
+  /** 兩邊的分數加上背包裡的金幣（一枚值 COIN_POINTS 分）。偷竊不會改變它。 */
+  const worth = (s: DKState): number =>
+    s.players[0].score + s.players[1].score + K * (s.bags[0] + s.bags[1]);
 
   it('連結 3：第 3 段開始時兩邊的分數是第 1、2 段累計的（不是 0），所以有分可以被偷', () => {
     const entering = makeState({
       tick: 2579,
-      players: [{ score: 20 }, { score: 31 }],
+      players: [{ score: 200 }, { score: 310 }],
     });
     const next = dKGame.step(entering, BOTH_IDLE);
     expect(next.tick).toBe(2580);
-    expect(next.players.map((p) => p.score)).toEqual([20, 31]);
+    expect(next.players.map((p) => p.score)).toEqual([200, 310]);
     expect(next.coins.length).toBe(6);
     expect(next.bags).toEqual([0, 0]);
     expect(next.lurk).toEqual([0, 0]);
@@ -304,20 +306,34 @@ describe('D-K｜第 3 段：連結 2（地盤是安全區）、連結 3（累計
     }
   });
 
-  it('沒有連結 2 的情況（被偷的人站在無主的格子上）：lurk 59 再 1 個 tick 就偷到，且有 STEAL_EXTRA：被偷的人 −2、偷的人背包 +2', () => {
+  it('金幣一枚值 COIN_POINTS 分：背包 2 枚走進基地，存進去 +2 × COIN_POINTS（累加在第 1、2 段的分數上）', () => {
+    const state = makeState({
+      tick: 2700,
+      players: [{ cell: cell(1, 23), score: 120 }, { score: 40 }],
+      bags: [2, 0],
+      coins: [cell(10, 10)],
+    });
+    const next = run(dKGame, state, 5, [PRESS_LEFT, NONE]);
+    expect(next.players[0].cell).toBe(BASE_0);
+    expect(next.players[0].score).toBe(120 + 2 * K);
+    expect(next.bags[0]).toBe(0);
+  });
+
+  it('沒有連結 2 的情況（被偷的人站在無主的格子上）：lurk 59 再 1 個 tick 就偷到——被偷的人 −(1 + STEAL_EXTRA) × COIN_POINTS、偷的人背包 +(1 + STEAL_EXTRA)', () => {
     const next = dKGame.step(stealing(), BOTH_IDLE);
-    expect(next.players[1].score).toBe(5 - 1 - STEAL_EXTRA);
-    expect(next.bags).toEqual([2, 0]);
-    expect(next.stolen[0]).toBe(2);
+    expect(next.players[1].score).toBe(100 - (1 + STEAL_EXTRA) * K);
+    expect(next.players[0].score).toBe(0);
+    expect(next.bags).toEqual([1 + STEAL_EXTRA, 0]);
+    expect(next.stolen[0]).toBe(1 + STEAL_EXTRA);
     expect(next.lurk[0]).toBe(0);
     expect(next.blocked).toEqual([0, 0]);
   });
 
-  it('連結 2：被偷的人站在自己顏色的格子上，偷的人 lurk 歸 0、偷不到，blocked +1', () => {
+  it('連結 2：被偷的人站在自己顏色的格子上，偷的人 lurk 維持 0、偷不到，blocked +1', () => {
     const state = stealing({ paint1: [AWAY] });
     const next = dKGame.step(state, BOTH_IDLE);
     expect(next.lurk[0]).toBe(0);
-    expect(next.players[1].score).toBe(5);
+    expect(next.players[1].score).toBe(100);
     expect(next.bags).toEqual([0, 0]);
     expect(next.blocked).toEqual([1, 0]);
   });
@@ -325,100 +341,99 @@ describe('D-K｜第 3 段：連結 2（地盤是安全區）、連結 3（累計
   it('連結 2：站在「對手的顏色」上不算安全區（被偷的人站在人的顏色上，照樣被偷）', () => {
     const state = stealing({ paint0: [AWAY] });
     const next = dKGame.step(state, BOTH_IDLE);
-    expect(next.players[1].score).toBe(5 - 1 - STEAL_EXTRA);
+    expect(next.players[1].score).toBe(100 - (1 + STEAL_EXTRA) * K);
   });
 
-  it('連結 2 的邊界：lurk 是 59、被偷的人剛好走上自己顏色那個 tick：這個 tick 不偷；走出去之後 lurk 從 0 重新累積', () => {
-    // 1 號在 AWAY 旁邊的自己顏色格子，下一次走格（tick 2605）走出來？先驗：站在顏色上被擋
-    const onTurf = stealing({ tick: 2602, paint1: [AWAY] });
-    const blocked = dKGame.step(onTurf, BOTH_IDLE);
+  it('連結 2 的邊界：lurk 是 59、被偷的人站在自己顏色上：這個 tick 不偷；同一局面站在無主格就偷到；被擋的期間 lurk 一直是 0', () => {
+    const blocked = dKGame.step(stealing({ tick: 2602, paint1: [AWAY] }), BOTH_IDLE);
     expect(blocked.lurk[0]).toBe(0);
-    // 同一局面但被偷的人站在無主格：偷到
     const offTurf = dKGame.step(stealing({ tick: 2602 }), BOTH_IDLE);
-    expect(offTurf.players[1].score).toBe(5 - 1 - STEAL_EXTRA);
-    // 被擋之後不是永久：lurk 要重新數 60 個 tick
+    expect(offTurf.players[1].score).toBe(100 - (1 + STEAL_EXTRA) * K);
     const again = run(dKGame, blocked, 59, BOTH_IDLE);
-    expect(again.lurk[0]).toBe(0); // 還在自己顏色上，持續被擋
+    expect(again.lurk[0]).toBe(0);
+    expect(again.players[1].score).toBe(100);
   });
 
   it('被偷的人在自己基地附近（距離 ≤ 2）照 D-J 規則偷不了（連結 2 不改這條）', () => {
-    const state = stealing({ players: [{ cell: NEAR_BASE_1 }, { cell: cell(30, 1), score: 5 }] });
+    const state = stealing({ players: [{ cell: NEAR_BASE_1 }, { cell: cell(30, 1), score: 100 }] });
     const next = dKGame.step(state, BOTH_IDLE);
-    expect(next.players[1].score).toBe(5);
+    expect(next.players[1].score).toBe(100);
     expect(next.bags).toEqual([0, 0]);
   });
 
-  it('STEAL_EXTRA：被偷的人只有 1 分 → 只偷到 1 分（沒有額外）、分數不會變負', () => {
-    const state = stealing({ players: [{ cell: NEAR_BASE_1 }, { cell: AWAY, score: 1 }] });
+  it('被偷的人分數不到一枚金幣（12 < COIN_POINTS）：只能偷到他有的，分數不會變負，沒有額外', () => {
+    const state = stealing({ players: [{ cell: NEAR_BASE_1 }, { cell: AWAY, score: 12 }] });
     const next = dKGame.step(state, BOTH_IDLE);
     expect(next.players[1].score).toBe(0);
     expect(next.bags).toEqual([1, 0]);
     expect(next.stolen[0]).toBe(1);
   });
 
-  it('STEAL_EXTRA：偷的人背包已有 2 枚 → 偷 1 枚就滿了，沒有額外', () => {
-    const state = stealing({ bags: [2, 0] });
+  it('被偷的人剛好有一枚金幣的分數（COIN_POINTS）：偷一枚、沒有額外', () => {
+    const state = stealing({ players: [{ cell: NEAR_BASE_1 }, { cell: AWAY, score: K }] });
     const next = dKGame.step(state, BOTH_IDLE);
-    expect(next.bags).toEqual([3, 0]);
-    expect(next.players[1].score).toBe(4);
+    expect(next.players[1].score).toBe(0);
+    expect(next.bags).toEqual([1, 0]);
   });
 
-  it('零和方向：偷竊前後「兩邊分數 + 兩邊背包」的總和不變；被偷的減、偷的人背包加，方向是 0 偷 1', () => {
+  it('STEAL_EXTRA：偷的人背包已有 2 枚 → 偷 1 枚就滿了，沒有額外', () => {
+    const next = dKGame.step(stealing({ bags: [2, 0] }), BOTH_IDLE);
+    expect(next.bags).toEqual([3, 0]);
+    expect(next.players[1].score).toBe(100 - K);
+  });
+
+  it('零和方向：偷竊前後「兩邊分數 + 兩邊背包 × COIN_POINTS」的總和不變；被偷的減、偷的人背包加，方向是 0 偷 1', () => {
     const state = stealing();
-    const total = (s: DKState): number =>
-      s.players[0].score + s.players[1].score + s.bags[0] + s.bags[1];
     const next = dKGame.step(state, BOTH_IDLE);
-    expect(total(next)).toBe(total(state));
+    expect(worth(next)).toBe(worth(state));
     expect(next.players[1].score).toBeLessThan(state.players[1].score);
     expect(next.players[0].score).toBe(state.players[0].score);
     expect(next.bags[0]).toBeGreaterThan(state.bags[0]);
     expect(next.bags[1]).toBe(state.bags[1]);
   });
 
+  it('零和方向（反過來）：1 號偷 0 號，被偷的是 0 號的分數、背包加在 1 號', () => {
+    const state = makeState({
+      tick: 2601,
+      players: [{ cell: cell(10, 10), score: 100 }, { cell: cell(1, 23) }],
+      lurk: [0, 59],
+    });
+    const next = dKGame.step(state, BOTH_IDLE);
+    expect(next.players[0].score).toBe(100 - (1 + STEAL_EXTRA) * K);
+    expect(next.bags).toEqual([0, 1 + STEAL_EXTRA]);
+    expect(worth(next)).toBe(worth(state));
+  });
+
   it('對稱：兩個人同時偷到對方（各自貼著對方基地、都不在自己顏色上）：結果左右對稱、總和不變', () => {
     const state = makeState({
       tick: 2601,
       players: [
-        { cell: cell(30, 0), score: 6 },
-        { cell: cell(1, 23), score: 6 },
+        { cell: cell(30, 0), score: 100 },
+        { cell: cell(1, 23), score: 100 },
       ],
       lurk: [59, 59],
     });
     const next = dKGame.step(state, BOTH_IDLE);
     expect(next.players[0].score).toBe(next.players[1].score);
     expect(next.bags[0]).toBe(next.bags[1]);
-    expect(next.players[0].score + next.bags[0]).toBe(6);
+    expect(worth(next)).toBe(worth(state));
   });
 
   it('時間到：背包裡還沒存的不算分；贏家按分數，同分平手', () => {
     const state = makeState({
       tick: 3599,
-      players: [{ score: 10 }, { score: 11 }],
+      players: [{ score: 100 }, { score: 110 }],
       bags: [3, 0],
       coins: [],
     });
     const end = dKGame.step(state, BOTH_IDLE);
     expect(end.over).toBe(true);
-    expect(end.players[0].score).toBe(10);
+    expect(end.players[0].score).toBe(100);
     expect(dKGame.winner(end)).toBe(1);
     const tie = dKGame.step(makeState({ tick: 3599, players: [{ score: 10 }, { score: 10 }] }), BOTH_IDLE);
     expect(dKGame.winner(tie)).toBeNull();
     // 結束以後 step 原樣回傳
     expect(dKGame.step(end, BOTH_IDLE)).toBe(end);
-  });
-
-  it('金幣存進基地：走進自己的基地，背包變成分數（累加在第 1、2 段的分數上）', () => {
-    const state = makeState({
-      tick: 2700,
-      players: [{ cell: cell(1, 23), score: 12 }, { score: 4 }],
-      bags: [2, 0],
-      coins: [cell(10, 10)],
-    });
-    // 往左走回基地 (0, 23)
-    const next = run(dKGame, state, 5, [PRESS_LEFT, NONE]);
-    expect(next.players[0].cell).toBe(BASE_0);
-    expect(next.players[0].score).toBe(14);
-    expect(next.bags[0]).toBe(0);
   });
 });
 
