@@ -89,7 +89,9 @@ function playAll(seed: number, index = 0): { final: SKState; snapshots: SKState[
   while (!skGame.isOver(state) && guard < 7000) {
     const before = state;
     const inputs: Inputs =
-      state.phase === 'pick' && state.picker !== null ? pickInputs(state.picker, index) : IDLE;
+      state.phase === 'pick' && state.picker !== null && state.armed
+        ? pickInputs(state.picker, index)
+        : IDLE;
     state = skGame.step(state, inputs);
     if (state.phase !== before.phase) {
       snapshots.push(state);
@@ -263,6 +265,50 @@ describe('S-K 黑桃馬拉松｜選牌階段', () => {
     const s = start();
     const ab: Buttons = { ...NONE, a: true, b: true };
     expect(skGame.step(s, s.picker === 0 ? [ab, NONE] : [NONE, ab]).phase).toBe('pick');
+  });
+
+  it('開局的第一次挑牌可以立刻按；之後的挑牌階段一開始是「還沒放開」，上一段按著的鍵不會直接鎖定', () => {
+    const first = skGame.init(1, CONFIG);
+    expect(first.armed).toBe(true);
+    // 第二次挑牌：上一段的 rest 結束、進入 pick
+    const done = makeState({
+      first: 0,
+      phase: 'rest',
+      seg: 0,
+      phaseTick: REST_TICKS - 1,
+      ledger: [entryOf('S-3', 0)],
+      cardId: 'S-3',
+    });
+    const next = skGame.step(done, IDLE);
+    expect(next.phase).toBe('pick');
+    expect(next.armed).toBe(false);
+    const picker = next.picker as Side;
+    // 一直按著 ↓：不鎖定
+    const held = run(next, 20, pickInputs(picker, 1));
+    expect(held.phase).toBe('pick');
+    expect(held.armed).toBe(false);
+    // 放開一個 tick 之後再按：鎖定
+    const released = skGame.step(held, IDLE);
+    expect(released.armed).toBe(true);
+    expect(released.phase).toBe('pick');
+    const locked = skGame.step(released, pickInputs(picker, 1));
+    expect(locked.phase).toBe('show');
+    expect(locked.cardId).toBe(next.offer[1]);
+  });
+
+  it('一直按著不放：逾時照樣自動鎖定第 0 張（一場一定結束）', () => {
+    const done = makeState({
+      first: 0,
+      phase: 'rest',
+      seg: 0,
+      phaseTick: REST_TICKS - 1,
+      ledger: [entryOf('S-3', 0)],
+      cardId: 'S-3',
+    });
+    const next = skGame.step(done, IDLE);
+    const held = run(next, PICK_TICKS, pickInputs(next.picker as Side, 2));
+    expect(held.phase).toBe('show');
+    expect(held.cardId).toBe(next.offer[0]);
   });
 
   it('候選牌少於 4 張時，按到沒有的鍵不算挑牌', () => {
