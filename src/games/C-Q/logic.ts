@@ -93,7 +93,7 @@ export interface CQState extends ClubsState {
 }
 
 export interface CQOptions {
-  /** true：放出要割尾巴、分數 −1，命中才還。預設 false（小規格原版）。 */
+  /** true（預設）：放出要割尾巴、分數 −1，命中才還（10.19 的改法）。false：小規格原版，放出不花東西。 */
   readonly tailCost?: boolean;
   /** false：沒有僚機（按 a 沒效果，AI 沒有放的動作）＝ C-A。消融用。預設 true。 */
   readonly drones?: boolean;
@@ -113,7 +113,7 @@ type Resolved = Required<CQOptions>;
 
 function resolve(options: CQOptions): Resolved {
   return {
-    tailCost: options.tailCost ?? false,
+    tailCost: options.tailCost ?? true,
     drones: options.drones ?? true,
     launchCost: options.launchCost ?? LAUNCH_COST,
     lockMoves: options.lockMoves ?? LOCK_MOVES,
@@ -384,43 +384,33 @@ const NONE: Buttons = Object.freeze({
 });
 const IDLE: readonly Buttons[] = Object.freeze([NONE]);
 const LAUNCH: Buttons = Object.freeze({ ...NONE, a: true });
-const IDLE_OR_LAUNCH: readonly Buttons[] = Object.freeze([NONE, LAUNCH]);
 
 const launchCache = new WeakMap<readonly Buttons[], readonly Buttons[]>();
 
-/** 同樣的動作各帶一份 a，接在後面（平手時搜尋型取排前面的＝不放）。 */
+/**
+ * 基底動作後面接一個「全放開＋a」（排在最後：平手時搜尋型取排前面的＝不放）。
+ * 基底動作是 `orderedActions` 的回傳值（模組內固定的共用陣列），所以用它當快取的鑰匙，不會每個 tick 新配置。
+ */
 function withLaunch(base: readonly Buttons[]): readonly Buttons[] {
   let cached = launchCache.get(base);
   if (cached === undefined) {
-    cached = Object.freeze([...base, ...base.map((b) => Object.freeze({ ...b, a: true }))]);
+    cached = Object.freeze([...base, LAUNCH]);
     launchCache.set(base, cached);
   }
   return cached;
 }
 
-const baseCache = new Map<string, readonly Buttons[]>();
-/** `orderedActions` 的前三個（兩個轉向、全放開）做成穩定的共用陣列，讓 `withLaunch` 的快取有效。 */
-function turnsOnly(state: ClubsState, side: Side): readonly Buttons[] {
-  const base = orderedActions(state, side).slice(0, 3);
-  const key = base
-    .map((b) => `${b.up ? 'u' : ''}${b.right ? 'r' : ''}${b.down ? 'd' : ''}${b.left ? 'l' : ''}`)
-    .join('|');
-  let cached = baseCache.get(key);
-  if (cached === undefined) {
-    cached = Object.freeze(base.map((b) => Object.freeze({ ...b })));
-    baseCache.set(key, cached);
-  }
-  return cached;
-}
-
+/**
+ * 基底動作完全沿用 C-A（`orderedActions`：兩個有效的轉向在前，之後是不會改變方向的三個；已鎖定轉向、
+ * 被僚機鎖住或局結束時是固定順序）。小規格原本寫「3 個基底動作各帶一份 a」，量測推翻：3 個基底動作時
+ * 搜尋型等級 5 對亂按只贏 71.0%（C-A 的 5 個動作是 81.0%，種子 0..99），沿用 5 個回到 79–80%。
+ * 放僚機的 a 是否與轉向同時按，對結果沒有差別（a 是邊緣觸發、轉向只要在走格前鎖定），所以只加一個「全放開＋a」。
+ */
 function actionsWith(options: Resolved, state: CQState, side: Side): readonly Buttons[] {
-  const launch = canLaunch(options, state, side);
-  const me = state.snakes[side];
-  if (state.over || !me.alive || me.turn !== me.dir || state.lock[side] > 0) {
-    return launch ? IDLE_OR_LAUNCH : IDLE;
-  }
-  const turns = turnsOnly(state, side);
-  return launch ? withLaunch(turns) : turns;
+  // 被僚機鎖住：任何轉向輸入都作廢，只剩「全放開」一個有意義的動作（其餘是重複的搜尋分支）。
+  const locked = !state.over && state.snakes[side].alive && state.lock[side] > 0;
+  const base = locked ? IDLE : orderedActions(state, side);
+  return canLaunch(options, state, side) ? withLaunch(base) : base;
 }
 
 // ---------------------------------------------------------------------------

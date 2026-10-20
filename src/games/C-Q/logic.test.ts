@@ -619,7 +619,7 @@ describe('C-Q 兩條蛇｜actions', () => {
     expect(cqGame.actions(over, 0).some((b) => b.a)).toBe(false);
   });
 
-  it('被鎖定：基底是 orderedActions 的固定順序（沒有轉向的選擇），可放時再加全放開＋a', () => {
+  it('被鎖定：只有全放開（可放時再加全放開＋a）', () => {
     const locked = makeState({ lock: [2, 0] });
     const actions = cqGame.actions(locked, 0);
     expect(actions[0]).toEqual(NONE);
