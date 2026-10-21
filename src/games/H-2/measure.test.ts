@@ -65,7 +65,7 @@ const TRAIN_N = Math.max(1, Number(process.env['H2_PROBE_TRAIN_N'] ?? '4'));
 const N = Math.max(1, Number(process.env['H2_PROBE_N'] ?? '4'));
 const SCAN_FROM = 7000;
 const LEVEL_FROM = 9000;
-const LEVEL_MEMBERS = (process.env['H2_PROBE_LEVEL_MEMBERS'] ?? 'b-late-300,b-late-240')
+const LEVEL_MEMBERS = (process.env['H2_PROBE_LEVEL_MEMBERS'] ?? 'b-late-300,b-late-255')
   .split(',')
   .filter((x) => x !== '');
 const LEVEL_N = Math.max(1, Number(process.env['H2_PROBE_LEVEL_N'] ?? '2'));

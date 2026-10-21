@@ -25,7 +25,7 @@ import type { H2State, Racer } from './logic';
 export const START_EARLY = 0;
 /** 晚按：第 58 個 tick 才按（第 60 個 tick 之前還算數，留 2 個 tick 的餘裕）。 */
 export const START_LATE = 58;
-export const THRESHOLDS = [118, 200, 240, 270, 300, 340] as const;
+export const THRESHOLDS = [118, 160, 200, 230, 255, 270, 285, 300, 340] as const;
 /** 引信至少 120，累積 118 放開必入袋。 */
 export const LOCK_IN = 118;
 export const LEAD_GAP = 100;

@@ -344,8 +344,8 @@ describe('反應延遲', () => {
 
 describe('對局與分歧率的串接', () => {
   it('playWith 跑得完一整場；同一個種子兩次結果相同；偶數種子坐 0 號邊、奇數種子坐 1 號邊', () => {
-    const a = playWith(3, member('b-late-240'), MAIN_CELL);
-    const b = playWith(3, member('b-late-240'), MAIN_CELL);
+    const a = playWith(3, member('b-late-255'), MAIN_CELL);
+    const b = playWith(3, member('b-late-255'), MAIN_CELL);
     expect(a).toEqual(b);
     expect(Number.isFinite(a.margin)).toBe(true);
     const side0 = playWith(4, member('b-idle'), MAIN_CELL);
@@ -363,7 +363,7 @@ describe('對局與分歧率的串接', () => {
   });
 
   it('compareBC：自己對自己 → 分歧率 0、勝率差 0；上限成立、沒有一致性違規', () => {
-    const r = compareBC(spec('b-late-240', 'b-late-240', [1, 2], MAIN_CELL));
+    const r = compareBC(spec('b-late-255', 'b-late-255', [1, 2], MAIN_CELL));
     expect(r.divergence.gamesDiffer).toBe(0);
     expect(r.win.diff.mean).toBe(0);
     expect(r.winBoundHolds).toBe(true);
