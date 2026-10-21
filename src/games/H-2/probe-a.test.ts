@@ -178,6 +178,18 @@ describe('(b) 的走法：開始與放開', () => {
   });
 });
 
+describe('開始時間可以任意指定（只給「落差掃描」用，不在族裡）', () => {
+  it('b-sK-T、c-sK-T：到這一局第 K 個 tick 才按；範圍外的 K 丟錯', () => {
+    const t0 = at(waiting, waiting, { roundTick: 0, tick: 0 });
+    expect(ask('b-s24-300', { ...t0, roundTick: 23 })).toBe(false);
+    expect(ask('b-s24-300', { ...t0, roundTick: 24 })).toBe(true);
+    expect(ask('c-s0-118', t0)).toBe(true);
+    expect(ask('c-s58-118', { ...t0, roundTick: 57 })).toBe(false);
+    expect(() => member('b-s59-300')).toThrow();
+    expect((B_FAMILY as readonly string[]).includes('b-s24-300')).toBe(false);
+  });
+});
+
 describe('(b) 不讀對手、全體不讀引信', () => {
   const mine: Racer[] = [waiting, holding(1), holding(60), holding(117), holding(118), holding(119)]
     .concat([holding(199), holding(200), holding(239), holding(240), holding(299), holding(300)])
