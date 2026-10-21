@@ -30,6 +30,9 @@ import type { Cell, Row } from './probe-a.test-helpers';
  *   D3_PROBE_SCAN_N（掃描場數，預設 2，正式 16；種子 7000 起，這批種子之後不再用）
  *   D3_PROBE_TRAIN_N（訓練場數，預設 4，正式 200；種子 1000 起）
  *   D3_PROBE_N（量測場數，預設 4，正式 400；種子 5000 起）
+ *   D3_PROBE_STAGE=levels（支配策略檢查：不讀對手的強 (b) 成員對兩種性格、等級 1 到 10、延遲 12，在種子 9000 起的 D3_PROBE_LEVEL_N 場上的勝率與分差；
+ *                   跟 (c)−(b) 無關，量衡量標準 3「人贏得了但不是靠運氣」）
+ *   D3_PROBE_LEVEL_N（levels 階段的場數，預設 2，正式 100）
  *   D3_PROBE_ALLC（每個 (c) 成員都對 (b*) 量一次）、D3_PROBE_LOG（每行即時附加到這個檔，長時間的量測看進度用）、
  *   D3_PROBE_VERBOSE（印出報告；跑完才看得到）。
  * 可續跑、可分給幾個行程（機器上有別的 agent 在跑，一個行程跑完要很久）：
@@ -63,6 +66,8 @@ const SCAN_N = Math.max(1, Number(process.env['D3_PROBE_SCAN_N'] ?? '2'));
 const TRAIN_N = Math.max(1, Number(process.env['D3_PROBE_TRAIN_N'] ?? '4'));
 const N = Math.max(1, Number(process.env['D3_PROBE_N'] ?? '4'));
 const SCAN_FROM = 7000;
+const LEVEL_FROM = 9000;
+const LEVEL_N = Math.max(1, Number(process.env['D3_PROBE_LEVEL_N'] ?? '2'));
 const TRAIN_FROM = 1000;
 const FROM = 5000;
 const range = (from: number, n: number): number[] => Array.from({ length: n }, (_v, i) => from + i);
@@ -137,8 +142,25 @@ describe(`D-3 探針 A 完整版｜格 ${cellName}（${at.policy} 等級 ${Strin
     say(`掃描 ${cellName} d-engine 勝率 ${pct(mirror.win)} 分差 ${mirror.margin.toFixed(2)}`);
   }, 7_200_000);
 
+  it('支配策略檢查（只在 STAGE=levels）：不讀對手的強成員對各等級的勝率', () => {
+    if (STAGE !== 'levels') {
+      return;
+    }
+    const list = range(LEVEL_FROM, LEVEL_N);
+    for (const policy of ['greedy', 'precise'] as const) {
+      for (const name of ['b-pull2', 'b-route2']) {
+        for (let level = 1; level <= 10; level += 1) {
+          const row = score(name, list, { policy, level, delay: 12 });
+          say(
+            `等級 ${policy} L${String(level)} 延遲 12 ${name} 勝率 ${pct(row.win)} 分差 ${row.margin.toFixed(2)}（n=${String(LEVEL_N)}）`,
+          );
+        }
+      }
+    }
+  }, 7_200_000);
+
   it('訓練 → 選 (b*)(c*) → 訓練種子上的分歧率 →（階段允許時）量測種子上的 (c)−(b)', () => {
-    if (STAGE === 'scan') {
+    if (STAGE === 'scan' || STAGE === 'levels') {
       return;
     }
     const train: Row[] = [];
