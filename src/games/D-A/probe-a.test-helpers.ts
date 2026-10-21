@@ -215,6 +215,21 @@ function ruleC(name: string): RuleC {
   }
 }
 
+/**
+ * 事後的敏感度分析成員（不在 (b)(c) 兩族裡，不參與 (b\*)(c\*) 的選擇；名字以 x- 開頭）：
+ * 看讀對手的罰再加大會不會繼續單調變好（本檔雙胞胎表的趨勢外推），只用來標示機制。
+ */
+function ruleX(name: string): RuleC {
+  switch (name) {
+    case 'x-chain-pos16':
+      return { ref: 'pos', pen: 16, chain: 0.5, dense: 0, stick: 3 };
+    case 'x-chain-pos24':
+      return { ref: 'pos', pen: 24, chain: 0.5, dense: 0, stick: 3 };
+    default:
+      throw new Error(`不是敏感度分析的成員：${name}`);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // 機器
 // ---------------------------------------------------------------------------
@@ -316,7 +331,7 @@ export function member(name: string): Controller<DAState> {
       () => rule.pen,
     );
   }
-  const rule = ruleC(name);
+  const rule = name.startsWith('x-') ? ruleX(name) : ruleC(name);
   return walker(
     rule,
     (state, side) => {

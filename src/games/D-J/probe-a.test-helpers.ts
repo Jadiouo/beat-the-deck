@@ -161,6 +161,10 @@ interface Config {
   readonly raid: RaidMode;
   readonly guard: GuardMode;
   readonly stay?: boolean;
+  /** 事後的敏感度分析才用：威脅半徑（預設 THREAT_STEPS）。 */
+  readonly threat?: number;
+  /** 事後的敏感度分析才用：只有我離自己的基地不超過這麼多步才進入守（便宜的守）。 */
+  readonly guardHome?: number;
 }
 
 /** (b) 的規則：只有參數，沒有任何對手的資料。 */
@@ -208,6 +212,21 @@ function ruleC(name: string): Config {
       return { n: 3, radius: null, raid: 'none', guard: 'lurk' };
     default:
       throw new Error(`不是 (c) 的成員：${name}`);
+  }
+}
+
+/**
+ * 事後的敏感度分析成員（不在 (b)(c) 兩族裡，不參與 (b\*)(c\*) 的選擇；名字以 x- 開頭）：
+ * 守家的代價是不是 `c-g3` 的門檻太寬造成的？縮小威脅半徑，或只在離家近的時候才守。
+ */
+function ruleX(name: string): Config {
+  switch (name) {
+    case 'x-g3-t8':
+      return { n: 3, radius: null, raid: 'none', guard: 'threat', threat: 8 };
+    case 'x-g3-near':
+      return { n: 3, radius: null, raid: 'none', guard: 'threat', guardHome: 12 };
+    default:
+      throw new Error(`不是敏感度分析的成員：${name}`);
   }
 }
 
@@ -322,7 +341,7 @@ function machine(cfg: Config, withOpp: boolean): Controller<DJState> {
         } else if (cfg.guard === 'lurk') {
           keep = opp.lurk >= 1 || waited < 60;
         } else {
-          keep = me.score >= 1 && (oppToBase as number) <= THREAT_STEPS + 4;
+          keep = me.score >= 1 && (oppToBase as number) <= (cfg.threat ?? THREAT_STEPS) + 4;
         }
         if (waited >= GUARD_MAX || !keep) {
           phase = 'collect';
@@ -338,7 +357,10 @@ function machine(cfg: Config, withOpp: boolean): Controller<DJState> {
           if (cfg.guard === 'blind') {
             guardNow = t % GUARD_EVERY < GUARD_OPEN;
           } else if (cfg.guard === 'threat' && opp !== null) {
-            guardNow = opp.bag < BAG_LIMIT && (oppToBase as number) <= THREAT_STEPS;
+            guardNow =
+              opp.bag < BAG_LIMIT &&
+              (oppToBase as number) <= (cfg.threat ?? THREAT_STEPS) &&
+              (cfg.guardHome === undefined || dBase <= cfg.guardHome);
           } else if (cfg.guard === 'lurk' && opp !== null) {
             guardNow = opp.lurk >= 1;
           }
@@ -441,7 +463,7 @@ export function member(name: string): Controller<DJState> {
   if ((B_FAMILY as readonly string[]).includes(name)) {
     return machine(ruleB(name), false);
   }
-  return machine(ruleC(name), true);
+  return machine(name.startsWith('x-') ? ruleX(name) : ruleC(name), true);
 }
 
 /**

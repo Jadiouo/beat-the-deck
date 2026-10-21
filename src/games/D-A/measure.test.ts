@@ -260,6 +260,10 @@ describe(`D-A 探針 A 完整版｜格 ${cellName}（AI ${at.policy} 等級 ${St
     for (const [b, c] of TWINS) {
       run(`twin|${b}|${c}`, b, c, twinSeeds);
     }
+    // 事後的敏感度分析成員（不在兩族裡）對 (b*)：DA_PROBE_XTRA=x-...,x-...
+    for (const x of process.env['DA_PROBE_XTRA']?.split(',').filter((v) => v !== '') ?? []) {
+      run(`x|${x}`, bStar.name, x, seeds);
+    }
     if (allC) {
       for (const c of C_FAMILY) {
         if (c !== cStar.name) {
