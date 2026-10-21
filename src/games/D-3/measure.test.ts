@@ -91,7 +91,7 @@ function cached<T>(kind: string, key: string, compute: () => T): T {
     return compute();
   }
   mkdirSync(OUT_DIR, { recursive: true });
-  const tag = `${cellName}.t${String(TRAIN_N)}.n${String(N)}`;
+  const tag = `D-3.${cellName}.t${String(TRAIN_N)}.n${String(N)}`;
   const file = join(OUT_DIR, `${tag}.${kind}.${key.replace(/[^\w.-]/g, '_')}.json`);
   if (existsSync(file)) {
     return JSON.parse(readFileSync(file, 'utf8')) as T;
