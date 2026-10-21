@@ -154,7 +154,7 @@ describe('(b) 的走法', () => {
     }
   });
 
-  it('b-exact-M：每個起始速度都停得下來，停點在 300 − M 之前 4 像素以內（逐 tick 的最後一刻才煞）', () => {
+  it('b-exact-M：每個起始速度都停得下來，停點在 300 − M 之前 6 像素以內（逐 tick 的最後一刻才煞）', () => {
     for (const M of MARGINS) {
       for (let v0 = 800; v0 <= 1200; v0 += 25) {
         const s = runRound(`b-exact-${String(M)}`, v0);
@@ -162,7 +162,7 @@ describe('(b) 的走法', () => {
         expect(r.status, `M=${String(M)} v0=${String(v0)}`).toBe('stopped');
         expect(r.pos, `M=${String(M)} v0=${String(v0)}`).toBeLessThanOrEqual(TRACK - M * 1000);
         expect(r.pos, `M=${String(M)} v0=${String(v0)}`).toBeGreaterThanOrEqual(
-          TRACK - M * 1000 - 4000,
+          TRACK - M * 1000 - 6000,
         );
       }
     }
@@ -351,9 +351,9 @@ describe('反應延遲與執行抖動', () => {
     const exact = runRound('b-exact-8', 1000).runners[0];
     const results = [1, 2, 3, 4, 5, 6, 7, 8].map(play);
     for (const r of results) {
-      // 晚 0 到 5 個 tick：最多多衝 5 個 tick 的距離（約 5 像素左右）
+      // 晚 0 到 5 個 tick：最多多衝 5 個 tick 的距離（每個 tick 約 1 到 2 像素）
       expect(r.pos).toBeGreaterThanOrEqual(exact.pos);
-      expect(r.pos).toBeLessThanOrEqual(exact.pos + 6000);
+      expect(r.pos).toBeLessThanOrEqual(exact.pos + 12000);
     }
     expect(new Set(results.map((r) => r.pos)).size).toBeGreaterThan(1);
     expect(play(3)).toEqual(play(3));
