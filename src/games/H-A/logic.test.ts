@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest';
 
 import { levelController, levelParams, wrapPolicy } from '../../ai/level';
 import { gambler } from '../../ai/policies/gambler';
+import { greedy } from '../../ai/policies/greedy';
 import { pathfinder } from '../../ai/policies/pathfinder';
 import { precise } from '../../ai/policies/precise';
+import type { Policy } from '../../ai/types';
 import { playMatch } from '../../core/match';
 import { intFrom, rngStateFor } from '../../core/rng';
 import type { RngState } from '../../core/rng';
@@ -666,5 +668,85 @@ describe('H-A 貪心骰｜AI 在邊緣觸發下也能玩', () => {
       }
     }
     expect(finishedEarly).toBeGreaterThanOrEqual(3);
+  });
+});
+
+describe('H-A 貪心骰｜模擬洩漏（DESIGN-AI-FUN 4.2-b：四個性格 x 深度 1、3、6 的 decide 黑箱）', () => {
+  // 隱藏資訊是「下一顆骰子」（藏在 state.rng 裡）。擲骰是兩段式：按 a 之後骰子在滾，再一個 tick 才出結果，
+  // 所以往前模擬 2 個 tick 的搜尋型會看到真的點數。局面只有 rng 不同，decide 必須按同一個鍵。
+  const POLICIES = [
+    ['pathfinder', pathfinder],
+    ['precise', precise],
+    ['greedy', greedy],
+    ['gambler', gambler],
+  ] as const;
+  const DICE = [[1], [2], [4], [6]] as const;
+  const ACCS = [4, 8, 14];
+
+  const decideWith = (
+    policy: Policy,
+    side: Side,
+    acc: number,
+    dice: readonly number[],
+    depth: number,
+  ): Buttons =>
+    policy.decide(hAGame, makeState({ turn: side, acc, rng: rngWithDice(dice) }), side, 0, {
+      depth,
+      seed: 0,
+    });
+
+  const blackBox = (name: string, policy: Policy, depth: number): void => {
+    for (const side of [0, 1] as const) {
+      for (const acc of ACCS) {
+        const base = decideWith(policy, side, acc, DICE[0], depth);
+        for (const dice of DICE.slice(1)) {
+          expect(
+            decideWith(policy, side, acc, dice, depth),
+            `${name} 深度 ${depth} 邊 ${side} 累積 ${acc} 下一顆骰子 ${dice[0]}`,
+          ).toEqual(base);
+        }
+      }
+    }
+  };
+
+  it('前提：按 a 之後 2 個 tick 內骰子就結算，下一顆是 1 與 6 的局面真的會走到不同的結果（深度 3、6 走得到）', () => {
+    const one = makeState({ acc: 8, rng: rngWithDice([1]) });
+    const six = makeState({ acc: 8, rng: rngWithDice([6]) });
+    const afterOne = stepN(stepN(one, 1, only(0, PRESS_A)), 1, idle());
+    const afterSix = stepN(stepN(six, 1, only(0, PRESS_A)), 1, idle());
+    expect(afterOne.acc).toBe(0);
+    expect(afterOne.turn).toBe(1);
+    expect(afterSix.acc).toBe(14);
+    expect(afterSix.turn).toBe(0);
+    // 第 1 個 tick 之後（深度 1 的視野）還看不出差別
+    const rollOne = hAGame.step(one, only(0, PRESS_A));
+    const rollSix = hAGame.step(six, only(0, PRESS_A));
+    expect(hAGame.evaluate(rollOne, 0)).toEqual(hAGame.evaluate(rollSix, 0));
+    // 結算之後 evaluate 看得出差別（這就是洩漏的路徑）
+    expect(hAGame.evaluate(afterOne, 0)).not.toEqual(hAGame.evaluate(afterSix, 0));
+  });
+
+  describe.each([1, 3, 6])('深度 %i', (depth) => {
+    for (const [name, policy] of POLICIES) {
+      // 搜尋型在深度 3、6 會呼叫 step 往前模擬到骰子結算，看到真的點數（見 docs/HIDDEN-STATE-LEAK.md）。
+      // 修法要動共用層，留給老闆裁示（CLAUDE.md 第 4 條），所以標 it.fails；不放寬測試（第 8 條）。
+      const leaks = name === 'pathfinder' && depth > 1;
+      const run = leaks ? it.fails : it;
+      run(`${name}：下一顆骰子不同，決定相同${leaks ? '（已知會偷看，待老闆裁示）' : ''}`, () => {
+        blackBox(name, policy, depth);
+      });
+    }
+  });
+
+  it('控制組：會偷看下一顆骰子的假性格會被抓到（測試咬得到）', () => {
+    const cheat: Policy = {
+      name: 'cheat',
+      decide: (_game, state) => {
+        const s = state as HAState;
+        const [v] = intFrom(s.rng, 6);
+        return v === 0 ? PRESS_B : PRESS_A;
+      },
+    };
+    expect(() => blackBox('cheat', cheat, 6)).toThrow();
   });
 });
