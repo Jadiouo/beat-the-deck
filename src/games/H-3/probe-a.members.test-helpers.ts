@@ -20,7 +20,7 @@ import type { H3State, Runner } from './logic';
  *   `last` 只在最後一局、對手已經結束時讀（領先就保險，必輸〔落後超過 300〕就孤注一擲）。
  */
 
-export const MARGINS = [0, 4, 8, 16, 32] as const;
+export const MARGINS = [0, 4, 8, 16, 24, 32, 48] as const;
 export const POSITIONS = [200, 240, 270, 285] as const;
 export const LEAD_GAP = 100;
 /** 領先時多留的邊距（像素）；pos 成員提早的像素。 */
