@@ -32,7 +32,8 @@ import type { Cell, Row } from './probe-a.test-helpers';
  *   H2_PROBE_N（量測場數，預設 4，正式 400；種子 5000 起）
  *   H2_PROBE_STAGE=levels（支配策略檢查：不讀對手的強 (b) 成員對兩種性格、等級 1 到 10、延遲 12，在種子 9000 起的 H2_PROBE_LEVEL_N 場上的勝率與分差；
  *                   跟 (c)−(b) 無關，量衡量標準 3「人贏得了但不是靠運氣」）
- *   H2_PROBE_LEVEL_N（levels 階段的場數，預設 2，正式 100）、H2_PROBE_LEVEL_MEMBERS（逗號分隔，levels 階段測哪些不讀的 (b) 成員）
+ *   H2_PROBE_LEVEL_N（levels 階段的場數，預設 2，正式 100）、H2_PROBE_LEVEL_MEMBERS（逗號分隔，levels 階段測哪些不讀的 (b) 成員）；
+ *   H2_PROBE_STAGE=lag（機制檢查：讀的人比對手晚按 K 個 tick 的勝率，K 由 H2_PROBE_LAG_STARTS 指定，種子 9000 起 H2_PROBE_LEVEL_N 場）
  *   H2_PROBE_ALLC（每個 (c) 成員都對 (b*) 量一次）、H2_PROBE_LOG（每行即時附加到這個檔，長時間的量測看進度用）、
  *   H2_PROBE_VERBOSE（印出報告；跑完才看得到）。
  * 可續跑、可分給幾個行程（機器上有別的 agent 在跑，一個行程跑完要很久）：
@@ -68,6 +69,9 @@ const LEVEL_FROM = 9000;
 const LEVEL_MEMBERS = (process.env['H2_PROBE_LEVEL_MEMBERS'] ?? 'b-late-300,b-late-255')
   .split(',')
   .filter((x) => x !== '');
+const LAG_STARTS = (process.env['H2_PROBE_LAG_STARTS'] ?? '0,6,12,18,24,30,36,48,58')
+  .split(',')
+  .map(Number);
 const LEVEL_N = Math.max(1, Number(process.env['H2_PROBE_LEVEL_N'] ?? '2'));
 const TRAIN_FROM = 1000;
 const FROM = 5000;
@@ -160,8 +164,28 @@ describe(`H-2 探針 A 完整版｜格 ${cellName}（${at.policy} 等級 ${Strin
     }
   }, 7_200_000);
 
+  it('落差掃描（只在 STAGE=lag）：讀的人比對手晚按多少個 tick 才讀得到東西（機制檢查，不在 (c)−(b) 的判讀裡）', () => {
+    if (STAGE !== 'lag') {
+      return;
+    }
+    const list = range(LEVEL_FROM, LEVEL_N);
+    for (const k of LAG_STARTS) {
+      for (const name of [
+        `b-s${String(k)}-118`,
+        `c-s${String(k)}-118`,
+        `b-s${String(k)}-300`,
+        `c-s${String(k)}-300`,
+      ]) {
+        const row = score(name, list, at);
+        say(
+          `落差 ${cellName} 開始 ${String(k)} ${name} 勝率 ${pct(row.win)} 分差 ${row.margin.toFixed(2)}（n=${String(LEVEL_N)}）`,
+        );
+      }
+    }
+  }, 7_200_000);
+
   it('訓練 → 選 (b*)(c*) → 訓練種子上的分歧率 →（階段允許時）量測種子上的 (c)−(b)', () => {
-    if (STAGE === 'scan' || STAGE === 'levels') {
+    if (STAGE === 'scan' || STAGE === 'levels' || STAGE === 'lag') {
       return;
     }
     const train: Row[] = [];

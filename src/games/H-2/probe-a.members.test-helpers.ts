@@ -62,18 +62,31 @@ interface MemberSpec {
   readonly lead: boolean;
 }
 
+/** 開始時間：early ＝ 0、late ＝ 58、sK ＝ K（0 到 58；只給「落差掃描」用，不在族裡）；不合法回傳 −1。 */
+function startOf(token: string): number {
+  if (token === 'early') {
+    return START_EARLY;
+  }
+  if (token === 'late') {
+    return START_LATE;
+  }
+  const k = Number(token.slice(1));
+  return k >= 0 && k <= START_LATE ? k : -1;
+}
+
 function specOf(name: string): MemberSpec | 'idle' {
   if (name === 'b-idle') {
     return 'idle';
   }
-  const m = /^([bc])-(early|late)-(\d+)(-boom|-cover|-lead)?$/.exec(name);
-  if (m === null || !(THRESHOLDS as readonly number[]).includes(Number(m[3]))) {
+  const m = /^([bc])-(early|late|s\d+)-(\d+)(-boom|-cover|-lead)?$/.exec(name);
+  const start = m === null ? 0 : startOf(m[2] as string);
+  if (m === null || start < 0 || !(THRESHOLDS as readonly number[]).includes(Number(m[3]))) {
     throw new Error(`不是族裡的成員：${name}`);
   }
   const reads = m[1] === 'c';
   const suffix = m[4] ?? '';
   return {
-    start: m[2] === 'early' ? START_EARLY : START_LATE,
+    start,
     threshold: Number(m[3]),
     boom: reads && (suffix === '' || suffix === '-boom'),
     cover: reads && (suffix === '' || suffix === '-cover'),
