@@ -24,6 +24,7 @@ import {
   playWith,
   score,
   selectBest,
+  selectDeviating,
   spec,
   withJitter,
 } from './probe-a.test-helpers';
@@ -432,6 +433,18 @@ describe('對局與分歧率的串接', () => {
         { name: 'd', win: 0.7, margin: 3 },
       ]).name,
     ).toBe('c');
+  });
+
+  it('selectDeviating：先排除在訓練種子上與 (b*) 逐位元相同的 (c) 成員（讀了等於沒讀），再選最強的；全都相同時回傳 null', () => {
+    const rows = [
+      { name: 'c-a', win: 1, margin: 10 },
+      { name: 'c-b', win: 1, margin: 8 },
+      { name: 'c-c', win: 0.9, margin: 99 },
+    ];
+    expect(selectDeviating(rows, new Set(['c-a']))?.name).toBe('c-a');
+    expect(selectDeviating(rows, new Set(['c-b', 'c-c']))?.name).toBe('c-b');
+    expect(selectDeviating(rows, new Set(['c-c']))?.name).toBe('c-c');
+    expect(selectDeviating(rows, new Set())).toBeNull();
   });
 
   it('score：b-never（地板）拿到的勝率與分差有意義（有限數字）', () => {
