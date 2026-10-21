@@ -49,8 +49,6 @@ const ask = (name: string, state: H2State, side: Side = 0): boolean =>
 
 /** 對手：每個 tick 都按著。 */
 const holdForever: Controller<H2State> = { decide: () => PRESS_A };
-/** 對手：從不按。 */
-const neverPress: Controller<H2State> = { decide: () => IDLE };
 /** 對手：一開始就按，累積到 `until` 就放開。 */
 function holdUntil(until: number): Controller<H2State> {
   return {
@@ -333,10 +331,11 @@ describe('反應延遲', () => {
     expect(last.tick).toBe(129);
   });
 
-  it('跨局時，延遲的世界若是上一局的，對手當作還沒動（不拿上一局的 banked／boom 當這一局的資訊）', () => {
+  it('跨局時，延遲的世界若是上一局的，對手當作還沒動（不拿上一局的 banked 當這一局的資訊）', () => {
     const prev = makeState({ tick: 100, round: 0, players: [banked(50), banked(200)] });
-    const now = makeState({ tick: 105, round: 1, roundTick: 3, players: [waiting, waiting] });
-    const seen = asked(12, [prev, { ...now, tick: 101 }, { ...now, tick: 105 }]);
+    const now = (tick: number): H2State =>
+      makeState({ tick, round: 1, roundTick: tick - 100, players: [waiting, waiting] });
+    const seen = asked(5, [prev, now(101), now(102), now(103), now(104), now(105)]);
     const last = seen[seen.length - 1] as H2State;
     expect(last.round).toBe(1);
     expect(last.players[1]).toEqual({ status: 'idle', acc: 0 });
