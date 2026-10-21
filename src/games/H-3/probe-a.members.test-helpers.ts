@@ -17,7 +17,7 @@ import type { H3State, Runner } from './logic';
  * - (b) 只准讀：自己的跑者、局數、自己的總分。**不准讀**對手的跑者與總分。
  * - (c) 讀對手公開的東西（兩邊的跑者與總分都畫在畫面上）：`lead` 讀總分差（領先 100 以上就更保險：邊距加 24 像素
  *   〔pos 是早 15 像素〕；落後 100 以上就更敢：邊距減 16 像素、不低於 0〔pos 是晚 15 像素〕）；
- *   `last` 只在最後一局、對手已經結束時讀（領先就保險，必輸〔落後超過 300〕就孤注一擲）。
+ *   `last` 只在最後一局、對手這一局的結果已經決定時讀〔停下、掉下去、或正在煞車：煞車中的結果由煞車距離決定，畫面上看得到〕（領先就保險，必輸〔落後超過 300〕就孤注一擲）。
  */
 
 export const MARGINS = [0, 4, 8, 16, 24, 32, 48] as const;
@@ -77,7 +77,23 @@ function specOf(name: string): MemberSpec | 'never' {
 }
 
 const other = (side: Side): Side => (side === 0 ? 1 : 0);
-const finished = (r: Runner): boolean => r.status === 'stopped' || r.status === 'fallen';
+/**
+ * 對手這一局的結果（分）：停下來是位置的整數部分，掉下去是 0；正在煞車的，結果已經由煞車距離決定
+ * （畫面上看得到它的位置與速度），照會停的位置算；還在跑的結果還沒決定，回傳 null。
+ */
+function settledScore(r: Runner): number | null {
+  if (r.status === 'fallen') {
+    return 0;
+  }
+  if (r.status === 'stopped') {
+    return Math.floor(r.pos / 1000);
+  }
+  if (r.status === 'braking') {
+    const stop = r.pos + brakeDistance(r.speed);
+    return stop > TRACK ? 0 : Math.floor(stop / 1000);
+  }
+  return null;
+}
 
 /** 一個成員的控制器（每次呼叫都是全新的；沒有內部狀態，所以同一個 state 永遠同一個答案）。 */
 export function member(name: string): Controller<H3State> {
@@ -96,8 +112,15 @@ export function member(name: string): Controller<H3State> {
       const diff = state.totals[side] - state.totals[other(side)];
       if (m.lead) {
         mood = diff >= LEAD_GAP ? 1 : diff <= -LEAD_GAP ? -1 : 0;
-      } else if (m.last && state.round === ROUNDS - 1 && finished(state.runners[other(side)])) {
-        mood = diff > 0 ? 1 : diff <= -TRACK / 1000 ? -1 : 0;
+      } else if (m.last && state.round === ROUNDS - 1) {
+        // 對手的結果已經決定（停下、掉下去、或正在煞車）：算「這一局結束時」的總分差。
+        // 停下與掉下去的得分已經在總分裡；正在煞車的還沒進總分，加上它會停的分數。
+        const opp = state.runners[other(side)];
+        const settled = settledScore(opp);
+        if (settled !== null) {
+          const gap = opp.status === 'braking' ? diff - settled : diff;
+          mood = gap > 0 ? 1 : gap <= -TRACK / 1000 ? -1 : 0;
+        }
       }
       if (m.kind === 'pos') {
         const target = m.value + (mood > 0 ? -POS_SHIFT : mood < 0 ? POS_SHIFT : 0);
