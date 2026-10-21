@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { levelController, wrapPolicy } from '../../ai/level';
+import { levelController, policyByName, wrapPolicy } from '../../ai/level';
 import { gambler } from '../../ai/policies/gambler';
 import { greedy } from '../../ai/policies/greedy';
 import { pathfinder } from '../../ai/policies/pathfinder';
@@ -17,6 +17,8 @@ import {
 import { deepFreeze } from '../../../tests/contract/freeze';
 import { COLOR } from '../../shell/palette';
 import { makeState as makeS3 } from '../S-3/logic';
+import { makeState as makeS7 } from '../S-7/logic';
+import type { Flash, RoundRecord, S7State } from '../S-7/logic';
 import {
   FINAL_WEIGHT,
   FULL_TICKS,
@@ -991,5 +993,143 @@ describe('S-K 黑桃馬拉松｜render', () => {
         expect(point.y).toBeLessThanOrEqual(LOGIC_HEIGHT + 8);
       }
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 模擬洩漏（DESIGN-AI-FUN 4.2-b）：S-K 自己沒有隱藏資訊，但遊戲階段的 step 原樣轉發給被包的牌，
+// 被包的 S-7 有真假光、真訊號何時來、對手的假動作。四個性格 x 深度 1、3、6 的 decide 黑箱。
+// ---------------------------------------------------------------------------
+
+describe('S-K 黑桃馬拉松｜模擬洩漏（包 S-7 時，四個性格 x 深度 1、3、6 的 decide 黑箱）', () => {
+  type Name = 'precise' | 'greedy' | 'gambler' | 'pathfinder';
+  const NAMES: readonly Name[] = ['precise', 'greedy', 'gambler', 'pathfinder'];
+  const DEPTHS = [1, 3, 6] as const;
+
+  const real = (age = 0): Flash => ({ age, makers: [false, false], real: true });
+  const fakeBy = (maker: Side, age = 0): Flash => ({
+    age,
+    makers: [maker === 0, maker === 1],
+    real: false,
+  });
+  const rec = (human: number, ai: number): RoundRecord => ({
+    twitches: [human, ai],
+    twitchAt: [Array.from({ length: human }, () => 96), Array.from({ length: ai }, () => 96)],
+    baited: [0, 0],
+    winner: null,
+  });
+  const history = Array.from({ length: 6 }, () => rec(0, 0));
+  /** 這個 AI 有「對手愛上當」的歷史：假動作對它有價值，所以真訊號前的決定會隨等待時間改變。 */
+  const bitesHistory = Array.from({ length: 6 }, (): RoundRecord => ({
+    ...rec(0, 1),
+    baited: [1, 0],
+  }));
+  const lit = (flash: Flash, extra: Partial<S7State> = {}): S7State =>
+    makeS7({ flash, history, elapsed: 100, waitLeft: 100, ...extra });
+
+  /** S-K 的遊戲階段，被包的是 S-7，inner 是給定的 S-7 局面。 */
+  const wrap = (inner: S7State): SKState =>
+    makeState({
+      phase: 'play',
+      seg: 1,
+      cardId: 'S-7',
+      picker: null,
+      offer: [],
+      segMax: 780,
+      inner,
+    });
+
+  const decide = (name: Name, s: SKState, side: Side, depth: number): Buttons =>
+    policyByName(name).decide(skGame, s, side, 0, { depth, seed: 1 });
+
+  type Pair = readonly [string, S7State, S7State];
+  // 與 S-7 自己的黑箱盲測（src/games/S-7/logic.test.ts）同一組：只有隱藏資訊不同。
+  const pairs: readonly Pair[] = [
+    ...[0, 5, 12, 20].map((age): Pair => [
+      `光亮了 ${age} tick：真光 vs 人抽的假光`,
+      lit(real(age)),
+      lit(fakeBy(0, age), { twitches: [1, 0], twitchAt: [[100 - age - 1], []] }),
+    ]),
+    [
+      '等待中：真訊號還有 60 tick vs 200 tick，亂數也不同',
+      makeS7({ history, elapsed: 120, waitLeft: 60 }),
+      makeS7({ history, elapsed: 120, waitLeft: 200, rng: 12345 }),
+    ],
+    [
+      '等待中：人這輪已經抽 0 次 vs 1 次（隱藏）',
+      makeS7({ history, elapsed: 120, waitLeft: 100, twitches: [0, 0] }),
+      makeS7({ history, elapsed: 120, waitLeft: 100, twitches: [1, 0] }),
+    ],
+  ];
+  // S-7 小規格「已知限制」的兩個窗口：搜尋型往前模擬會看到假光熄滅、真光亮起。
+  const windows: readonly Pair[] = [
+    [
+      '假光快熄了 vs 真光（同樣亮了 26 tick）',
+      lit(real(26)),
+      lit(fakeBy(0, 26), { twitches: [1, 0], twitchAt: [[73], []] }),
+    ],
+    ...[2, 4].map((left): Pair => [
+      `真訊號 ${left} tick 後亮 vs 200 tick 後亮（AI 有被騙的歷史、已等了 300 tick）`,
+      makeS7({ history: bitesHistory, elapsed: 300, waitLeft: left }),
+      makeS7({ history: bitesHistory, elapsed: 300, waitLeft: 200 }),
+    ]),
+    [
+      '真訊號 3 tick 後亮 vs 200 tick 後亮',
+      makeS7({ history, elapsed: 120, waitLeft: 3 }),
+      makeS7({ history, elapsed: 120, waitLeft: 200 }),
+    ],
+  ];
+
+  // 只測 AI 那一邊（1 號邊）：假光是 0 號邊（人）抽的，對 0 號邊本來就不是隱藏資訊。
+  const check = (name: Name, list: readonly Pair[]): void => {
+    for (const [label, a, b] of list) {
+      for (const depth of DEPTHS) {
+        expect(decide(name, wrap(a), 1, depth), `${label} 深度 ${depth}`).toEqual(
+          decide(name, wrap(b), 1, depth),
+        );
+      }
+    }
+  };
+
+  it('前提：這組局面在 S-K 的遊戲階段，evaluate 與 actions 逐字等於被包的 S-7（轉發沒有改寫）', () => {
+    for (const [, a] of [...pairs, ...windows]) {
+      for (const side of [0, 1] as const) {
+        expect(skGame.actions(wrap(a), side)).toEqual(poolEntry('S-7').game.actions(a, side));
+        expect(skGame.evaluate(wrap(a), side)).toEqual(poolEntry('S-7').game.evaluate(a, side));
+      }
+    }
+  });
+
+  it.each(NAMES)('%s：隱藏資訊不同（真假光、等待、抽動次數），深度 1、3、6 的決定相同', (name) => {
+    check(name, pairs);
+  });
+
+  // 窗口：搜尋型往前模擬 depth 個 tick 會看到真光亮起（S-7 小規格「已知限制」(b)）。S-7 自己的盲測把它排除在外，
+  // 這裡不排除：搜尋型紅（真的偷看，標 it.fails；修法要動共用層，留給老闆裁示），一步看的三個性格綠。
+  // 預設性格是精準型（一步看），出貨不受影響。
+  for (const name of NAMES) {
+    const run = name === 'pathfinder' ? it.fails : it;
+    run(
+      `${name}：兩個已知窗口（假光快熄、真光快亮）${name === 'pathfinder' ? '（已知會偷看，待老闆裁示）' : ''}`,
+      () => {
+        check(name, windows);
+      },
+    );
+  }
+
+  it('控制組：偷看 S-7 的 flash.real 的假性格會被抓到（測試咬得到）', () => {
+    const cheat: Policy = {
+      name: 'cheat',
+      decide: (_game, state) => {
+        const inner = (state as SKState).inner as S7State;
+        return { ...NONE, a: inner.flash?.real === true };
+      },
+    };
+    expect(() => {
+      const [, a, b] = pairs[0] as Pair;
+      expect(cheat.decide(skGame, wrap(a), 1, 0, { depth: 6, seed: 1 })).toEqual(
+        cheat.decide(skGame, wrap(b), 1, 0, { depth: 6, seed: 1 }),
+      );
+    }).toThrow();
   });
 });
