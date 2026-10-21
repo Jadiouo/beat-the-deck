@@ -11,6 +11,9 @@ import {
   C_FAMILY,
   LEAD_GAP,
   MARGINS,
+  NEED_PAD,
+  NEED_FAMILY,
+  NEED_TWINS,
   POSITIONS,
   TWINS,
   member,
@@ -307,6 +310,65 @@ describe('(c) 真的讀', () => {
         }
       }
     }
+  });
+});
+
+describe('need 讀法（量測後加的附錄，不在 C_FAMILY 裡）：算出「要贏至少要停在哪」，夠了就不再冒險', () => {
+  it('每個 (b) 基底（b-never 除外）都有一個 need 雙胞胎；不在 C_FAMILY 與 TWINS 裡', () => {
+    expect(NEED_FAMILY.length).toBe(B_FAMILY.length - 1);
+    for (const c of NEED_FAMILY) {
+      expect(c.endsWith('-need')).toBe(true);
+      expect(C_FAMILY.includes(c)).toBe(false);
+      expect(typeof member(c).decide).toBe('function');
+    }
+    for (const [b, c] of NEED_TWINS) {
+      expect(B_FAMILY.includes(b)).toBe(true);
+      expect(NEED_FAMILY.includes(c)).toBe(true);
+      expect(c).toBe(`${b.replace('b-', 'c-')}-need`);
+    }
+  });
+
+  it('不是最後一局、或對手的結果還沒決定：與 (b) 相同', () => {
+    const base = firstBrakePos('b-exact-8', {}) as number;
+    expect(firstBrakePos('c-exact-8-need', { round: 2, totals: [500, 0] }, stopped(100000))).toBe(
+      base,
+    );
+    expect(firstBrakePos('c-exact-8-need', { round: 4, totals: [500, 0] }, running(10))).toBe(base);
+  });
+
+  it('最後一局、對手已經停在 250 分、我的總分比它多 500（需要的分數 < 0）：一開始就煞車', () => {
+    const pos = firstBrakePos('c-exact-8-need', { round: 4, totals: [500, 0] }, stopped(250000));
+    expect(pos).toBe(0);
+  });
+
+  it('最後一局、對手停在 250、我落後 200（需要 > 250 分才贏）：停點剛好超過需要加 NEED_PAD 就煞，比 (b) 早', () => {
+    const base = firstBrakePos('b-exact-8', {}) as number;
+    const pos = firstBrakePos(
+      'c-exact-8-need',
+      { round: 4, totals: [0, 200] },
+      stopped(250000),
+    ) as number;
+    expect(pos).toBeLessThan(base);
+    // 需要 ＝ 對手總分（含它這一局）− 我的總分；對手的 totals 已經含它停下來的 250，所以傳 [0, 200 + 250] 才是需要 450（拿不到）
+    const hopeless = firstBrakePos(
+      'c-exact-8-need',
+      { round: 4, totals: [0, 450] },
+      stopped(250000),
+    ) as number;
+    expect(hopeless).toBe(base);
+    expect(NEED_PAD).toBeGreaterThan(0);
+  });
+
+  it('對手正在煞車：它會停的分數加進它的總分來算需要', () => {
+    // 對手正在煞車、會停在 250500（250 分）；我的總分 0、它的總分 0 → 需要 250 → 停點到 250 + 1 + PAD 就煞
+    const pos = firstBrakePos(
+      'c-exact-8-need',
+      { round: 4, totals: [0, 0] },
+      braking(240000),
+    ) as number;
+    const stopAt = pos + 10500; // 1.0 像素／tick 的煞車距離約 10.5 像素（起始速度 1.0，剛起跑時速度還沒變太多）
+    expect(stopAt).toBeGreaterThanOrEqual((250 + 1 + NEED_PAD) * 1000 - 9000);
+    expect(pos).toBeLessThan(firstBrakePos('b-exact-8', {}) as number);
   });
 });
 
