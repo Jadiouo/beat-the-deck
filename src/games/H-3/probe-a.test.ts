@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 
 import { compareBC, divergence } from '../../../tests/ai/probe-a.shared';
 import type { Buttons, Controller, Side } from '../../core/types';
-import { IDLE } from '../_hearts/logic';
+import { IDLE, PRESS_A } from '../_hearts/logic';
 import { TRACK, h3Game, makeState } from './logic';
 import type { H3State, Runner } from './logic';
 import {
@@ -99,6 +99,23 @@ function firstBrakePos(
     s = { ...moved, runners: [moved.runners[0], opp] };
   }
   return null;
+}
+
+/** 順著跑，成員第一次按下 a 之後一直按到停下來；回傳最後的位置（千分之一像素）。 */
+function stopFor(name: string, extra: Partial<H3State>, opp: Runner = running(0)): number {
+  let s = makeState({ v0: 1000, runners: [running(0), opp], ...extra });
+  const ctl = member(name);
+  let braked = false;
+  for (
+    let t = 0;
+    t < 700 && s.runners[0].status !== 'stopped' && s.runners[0].status !== 'fallen';
+    t += 1
+  ) {
+    braked = braked || ctl.decide(s, 0, t).a;
+    const moved = h3Game.step(s, [braked ? PRESS_A : IDLE, IDLE]);
+    s = { ...moved, runners: [moved.runners[0], opp] };
+  }
+  return s.runners[0].pos;
 }
 
 describe('族的定義', () => {
@@ -360,15 +377,11 @@ describe('need 讀法（量測後加的附錄，不在 C_FAMILY 裡）：算出�
   });
 
   it('對手正在煞車：它會停的分數加進它的總分來算需要', () => {
-    // 對手正在煞車、會停在 250500（250 分）；我的總分 0、它的總分 0 → 需要 250 → 停點到 250 + 1 + PAD 就煞
-    const pos = firstBrakePos(
-      'c-exact-8-need',
-      { round: 4, totals: [0, 0] },
-      braking(240000),
-    ) as number;
-    const stopAt = pos + 10500; // 1.0 像素／tick 的煞車距離約 10.5 像素（起始速度 1.0，剛起跑時速度還沒變太多）
-    expect(stopAt).toBeGreaterThanOrEqual((250 + 1 + NEED_PAD) * 1000 - 9000);
-    expect(pos).toBeLessThan(firstBrakePos('b-exact-8', {}) as number);
+    // 對手正在煞車、會停在 250500（250 分）；兩邊總分都是 0 → 需要 250 → 停點剛好超過 250 ＋ 1 ＋ PAD
+    const stop = stopFor('c-exact-8-need', { round: 4, totals: [0, 0] }, braking(240000));
+    expect(stop).toBeGreaterThanOrEqual((250 + 1 + NEED_PAD) * 1000);
+    expect(stop).toBeLessThanOrEqual((250 + 1 + NEED_PAD) * 1000 + 3500);
+    expect(stop).toBeLessThan(stopFor('b-exact-8', {}));
   });
 });
 

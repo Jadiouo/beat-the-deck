@@ -39,6 +39,20 @@ export const B_FAMILY: readonly string[] = [...BASES.map((b) => `b-${b}`), 'b-ne
 export const C_FAMILY: readonly string[] = BASES.flatMap((b) => [`c-${b}-lead`, `c-${b}-last`]);
 
 /**
+ * need 讀法（**量測後加的附錄**，不在 `C_FAMILY` 與 `TWINS` 裡，不影響已經量過的 (c\\*) 選法）：
+ * 最後一局、對手這一局的結果已經決定時，算出「要贏至少要停在幾分」＝ 對手最終總分 − 我的總分；
+ * 煞車點取「基底的煞車點」與「煞車後的停點 ≥ 需要 ＋ 1 ＋ `NEED_PAD` 像素」兩者較早的那個
+ * （需要 < 0 ＝ 怎麼停都贏，一開始就煞車）。意思是：已經夠贏就不要再冒險靠近邊緣。
+ */
+export const NEED_PAD = 10;
+
+export const NEED_FAMILY: readonly string[] = BASES.map((b) => `c-${b}-need`);
+
+export const NEED_TWINS: readonly (readonly [string, string])[] = BASES.map(
+  (b) => [`b-${b}`, `c-${b}-need`] as const,
+);
+
+/**
  * 雙胞胎（量之前固定）：每個 (b)（b-never 除外）都有 lead 與 last 兩個 (c) 雙胞胎，機器完全一樣、只差讀什麼。
  * 所以不論訓練種子上誰是 (b\*)，它都有對應的 (c) 版本（10.68 第六小節）。
  */
@@ -52,13 +66,14 @@ interface MemberSpec {
   readonly value: number;
   readonly lead: boolean;
   readonly last: boolean;
+  readonly need: boolean;
 }
 
 function specOf(name: string): MemberSpec | 'never' {
   if (name === 'b-never') {
     return 'never';
   }
-  const m = /^([bc])-(exact|pos)-(\d+)(-lead|-last)?$/.exec(name);
+  const m = /^([bc])-(exact|pos)-(\d+)(-lead|-last|-need)?$/.exec(name);
   const value = Number(m?.[3]);
   const ok =
     m !== null &&
@@ -73,6 +88,7 @@ function specOf(name: string): MemberSpec | 'never' {
     value,
     lead: m[4] === '-lead',
     last: m[4] === '-last',
+    need: m[4] === '-need',
   };
 }
 
@@ -121,6 +137,20 @@ export function member(name: string): Controller<H3State> {
           const gap = opp.status === 'braking' ? diff - settled : diff;
           mood = gap > 0 ? 1 : gap <= -TRACK / 1000 ? -1 : 0;
         }
+      }
+      // need：夠贏就煞（停點 ≥ 需要 ＋ 1 ＋ 餘裕）；需要 < 0 ＝ 怎麼停都贏。
+      let needStop = Number.POSITIVE_INFINITY;
+      if (m.need && state.round === ROUNDS - 1) {
+        const opp = state.runners[other(side)];
+        const settled = settledScore(opp);
+        if (settled !== null) {
+          const oppFinal = state.totals[other(side)] + (opp.status === 'braking' ? settled : 0);
+          const need = oppFinal - state.totals[side];
+          needStop = need < 0 ? Number.NEGATIVE_INFINITY : (need + 1 + NEED_PAD) * 1000;
+        }
+      }
+      if (me.pos + brakeDistance(me.speed) >= needStop) {
+        return PRESS_A;
       }
       if (m.kind === 'pos') {
         const target = m.value + (mood > 0 ? -POS_SHIFT : mood < 0 ? POS_SHIFT : 0);

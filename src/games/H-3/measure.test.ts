@@ -15,7 +15,7 @@ import {
 import type { ProbeAResult } from '../../../tests/ai/probe-a.shared';
 import { h3Game } from './logic';
 import type { H3State } from './logic';
-import { B_FAMILY, C_FAMILY, TWINS, member } from './probe-a.members.test-helpers';
+import { B_FAMILY, C_FAMILY, NEED_TWINS, TWINS, member } from './probe-a.members.test-helpers';
 import {
   AI_SEED_OFFSET,
   CONFIG,
@@ -41,6 +41,7 @@ import type { Cell, Row } from './probe-a.test-helpers';
  *   H3_PROBE_STAGE=levels（支配策略檢查：不讀對手的強 (b) 成員對兩種性格、等級 1 到 10、延遲 12，在種子 9000 起的 H3_PROBE_LEVEL_N 場上的勝率與分差；
  *                   跟 (c)−(b) 無關，量衡量標準 3「人贏得了但不是靠運氣」）
  *   H3_PROBE_LEVEL_N（levels 階段的場數，預設 2，正式 100）、H3_PROBE_LEVEL_MEMBERS（逗號分隔，levels 階段測哪些不讀的 (b) 成員）
+ *   H3_PROBE_STAGE=need（量測後加的附錄：每個基底的 need 雙胞胎對它的 (b)，量測種子 5000 起 H3_PROBE_N 場；見 `docs/cards/H-3.md` 附錄）、
  *   H3_PROBE_ALLC（每個 (c) 成員都對 (b*) 量一次）、H3_PROBE_LOG（每行即時附加到這個檔，長時間的量測看進度用）、
  *   H3_PROBE_VERBOSE（印出報告；跑完才看得到）。
  * 可續跑、可分給幾個行程（機器上有別的 agent 在跑，一個行程跑完要很久）：
@@ -68,6 +69,10 @@ const CELLS: Readonly<Record<string, Cell>> = {
   g5d12j5: { policy: 'gambler', level: 5, delay: 12, jitter: 5 },
   p10d12j5: { policy: 'precise', level: 10, delay: 12, jitter: 5 },
   g10d12j10: { policy: 'gambler', level: 10, delay: 12, jitter: 10 },
+  g10d12j15: { policy: 'gambler', level: 10, delay: 12, jitter: 15 },
+  g10d12j20: { policy: 'gambler', level: 10, delay: 12, jitter: 20 },
+  g10d12j30: { policy: 'gambler', level: 10, delay: 12, jitter: 30 },
+  g10d0j20: { policy: 'gambler', level: 10, delay: 0, jitter: 20 },
 };
 const cellName = process.env['H3_PROBE_CELL'] ?? 'main';
 const at = CELLS[cellName] as Cell;
@@ -172,8 +177,19 @@ describe(`H-3 探針 A 完整版｜格 ${cellName}（${at.policy} 等級 ${Strin
     }
   }, 7_200_000);
 
+  it('need 附錄（只在 STAGE=need）：每個基底的 need 雙胞胎對它的 (b)，量測種子（量測後加的附錄，不在 (c) 族裡）', () => {
+    if (STAGE !== 'need') {
+      return;
+    }
+    for (const [b, c] of NEED_TWINS) {
+      const r = cached('job', `need__${b}__${c}`, () => compareBC(spec(b, c, seeds, at)));
+      say(formatProbeA(`H-3 ${cellName} ${b} → ${c} [need|${b}|${c}]`, r));
+      expect(r.winBoundHolds).toBe(true);
+    }
+  }, 7_200_000);
+
   it('訓練 → 選 (b*)(c*) → 訓練種子上的分歧率 →（階段允許時）量測種子上的 (c)−(b)', () => {
-    if (STAGE === 'scan' || STAGE === 'levels') {
+    if (STAGE === 'scan' || STAGE === 'levels' || STAGE === 'need') {
       return;
     }
     const train: Row[] = [];
