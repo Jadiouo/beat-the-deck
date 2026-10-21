@@ -5,7 +5,8 @@ import { describe, expect, it } from 'vitest';
 import { levelController, policyByName } from '../../ai/level';
 import type { PolicyKey } from '../../ai/types';
 import { playMatch } from '../../core/match';
-import type { Side } from '../../core/types';
+import type { Buttons, Controller, Side } from '../../core/types';
+import { START_CELLS, cellX, cellY } from '../_diamonds/logic';
 import {
   compareBC,
   divergence,
@@ -25,6 +26,7 @@ import {
   TWIN_OF,
   member,
   playWith,
+  withDelay,
   score,
   selectBest,
   spec,
@@ -69,9 +71,7 @@ const trainSeeds = Array.from({ length: TRAIN_N }, (_v, i) => TRAIN_FROM + i);
 const seeds = Array.from({ length: N }, (_v, i) => FROM + i);
 /** 雙胞胎對照（小規格「雙胞胎」一節，量之前固定）：機器完全一樣、只差「讀對手」那一項的 [(b), (c)]。 */
 const TWINS: readonly (readonly [string, string])[] = [
-  ...Object.entries(TWIN_OF)
-    .filter((e): e is [string, string] => e[1] !== null)
-    .filter(([b]) => b !== 'b-stick'),
+  ...Object.entries(TWIN_OF).filter((e): e is [string, string] => e[1] !== null),
   ...EXTRA_TWINS,
 ];
 const TWIN_N = Math.min(N, Math.max(1, Number(process.env['DA_PROBE_TWIN_N'] ?? '2')));
@@ -127,6 +127,57 @@ function mirrorRow(list: readonly number[]): { win: number; margin: number } {
     margin += o.margin;
   }
   return { win: win / list.length, margin: margin / list.length };
+}
+
+/**
+ * 診斷（描述性，不進 (c)−(b) 的讀數）：同一個成員在量測種子的前 `DA_PROBE_DIAG_N` 場（預設 100）裡的平均——
+ * 我方分數、對手分數、我方被偷幾分、我方偷到幾分（只有 D-J 有意義）、我站在自己基地 2 步以內的 tick 數。
+ * 用包在延遲外面的記錄器看真實的 state（不是延遲之後的視野）。
+ */
+function diagnose(name: string, list: readonly number[]) {
+  const acc = { self: 0, opp: 0, stolenFromMe: 0, stolenByMe: 0, nearHome: 0, win: 0 };
+  for (const seed of list) {
+    const side: Side = seed % 2 === 0 ? 0 : 1;
+    let near = 0;
+    let last: DAState | null = null;
+    const inner = withDelay(member(name), at.delay, dAGame);
+    const recorder: Controller<DAState> = {
+      decide(state: DAState, s: Side, tick: number): Buttons {
+        last = state;
+        const base = START_CELLS[s];
+        const here = state.players[s].cell;
+        if (Math.abs(cellX(here) - cellX(base)) + Math.abs(cellY(here) - cellY(base)) <= 2) {
+          near += 1;
+        }
+        return inner.decide(state, s, tick);
+      },
+    };
+    const ai = levelController(dAGame, policyByName(at.policy), at.level, seed + AI_SEED_OFFSET);
+    const result =
+      side === 0
+        ? playMatch(dAGame, seed, CONFIG, recorder, ai)
+        : playMatch(dAGame, seed, CONFIG, ai, recorder);
+    const o = outcomeOf(result, side);
+    acc.win += o.win;
+    acc.self += result.score[side];
+    acc.opp += result.score[side === 0 ? 1 : 0];
+    acc.nearHome += near;
+    const stolen = (last as unknown as { stolen?: readonly [number, number] } | null)?.stolen;
+    if (stolen !== undefined) {
+      acc.stolenByMe += stolen[side];
+      acc.stolenFromMe += stolen[side === 0 ? 1 : 0];
+    }
+  }
+  const n = list.length;
+  return {
+    n,
+    win: acc.win / n,
+    self: acc.self / n,
+    opp: acc.opp / n,
+    stolenFromMe: acc.stolenFromMe / n,
+    stolenByMe: acc.stolenByMe / n,
+    nearHome: acc.nearHome / n,
+  };
 }
 
 describe(`D-A 探針 A 完整版｜格 ${cellName}（AI ${at.policy} 等級 ${String(at.level)}、玩家延遲 ${String(at.delay)}）`, () => {
@@ -236,6 +287,19 @@ describe(`D-A 探針 A 完整版｜格 ${cellName}（AI ${at.policy} 等級 ${St
       );
     }
   }, 7_200_000);
+
+  it('診斷（只在 DA_PROBE_DIAG 給成員名時才跑）', () => {
+    const names = process.env['DA_PROBE_DIAG']?.split(',').filter((x) => x !== '') ?? [];
+    const diagN = Math.max(1, Number(process.env['DA_PROBE_DIAG_N'] ?? '100'));
+    const list = Array.from({ length: diagN }, (_v, i) => FROM + i);
+    for (const name of names) {
+      const d = cached('diag', `${name}.${String(diagN)}`, () => diagnose(name, list));
+      say(
+        `診斷 ${cellName} ${name} n=${String(d.n)} 勝率 ${(100 * d.win).toFixed(1)} 我方分數 ${d.self.toFixed(2)} 對手分數 ${d.opp.toFixed(2)} 被偷 ${d.stolenFromMe.toFixed(2)} 偷到 ${d.stolenByMe.toFixed(2)} 在家 2 步內的 tick ${d.nearHome.toFixed(0)}`,
+      );
+    }
+    expect(names.length).toBeGreaterThanOrEqual(0);
+  });
 
   it('預設場數下，工具串得起來（兩族都有成員、種子不重疊）', () => {
     expect(trainSeeds.some((s) => seeds.includes(s))).toBe(false);
