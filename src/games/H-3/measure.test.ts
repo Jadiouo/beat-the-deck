@@ -16,7 +16,15 @@ import type { ProbeAResult } from '../../../tests/ai/probe-a.shared';
 import { h3Game } from './logic';
 import type { H3State } from './logic';
 import { B_FAMILY, C_FAMILY, TWINS, member } from './probe-a.members.test-helpers';
-import { AI_SEED_OFFSET, CONFIG, playWith, score, selectBest, spec } from './probe-a.test-helpers';
+import {
+  AI_SEED_OFFSET,
+  CONFIG,
+  playWith,
+  score,
+  selectBest,
+  selectDeviating,
+  spec,
+} from './probe-a.test-helpers';
 import type { Cell, Row } from './probe-a.test-helpers';
 
 /**
@@ -175,7 +183,24 @@ describe(`H-3 探針 A 完整版｜格 ${cellName}（${at.policy} 等級 ${Strin
       say(`訓練 ${name} 勝率 ${pct(row.win)} 分差 ${row.margin.toFixed(2)}`);
     }
     const bStar = selectBest(train.filter((r) => r.name.startsWith('b-')));
-    const cStar = selectBest(train.filter((r) => r.name.startsWith('c-')));
+    // (c*)：先排除在訓練種子上與 (b*) 逐位元相同的成員（一個從來不讀的讀者不是讀者），再選最強的。
+    const cRows = train.filter((r) => r.name.startsWith('c-'));
+    const diverged = new Set<string>();
+    const inert: string[] = [];
+    for (const row of cRows) {
+      const d = cached('pre', `${bStar.name}__${row.name}`, () =>
+        divergence(spec(bStar.name, row.name, trainSeeds, at)),
+      );
+      if (d.gamesDiffer > 0) {
+        diverged.add(row.name);
+      } else {
+        inert.push(row.name);
+      }
+    }
+    say(
+      `訓練種子上與 (b*) 逐位元相同（不讀）的 (c) 成員 ${String(inert.length)} 個：${inert.join('、')}`,
+    );
+    const cStar = selectDeviating(cRows, diverged) ?? selectBest(cRows);
     say(`(b*) ＝ ${bStar.name}（${pct(bStar.win)}%）、(c*) ＝ ${cStar.name}（${pct(cStar.win)}%）`);
 
     // 訓練種子上的分歧率（只跑 (b*) 驅動，不讀勝率）。

@@ -132,3 +132,12 @@ export function selectBest(rows: readonly Row[]): Row {
   }
   return best;
 }
+
+/**
+ * (c\*) 的選法（量之前固定，H-3 第三筆定義修訂）：先排除「在訓練種子上與 (b\*) 逐位元相同」的 (c) 成員
+ * （一個從來不讀的讀者不是讀者），在有分歧的成員裡照 `selectBest` 的規則選；全都相同時回傳 null。
+ */
+export function selectDeviating(rows: readonly Row[], diverged: ReadonlySet<string>): Row | null {
+  const live = rows.filter((r) => diverged.has(r.name));
+  return live.length === 0 ? null : selectBest(live);
+}
