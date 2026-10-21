@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest';
 
 import { levelController } from '../../ai/level';
 import { gambler } from '../../ai/policies/gambler';
+import { greedy } from '../../ai/policies/greedy';
 import { pathfinder } from '../../ai/policies/pathfinder';
 import { precise } from '../../ai/policies/precise';
+import type { Policy } from '../../ai/types';
 import { playMatch } from '../../core/match';
 import { rngStateFor } from '../../core/rng';
 import type { Buttons, Inputs } from '../../core/types';
@@ -432,6 +434,78 @@ describe('H-2 引信｜actions 與 evaluate', () => {
         expect(pa).toEqual(pb);
       }
     }
+  });
+
+  it('模擬洩漏的局面走得到：引信只差 d 個 tick 時，繼續按 d 個 tick 一定爆炸；引信很大時不會（黑箱測試的前提）', () => {
+    for (const depth of [1, 3, 6]) {
+      for (const acc of [20, 100, 200]) {
+        const near = makeState({ fuse: acc + depth, players: [holding(acc), waiting] });
+        const far = makeState({ fuse: 599, players: [holding(acc), waiting] });
+        expect(stepN(near, depth, inputs(true, false)).players[0].status).toBe('boom');
+        expect(stepN(far, depth, inputs(true, false)).players[0].status).toBe('holding');
+        // 爆炸前一個 tick 還沒爆：d 步是「剛好走得到」的最短距離
+        expect(stepN(near, depth - 1, inputs(true, false)).players[0].status).toBe('holding');
+      }
+    }
+  });
+
+  // DESIGN-AI-FUN 4.2-b：四個性格 × 深度 1、3、6，只有隱藏的 fuse 不同，decide 實際按的鍵必須相同。
+  // 引信設成「剛好在該深度內爆炸」（acc + depth），不是遠大於 acc 的值（那樣 6 tick 內走不到爆炸，測不到任何東西）。
+  const BLACKBOX_POLICIES = [
+    ['pathfinder', pathfinder],
+    ['precise', precise],
+    ['greedy', greedy],
+    ['gambler', gambler],
+  ] as const;
+  // acc 只取 20 與 100：精準型在 acc ≥ 130 自己就會放開，那裡「按不按」不隨 fuse 變，測不到東西。
+  const BLACKBOX_ACCS = [20, 100];
+  const farDecision = (policy: Policy, acc: number, depth: number): Buttons =>
+    policy.decide(h2Game, makeState({ fuse: 599, players: [holding(acc), waiting] }), 0, 0, {
+      depth,
+      seed: 0,
+    });
+  const blackBox = (name: string, policy: Policy, depth: number, offsets: number[]): void => {
+    for (const acc of BLACKBOX_ACCS) {
+      const base = farDecision(policy, acc, depth);
+      for (const offset of offsets) {
+        const s = makeState({ fuse: acc + offset, players: [holding(acc), waiting] });
+        expect(
+          policy.decide(h2Game, s, 0, 0, { depth, seed: 0 }),
+          `${name} 深度 ${depth} acc ${acc} fuse ${acc + offset}`,
+        ).toEqual(base);
+      }
+    }
+  };
+  describe.each([1, 3, 6])('黑箱：decide 不隨 fuse 改變｜深度 %i', (depth) => {
+    for (const [name, policy] of BLACKBOX_POLICIES) {
+      // 嚴格版（4.2-b 的要求）：引信剛好在 1 到 depth 個 tick 內爆炸，也要和「引信很大」按同一個鍵。
+      // 目前四個性格全部是紅的：連出貨的賭徒型也看得到「下一個 tick 就爆」（fuse = acc + 1）；
+      // 搜尋型在 depth ≥ 3 還看得到 fuse = acc + 2。原因是 step 照真的 fuse 結算，AI 沒有遮罩。
+      // 修法要動共用層（src/ai 或 Game 介面），留給老闆裁示（CLAUDE.md 第 4 條），所以標 it.fails：
+      // 有人修好了它會轉紅，提醒把 .fails 拿掉。不放寬、不改門檻（第 8 條）。
+      it.fails(`${name}：任何 1 到 ${depth} tick 內爆炸的引信都不改變決定（已知偷看）`, () => {
+        blackBox(
+          name,
+          policy,
+          depth,
+          Array.from({ length: depth }, (_v, i) => i + 1),
+        );
+      });
+      // 有界版（綠的）：看不到的距離至少守住。一步看的性格只穿過 1 個 tick；搜尋型最多穿過 depth 個 tick。
+      // 引信比這個視野還遠，決定就不可以變。
+      it(`${name}：引信在視野之外（超過 ${name === 'pathfinder' ? depth : 1} tick）不改變決定`, () => {
+        const horizon = name === 'pathfinder' ? depth : 1;
+        blackBox(name, policy, depth, [horizon + 1, horizon + 2, horizon + 5, 300]);
+      });
+    }
+  });
+
+  it('控制組：會偷看 fuse 的假性格在同一組局面會被抓到（測試咬得到）', () => {
+    const cheat: Policy = {
+      name: 'cheat',
+      decide: (_game, state) => ({ ...IDLE, a: (state as H2State).fuse > 300 }),
+    };
+    expect(() => blackBox('cheat', cheat, 6, [1, 6, 7, 300])).toThrow();
   });
 
   it('賭徒型與精準型的停止點不同：精準型約在 110 放開，賭徒型撐到 240 左右（gain 的視野 120：停在 300 − 120/2）', () => {
