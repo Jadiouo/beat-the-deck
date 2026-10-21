@@ -41,6 +41,7 @@ const running = (pos: number, speed = 1000, age = 0): Runner => ({
   age,
 });
 const stopped = (pos: number): Runner => ({ status: 'stopped', pos, speed: 0, age: 0 });
+const braking = (pos: number, speed = 1000): Runner => ({ status: 'braking', pos, speed, age: 0 });
 const fallen: Runner = { status: 'fallen', pos: TRACK + 1, speed: 0, age: 0 };
 
 function at(me: Runner, opp: Runner, extra: Partial<H3State> = {}): H3State {
@@ -89,7 +90,9 @@ function firstBrakePos(
   for (let t = 0; t < 400 && s.runners[0].status === 'running'; t += 1) {
     const pressed = ctl.decide(s, 0, t).a;
     if (pressed) return s.runners[0].pos;
-    s = h3Game.step(s, [IDLE, IDLE]);
+    const moved = h3Game.step(s, [IDLE, IDLE]);
+    // 對手的樣子固定不動（我們要的是「我煞車的那一刻看到的對手」）
+    s = { ...moved, runners: [moved.runners[0], opp] };
   }
   return null;
 }
@@ -256,6 +259,27 @@ describe('(c) 真的讀', () => {
         stopped(250000),
       ) as number,
     ).toBeGreaterThan(base);
+    // 對手正在煞車（結果已經由煞車距離決定，畫面上看得到）：照它會停的位置算
+    // 煞車中：240000 + 10500 ＝ 250500 → 250 分（會停在邊緣內）；總分 500 對 0：領先 → 更早
+    expect(
+      firstBrakePos(
+        `c-${name}-last`,
+        { ...lastRound, totals: [500, 0] },
+        braking(240000),
+      ) as number,
+    ).toBeLessThan(base);
+    // 煞車中但會衝出去（掉下去，0 分）：總分 100 對 0 → 仍然領先 → 更早；落後 700 對煞車中的 250 → 必輸 → 更晚
+    expect(
+      firstBrakePos(
+        `c-${name}-last`,
+        { ...lastRound, totals: [0, 700] },
+        braking(240000),
+      ) as number,
+    ).toBeGreaterThan(base);
+    // 煞車中、勢均力敵（總分 0 對 250 加上預測的 250 ＝ 落後 500，不是勢均力敵；改成 250 對 0 加上預測 250 ＝ 平手 → 與 (b) 相同）
+    expect(
+      firstBrakePos(`c-${name}-last`, { ...lastRound, totals: [250, 0] }, braking(240000)),
+    ).toBe(base);
     // 勢均力敵：與 (b) 相同
     expect(
       firstBrakePos(`c-${name}-last`, { ...lastRound, totals: [100, 250] }, stopped(250000)),
